@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "should_manually_create_uid": false,
+    "toc_updated_at": "2024-03-07T04:04:06.000Z",
+    "book_id": 27737573
+  },
+  "data": [
+    {
+      "type": "DOC",
+      "title": "客户档案",
+      "uuid": "_QMW_FGeLePOyEYr",
+      "url": "xmkx3m",
+      "prev_uuid": "",
+      "sibling_uuid": "5EfYUMwC8Msxig01",
+      "child_uuid": "",
+      "parent_uuid": "",
+      "doc_id": 89656742,
+      "level": 0,
+      "id": 89656742,
+      "open_window": 1,
+      "visible": 1
+    },
+    {
+      "type": "DOC",
+      "title": "营销管理/短信发送查询",
+      "uuid": "5EfYUMwC8Msxig01",
+      "url": "hi6uptq27ivsg082",
+      "prev_uuid": "_QMW_FGeLePOyEYr",
+      "sibling_uuid": "0lDYI93yqQCs6bKT",
+      "child_uuid": "",
+      "parent_uuid": "",
+      "doc_id": 106044229,
+      "level": 0,
+      "id": 106044229,
+      "open_window": 1,
+      "visible": 1
+    },
+    {
+      "type": "DOC",
+      "title": "中差评管理",
+      "uuid": "0lDYI93yqQCs6bKT",
+      "url": "gbyi97dg9sd8g0wq",
+      "prev_uuid": "5EfYUMwC8Msxig01",
+      "sibling_uuid": "SnEWW9qh4eaRes3r",
+      "child_uuid": "",
+      "parent_uuid": "",
+      "doc_id": 106042299,
+      "level": 0,
+      "id": 106042299,
+      "open_window": 1,
+      "visible": 1
+    },
+    {
+      "type": "DOC",
+      "title": "消息卡片通知记录",
+      "uuid": "SnEWW9qh4eaRes3r",
+      "url": "sdozzgizh9w17koq",
+      "prev_uuid": "0lDYI93yqQCs6bKT",
+      "sibling_uuid": "",
+      "child_uuid": "",
+      "parent_uuid": "",
+      "doc_id": 160913879,
+      "level": 0,
+      "id": 160913879,
+      "open_window": 1,
+      "visible": 1
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+# 仓库里一律存 LF，检出也用 LF。
+#
+# 开发在 Windows、部署在 Ubuntu。带 \r 的 shell 脚本在 bash 下会报
+#   ./deploy.sh: /bin/bash^M: bad interpreter: No such file or directory
+# 这个故障在 Windows 本地怎么看都是正常的，只有传上服务器才炸——
+# M5 要写 deploy/*.sh，先把它堵死。
+* text=auto eol=lf
+
+# 二进制文件不做任何换行转换
+*.ico binary
+*.png binary
+*.jpg binary
+*.woff  binary
+*.woff2 binary

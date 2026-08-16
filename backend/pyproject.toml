@@ -1,0 +1,79 @@
+[project]
+name = "copilot"
+version = "0.1.0"
+description = "知识库 Agent —— 语雀 + 自传文档的带引用问答与多轮调研"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # Web
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.20",
+    # 配置
+    "pydantic-settings>=2.7",
+    # 数据库：Postgres + pgvector
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "pgvector>=0.3.6",
+    "alembic>=1.14",
+    # HTTP 客户端（SiliconFlow / DeepSeek / 语雀）
+    "httpx>=0.28",
+    # 语雀正文是 Lake HTML，转成 Markdown 后切分才有章节结构
+    "markdownify>=0.14",
+    "beautifulsoup4>=4.12",
+    # CLI
+    "typer>=0.15",
+    # 认证
+    "bcrypt>=4.2",
+    "pyjwt>=2.10",
+]
+
+[project.optional-dependencies]
+# 轻量解析：服务器上装这个（1.6GB 内存，不能碰 ML 模型）
+parse = [
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "pypdf>=5.1",
+    "markdown-it-py>=3.0",
+]
+# 完整解析：仅开发机装。Docling 会带进 torch，服务器上装不得
+parse-full = [
+    "docling>=2.14",
+]
+# Agent（M7）
+agent = [
+    "pydantic-ai>=2.0",
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+copilot = "copilot.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/copilot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# 迁移文件是 alembic 生成的历史记录，不按手写代码的标准 lint
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["../tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,38 @@
+# ===== 数据与密钥：绝不入库 =====
+data/
+*.env
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 构建产物 / 日志 =====
+dist/
+build/
+*.log
+logs/
