@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu } from "lucide-react";
+import { Bot, Loader2, Menu, Plus } from "lucide-react";
 
 import { ChatView } from "@/components/chat/chat-view";
 import { Sidebar } from "@/components/chat/sidebar";
@@ -76,13 +76,16 @@ export default function ChatPage() {
   if (auth.status !== "authed" || !chatId) {
     return (
       <main className="flex h-full items-center justify-center">
-        <p className="text-muted-foreground text-sm">正在加载…</p>
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="size-4 animate-spin text-primary" />
+          <span>正在加载知识库会话…</span>
+        </div>
       </main>
     );
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-background">
       <Sidebar
         conversations={conversations}
         activeId={chatId}
@@ -95,11 +98,19 @@ export default function ChatPage() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b px-4 py-2 md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
-            <Menu className="size-4" />
+        <header className="flex items-center justify-between border-b px-3 py-2.5 md:hidden bg-background/95 backdrop-blur-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <Button variant="ghost" size="icon" className="size-8" onClick={() => setDrawerOpen(true)}>
+              <Menu className="size-4" />
+            </Button>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Bot className="size-4 text-primary shrink-0" />
+              <span className="truncate text-xs font-semibold">ERP 知识库助手</span>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" className="size-8" onClick={newConversation} title="新建对话">
+            <Plus className="size-4" />
           </Button>
-          <span className="truncate text-sm font-medium">旗舰版 ERP 知识库助手</span>
         </header>
 
         {/* key 一变就整棵重挂，切换历史对话时不会串台 */}

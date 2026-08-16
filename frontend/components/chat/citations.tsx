@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { BookOpenText, ExternalLink } from "lucide-react";
 
 import type { Citation } from "@/lib/api";
 
@@ -13,31 +13,57 @@ export function Citations({ citations }: { citations: Citation[] }) {
   if (citations.length === 0) return null;
 
   return (
-    <div className="mt-3 space-y-1.5 border-t pt-3">
-      <p className="text-muted-foreground text-xs font-medium">来源</p>
-      <ol className="space-y-1">
+    <div className="mt-3.5 space-y-2 border-t border-border/60 pt-3">
+      <div className="flex items-center gap-1.5 text-muted-foreground text-xs font-medium">
+        <BookOpenText className="size-3.5" />
+        <span>引用知识库来源 ({citations.length})</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
         {citations.map((c) => {
-          const label = c.heading ? `${c.title} · ${c.heading}` : c.title;
-          return (
-            <li key={c.n} className="flex gap-2 text-xs leading-relaxed">
-              <span className="text-muted-foreground shrink-0 tabular-nums">[{c.n}]</span>
-              {c.url ? (
-                <a
-                  href={c.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-foreground text-muted-foreground inline-flex min-w-0 items-start gap-1 underline decoration-dotted underline-offset-2"
-                >
-                  <span className="min-w-0 break-words">{label}</span>
-                  <ExternalLink className="mt-0.5 size-3 shrink-0" aria-hidden />
-                </a>
-              ) : (
-                <span className="text-muted-foreground min-w-0 break-words">{label}</span>
+          const content = (
+            <div className="group flex max-w-full items-center gap-1.5 rounded-lg border border-border/80 bg-background/80 px-2.5 py-1.5 text-xs text-foreground/90 shadow-2xs transition-all hover:border-primary/40 hover:bg-accent/40">
+              <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                {c.n}
+              </span>
+              <span className="truncate font-medium">{c.title}</span>
+              {c.heading && (
+                <>
+                  <span className="text-muted-foreground/60 text-[10px]">/</span>
+                  <span className="truncate text-muted-foreground text-[11px]">{c.heading}</span>
+                </>
               )}
-            </li>
+              {c.url && (
+                <ExternalLink className="size-3 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              )}
+            </div>
+          );
+
+          if (c.url) {
+            return (
+              <a
+                key={c.n}
+                href={c.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}\n点击查看语雀原文`}
+                className="inline-block max-w-full no-underline focus:outline-none"
+              >
+                {content}
+              </a>
+            );
+          }
+
+          return (
+            <div
+              key={c.n}
+              title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}`}
+              className="inline-block max-w-full"
+            >
+              {content}
+            </div>
           );
         })}
-      </ol>
+      </div>
     </div>
   );
 }
