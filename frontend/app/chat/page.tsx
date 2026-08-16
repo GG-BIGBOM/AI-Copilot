@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, Loader2, Menu, Plus } from "lucide-react";
+import {
+  Bot,
+  Loader2,
+  Menu,
+  MessageSquarePlus,
+  PanelLeftOpen,
+  Sparkles,
+} from "lucide-react";
 
 import { ChatView } from "@/components/chat/chat-view";
 import { Sidebar } from "@/components/chat/sidebar";
@@ -28,6 +35,22 @@ export default function ChatPage() {
   const [initialMessages, setInitialMessages] = useState<CopilotUIMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("sidebar-collapsed");
+    if (saved === "true") {
+      setSidebarCollapsed(true);
+    }
+  }, []);
+
+  function toggleSidebarCollapse() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("sidebar-collapsed", String(next));
+      return next;
+    });
+  }
 
   const refreshConversations = useCallback(() => {
     api.conversations().then(setConversations).catch(() => {
@@ -36,12 +59,7 @@ export default function ChatPage() {
   }, []);
 
   // ⭐ 会话 id 在渲染期派生，既不放 useState 初始值也不放 effect。
-  //
-  // 放 useState 初始值：静态导出会在构建时预渲染本页，那个 UUID 会被写死进
-  // HTML，浏览器再算一个就是 hydration mismatch。
-  // 放 effect：同步 setState 会触发级联渲染，React 的 lint 直接报错。
-  //
-  // 渲染期派生两头都躲开了——预渲染时 auth.status 还是 loading，这段根本不执行。
+  // 避免静态导出预渲染水合不一致与级联渲染报错
   if (auth.status === "authed" && chatId === null) {
     setChatId(crypto.randomUUID());
   }
@@ -75,42 +93,90 @@ export default function ChatPage() {
 
   if (auth.status !== "authed" || !chatId) {
     return (
-      <main className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="size-4 animate-spin text-primary" />
-          <span>正在加载知识库会话…</span>
+      <main className="flex h-full items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground text-sm">
+          <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Loader2 className="size-5 animate-spin" />
+          </div>
+          <span className="font-medium text-foreground/80">正在载入知识库工作台…</span>
         </div>
       </main>
     );
   }
 
   return (
-    <div className="flex h-full bg-background">
+    <div className="flex h-full bg-background overflow-hidden">
       <Sidebar
         conversations={conversations}
         activeId={chatId}
         user={auth.user}
         open={drawerOpen}
+        collapsed={sidebarCollapsed}
         onClose={() => setDrawerOpen(false)}
+        onToggleCollapse={toggleSidebarCollapse}
         onNew={newConversation}
         onPick={openConversation}
         onLogout={logout}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b px-3 py-2.5 md:hidden bg-background/95 backdrop-blur-xs">
+      <main className="flex min-w-0 flex-1 flex-col relative h-full">
+        {/* ChatGPT 风格顶部磨砂玻璃导航栏 */}
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 bg-background/80 px-3.5 backdrop-blur-md z-20">
           <div className="flex items-center gap-2 min-w-0">
-            <Button variant="ghost" size="icon" className="size-8" onClick={() => setDrawerOpen(true)}>
+            {/* 移动端打开抽屉 */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 md:hidden text-muted-foreground hover:text-foreground"
+              onClick={() => setDrawerOpen(true)}
+              title="打开侧边栏"
+              aria-label="打开侧边栏"
+            >
               <Menu className="size-4" />
             </Button>
-            <div className="flex items-center gap-1.5 min-w-0">
-              <Bot className="size-4 text-primary shrink-0" />
-              <span className="truncate text-xs font-semibold">ERP 知识库助手</span>
+
+            {/* 桌面端当侧边栏折叠时，显示展开按钮 */}
+            {sidebarCollapsed && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden md:flex size-8 text-muted-foreground hover:text-foreground"
+                onClick={toggleSidebarCollapse}
+                title="展开侧边栏"
+                aria-label="展开侧边栏"
+              >
+                <PanelLeftOpen className="size-4" />
+              </Button>
+            )}
+
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Bot className="size-3.5" />
+              </div>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="truncate text-xs sm:text-sm font-semibold text-foreground">
+                  旗舰版 ERP 知识库助手
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  <Sparkles className="size-2.5" />
+                  <span>语雀检索增强</span>
+                </span>
+              </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="size-8" onClick={newConversation} title="新建对话">
-            <Plus className="size-4" />
-          </Button>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground rounded-lg"
+              onClick={newConversation}
+              title="新建对话"
+            >
+              <MessageSquarePlus className="size-3.5" />
+              <span className="hidden sm:inline">新对话</span>
+            </Button>
+          </div>
         </header>
 
         {/* key 一变就整棵重挂，切换历史对话时不会串台 */}

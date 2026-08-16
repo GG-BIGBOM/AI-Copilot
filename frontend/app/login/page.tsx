@@ -32,17 +32,17 @@ export default function LoginPage() {
       // replace 而不是 push：登录成功后按返回键不该回到登录页
       router.replace("/chat");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "登录失败，请重试。");
+      setError(err instanceof ApiError ? err.message : "登录失败，请检查账号密码或网络连接。");
       setBusy(false);
     }
   }
 
   if (checking) {
     return (
-      <main className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="size-4 animate-spin" />
-          <span>正在验证身份…</span>
+      <main className="flex h-full items-center justify-center bg-background">
+        <div className="flex items-center gap-2.5 text-muted-foreground text-sm font-medium">
+          <Loader2 className="size-4 animate-spin text-primary" />
+          <span>正在验证登录状态…</span>
         </div>
       </main>
     );
@@ -51,23 +51,23 @@ export default function LoginPage() {
   return (
     <AuthShell
       title="欢迎回来"
-      description="登录以访问旗舰版 ERP 知识库助手"
+      description="登录以访问旗舰版 ERP 企业知识库助手"
       footer={
         <>
           还没有账号？{" "}
           <Link
             href="/register"
-            className="text-foreground font-medium underline underline-offset-4 hover:opacity-80 transition-opacity"
+            className="text-foreground font-semibold underline underline-offset-4 hover:opacity-80 transition-opacity"
           >
-            用邀请码注册
+            使用邀请码注册
           </Link>
         </>
       }
     >
       <form onSubmit={onSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="email" className="text-xs font-medium">
-            邮箱
+        <div className="space-y-1.5">
+          <Label htmlFor="email" className="text-xs font-semibold text-foreground">
+            企业邮箱
           </Label>
           <Input
             id="email"
@@ -75,21 +75,23 @@ export default function LoginPage() {
             placeholder="name@example.com"
             autoComplete="username"
             required
+            className="h-10 rounded-xl bg-muted/40 border-border/80 focus-visible:ring-primary/20 text-xs sm:text-sm"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="password" className="text-xs font-medium">
-            密码
+        <div className="space-y-1.5">
+          <Label htmlFor="password" className="text-xs font-semibold text-foreground">
+            账号密码
           </Label>
           <div className="relative">
             <Input
               id="password"
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
+              placeholder="请输入密码"
               required
-              className="pr-10"
+              className="h-10 rounded-xl bg-muted/40 border-border/80 pr-10 focus-visible:ring-primary/20 text-xs sm:text-sm"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -105,19 +107,19 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <Alert variant="destructive" className="py-2.5">
+          <Alert variant="destructive" className="py-2.5 rounded-xl border-destructive/40 shadow-xs">
             <AlertDescription className="text-xs">{error}</AlertDescription>
           </Alert>
         )}
 
-        <Button type="submit" className="w-full font-medium" disabled={busy}>
+        <Button type="submit" className="w-full h-10 font-semibold rounded-xl shadow-xs transition-all active:scale-[0.99]" disabled={busy}>
           {busy ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="size-4 animate-spin" />
-              <span>登录中…</span>
+              <span>正在登录…</span>
             </span>
           ) : (
-            "登录"
+            "立即登录"
           )}
         </Button>
       </form>

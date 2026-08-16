@@ -1,39 +1,41 @@
-import { BookOpenText, ExternalLink } from "lucide-react";
+"use client";
+
+import { BookOpen, ExternalLink } from "lucide-react";
 
 import type { Citation } from "@/lib/api";
 
 /**
- * 引用来源列表。每条可点开跳语雀原文。
- *
- * 这里**不判**答案是不是「知识库暂无此内容」——后端在那种情况下根本不会
- * 下发 `data-citations` 片段。防幻觉那条规则收在服务端一处，前端再判一次
- * 只会制造两份可能不一致的实现。
+ * 引用来源卡片列表（ChatGPT Search / 权威知识库引用风格）。
+ * 每条可直接点击跳转语雀知识库原文。
  */
 export function Citations({ citations }: { citations: Citation[] }) {
-  if (citations.length === 0) return null;
+  if (!citations || citations.length === 0) return null;
 
   return (
-    <div className="mt-3.5 space-y-2 border-t border-border/60 pt-3">
-      <div className="flex items-center gap-1.5 text-muted-foreground text-xs font-medium">
-        <BookOpenText className="size-3.5" />
-        <span>引用知识库来源 ({citations.length})</span>
+    <div className="mt-4 space-y-2.5 border-t border-border/60 pt-3">
+      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+        <BookOpen className="size-3.5 text-primary/80" />
+        <span>参考知识库来源 ({citations.length})</span>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {citations.map((c) => {
-          const content = (
-            <div className="group flex max-w-full items-center gap-1.5 rounded-lg border border-border/80 bg-background/80 px-2.5 py-1.5 text-xs text-foreground/90 shadow-2xs transition-all hover:border-primary/40 hover:bg-accent/40">
-              <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+          const cardContent = (
+            <div className="group relative flex items-start gap-2.5 rounded-xl border border-border/70 bg-card/70 p-2.5 text-xs text-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/40 hover:shadow-xs">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10 font-mono text-[11px] font-bold text-primary">
                 {c.n}
               </span>
-              <span className="truncate font-medium">{c.title}</span>
-              {c.heading && (
-                <>
-                  <span className="text-muted-foreground/60 text-[10px]">/</span>
-                  <span className="truncate text-muted-foreground text-[11px]">{c.heading}</span>
-                </>
-              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium text-foreground group-hover:text-primary transition-colors">
+                  {c.title}
+                </p>
+                {c.heading && (
+                  <p className="truncate text-[11px] text-muted-foreground mt-0.5">
+                    {c.heading}
+                  </p>
+                )}
+              </div>
               {c.url && (
-                <ExternalLink className="size-3 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                <ExternalLink className="size-3.5 shrink-0 text-muted-foreground opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:opacity-100" />
               )}
             </div>
           );
@@ -45,10 +47,10 @@ export function Citations({ citations }: { citations: Citation[] }) {
                 href={c.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}\n点击查看语雀原文`}
-                className="inline-block max-w-full no-underline focus:outline-none"
+                title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}\n点击在语雀知识库中查看原文`}
+                className="block no-underline focus:outline-none"
               >
-                {content}
+                {cardContent}
               </a>
             );
           }
@@ -57,9 +59,9 @@ export function Citations({ citations }: { citations: Citation[] }) {
             <div
               key={c.n}
               title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}`}
-              className="inline-block max-w-full"
+              className="block"
             >
-              {content}
+              {cardContent}
             </div>
           );
         })}

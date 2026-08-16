@@ -12,7 +12,7 @@ import { API_BASE } from "@/lib/api";
 import type { CopilotUIMessage } from "@/lib/chat-types";
 
 /**
- * 一次会话。父组件用 `key={chatId}` 强制重挂，切换历史对话时状态干净。
+ * 一次会话视图。父组件用 `key={chatId}` 强制重挂，切换历史对话时状态干净。
  *
  * ⭐ `chatId` 必须是 UUID。useChat 默认自己生成的是 nanoid，后端解析不出来
  * 就会每轮另开一条会话，多轮对话全散了——见 plan.md M3 的接口约定。
@@ -58,14 +58,15 @@ export function ChatView({
           setDraft("");
           sendMessage({ text });
         }}
+        onRegenerate={() => regenerate()}
       />
 
       {error && (
         <div className="mx-auto w-full max-w-3xl px-4 pb-2">
-          <Alert variant="destructive">
-            <AlertDescription className="flex items-center justify-between gap-3">
-              <span>{error.message || "出错了，请重试。"}</span>
-              <Button size="sm" variant="outline" onClick={() => regenerate()}>
+          <Alert variant="destructive" className="rounded-2xl border-destructive/40 shadow-xs">
+            <AlertDescription className="flex items-center justify-between gap-3 text-xs">
+              <span>{error.message || "出错了，请稍后重试。"}</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs rounded-lg" onClick={() => regenerate()}>
                 重试
               </Button>
             </AlertDescription>
