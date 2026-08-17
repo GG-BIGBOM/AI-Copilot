@@ -33,10 +33,17 @@ tar -czf - --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
 echo "==> [4/6] 同步 systemd 单元文件"
 # M5 时这两个文件是手动 scp 上去的，结果 M6 加 worker 才发现「服务器上的单元
 # 文件和仓库里的可能不一致」没人守着。放进部署流程，仓库即事实。
+#
+# ⭐ 只 enable timer，**不 enable copilot-sync.service**：它是 oneshot，
+# 由 timer 触发；单元里故意没写 [Install]，enable 它会直接报错。
 tar -czf - -C deploy copilot-api.service copilot-worker.service \
+                     copilot-sync.service copilot-sync.timer \
   | $SSH "tar -xzf - -C /etc/systemd/system \
           && systemctl daemon-reload \
-          && systemctl enable copilot-api copilot-worker >/dev/null"
+          && systemctl enable copilot-api copilot-worker >/dev/null \
+          && systemctl enable --now copilot-sync.timer >/dev/null"
+# timer 要 `--now`：光 enable 只建了开机自启的符号链接，**这次不会跑起来**，
+# `systemctl is-active` 会一直是 inactive，而那看起来像装失败了
 
 echo "==> [5/6] 推送前端产物"
 # 先解到 .new 再整目录替换：避免用户正好在传输中途刷到半个站
@@ -57,7 +64,11 @@ echo "==> [6/6] 装依赖、跑迁移、重启"
 #    漏了的话表现是：上传成功、状态转到「解析失败」、错误写着「服务端缺少
 #    docx 解析组件」——网站一切正常，只有上传的文档全废。
 #    （**永远别在服务器上装 `parse-full`**：Docling 会拖进 torch，
-#    1.6GB 装都装不下，见 plan.md 一·3。）
+#    1.6GB 装都装不下，见 plan.md 一·3。`eval` 那组也不装——评测只在本机跑。）
+#
+# ⚠️ `uv sync` 是**声明式**的：它把环境同步成「你这次列出的样子」，
+#    没列的 extra 会被**卸掉**。本机踩过——`uv sync --extra eval` 之后
+#    python-docx/pptx 全被移除，10 个解析测试当场变红。要装两组就一起列。
 $SSH "set -e
       export PATH=/root/.local/bin:\$PATH COPILOT_ROOT=$APP_DIR
       cd $APP_DIR
@@ -66,7 +77,8 @@ $SSH "set -e
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker
       sleep 3
-      systemctl is-active copilot-api copilot-worker"
+      systemctl is-active copilot-api copilot-worker
+      systemctl is-active copilot-sync.timer"
 
 echo "==> 验收"
 curl -sf --resolve liushun666.cn:443:${HOST#*@} https://liushun666.cn/api/health && echo

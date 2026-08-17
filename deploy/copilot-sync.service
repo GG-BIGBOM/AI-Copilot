@@ -1,0 +1,38 @@
+[Unit]
+Description=Copilot 语雀增量同步 + 入库（由 copilot-sync.timer 触发）
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+# oneshot：跑完就退出，不常驻。timer 负责什么时候叫它
+Type=oneshot
+User=copilot
+Group=copilot
+WorkingDirectory=/opt/copilot
+Environment=COPILOT_ROOT=/opt/copilot
+Environment=HOME=/tmp
+
+# 两步，顺序不能反：先把语雀的变更抓到 data/raw/yuque/，再切分入库。
+# 两步都是**增量**的：
+#   sync-yuque  比对文档的 content_updated_at，没变的跳过
+#   ingest      比对正文 hash，没变的整篇跳过（省的是 embedding 调用，是真金白银）
+# 所以每天跑一次的实际代价通常是零——语雀那边没人改文档时，什么都不会发生。
+ExecStart=/opt/copilot/.venv/bin/copilot sync-yuque https://www.yuque.com/wdterpqjb
+ExecStart=/opt/copilot/.venv/bin/copilot ingest
+
+# 抓 786 篇 + 可能重新向量化，慢是正常的；但也不能挂死
+TimeoutStartSec=3600
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/copilot/data
+
+# ⭐ 比 API（600M）和 worker（400M）都小。它是**最不重要**的一个进程：
+# 同步失败只是知识库晚一天更新，而它把内存吃爆会连带 postgres 被 OOM killer
+# 挑中，那就是全站挂掉。宁可让它自己被杀。
+MemoryMax=350M
+# CPU 也让一让：切分是纯 CPU 的，不该和正在流答案的 API 抢
+CPUWeight=20
+IOWeight=20

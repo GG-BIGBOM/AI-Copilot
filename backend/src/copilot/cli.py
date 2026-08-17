@@ -214,6 +214,59 @@ async def _invite(count: int, show: bool) -> None:
     typer.secho(f"\n当前未使用共 {remaining} 个。每个码只能用一次。", fg=typer.colors.BRIGHT_BLACK)
 
 
+@app.command(name="prune-junk")
+def prune_junk(
+    apply: bool = typer.Option(False, "--apply", help="真的删。默认只看不动"),
+) -> None:
+    """清掉索引里的二进制垃圾块（语雀内嵌表格的压缩载荷）。
+
+    M8 清点索引时发现的：5268 块里有 692 块（13%）是这种东西，
+    白占 embedding 额度、白占 top-k 名额（见 ingest/chunker.looks_like_junk）。
+    切分器已经在入库时拦掉了，这个命令是清**存量**——不必重新向量化整个库。
+    """
+    import asyncio
+
+    asyncio.run(_prune_junk(apply))
+
+
+async def _prune_junk(apply: bool) -> None:
+    from sqlalchemy import delete, func, select, update
+
+    from copilot.db.models import Chunk, Document
+    from copilot.db.session import SessionLocal
+    from copilot.ingest.chunker import looks_like_junk
+
+    async with SessionLocal() as session:
+        stmt = select(Chunk.id, Chunk.document_id, Chunk.content)
+        rows = list((await session.execute(stmt)).all())
+        junk = [r for r in rows if looks_like_junk(r.content)]
+        docs = {r.document_id for r in junk}
+        share = len(junk) / max(len(rows), 1)
+        typer.echo(
+            f"总块 {len(rows)}　垃圾块 {len(junk)}（{share:.1%}），涉及 {len(docs)} 篇文档"
+        )
+
+        if not junk:
+            typer.secho("索引很干净，不用清。", fg=typer.colors.GREEN)
+            return
+        if not apply:
+            typer.secho("这是预演，什么都没删。确认无误后加 --apply。", fg=typer.colors.YELLOW)
+            return
+
+        await session.execute(delete(Chunk).where(Chunk.id.in_([r.id for r in junk])))
+        # chunk_count 要跟着修，否则「文档管理」页和统计口径全是旧数
+        for doc_id in docs:
+            n = await session.scalar(
+                select(func.count(Chunk.id)).where(Chunk.document_id == doc_id)
+            )
+            await session.execute(
+                update(Document).where(Document.id == doc_id).values(chunk_count=n)
+            )
+        await session.commit()
+        left = await session.scalar(select(func.count(Chunk.id)))
+        typer.secho(f"已删 {len(junk)} 块，现存 {left} 块。", fg=typer.colors.GREEN)
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="监听地址，线上用 127.0.0.1 由 nginx 反代"),

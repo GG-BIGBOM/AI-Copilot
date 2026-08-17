@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from copilot.api import providers
+from copilot.api import logging_setup, providers
 from copilot.api.routes import auth as auth_routes
 from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import docs as docs_routes
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     s = get_settings()
     # 顶着占位密钥对外服务 = 任何人都能自己签一个登录态。宁可起不来
     ensure_production_ready()
+    logging_setup.configure_logging()
 
     app = FastAPI(
         title="知识库 Agent API",
@@ -47,6 +48,12 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json" if not s.cookie_secure else None,
     )
+
+    # ⚠️ 中间件的执行顺序和注册顺序**相反**：后注册的在外层。
+    # request id 要先挂，CORS 后挂——这样 CORS 在最外层，
+    # 连中间件自己抛出的 500 都会被加上 CORS 头，否则浏览器只报一句
+    # "CORS error"，真正的错误信息看不到（本地开发时尤其坑）
+    logging_setup.install(app)
 
     # 本地开发前端在 3000、后端在 8000，跨源。
     # 带 cookie 的跨源请求要求 allow_credentials=True，而这与 allow_origins=["*"]

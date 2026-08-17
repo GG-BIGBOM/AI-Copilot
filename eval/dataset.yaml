@@ -1,0 +1,343 @@
+# 知识库 Agent 评测集
+#
+# ⚠️ **每一道题的答案都是从真实语料里抄出来的**，不是凭想象编的。
+# 编题的做法：先把 5268 个块里「带界面路径、带数字、带映射表」的挑出来读，
+# 再针对读到的具体事实出题。凭想象出的题会让指标好看却毫无意义——
+# 模型答对的是我脑子里的知识库，不是磁盘上这个。
+#
+# 语料：语雀 wdterpqjb（旗舰版ERP）14 个库 / 746 篇 / 5268 块，2026-08-17 快照
+#
+# 四类题，各自量的是不同的东西：
+#   fact       材料里有明确答案 → 要答对、要引对源。量**准确率**
+#   no_answer  材料里没有       → 必须说「知识库暂无此内容」。量**幻觉率**
+#   probe      材料里有，但问法偏/绕 → 也该答出来。量**假阴性率**
+#              （M6 验收时撞见的：材料里就是答案，却被答成「不知道」）
+#   partial    材料只覆盖一部分 → 答已有部分 + 明确说哪部分没有
+#
+# 字段：
+#   q             问题
+#   source        期望命中的文档标题里应含的字串（判「检索对不对」，与「答得对不对」分开）
+#   must_include  答案里必须出现的关键事实（判定不区分大小写；数字/编码类要原样）
+#   must_not_include  出现即算错（一般用于挡「换个说法把不知道说成知道」）
+#   why           这题在测什么。**别删**——半年后回来看，没有这行就不知道当初为什么出这道题
+
+meta:
+  corpus: 语雀 wdterpqjb 14 个库 / 746 篇 / 5268 块
+  built_at: '2026-08-17'
+  built_from: 人工阅读 1178 个「含界面路径且长于 220 字」的块后出题
+
+cases:
+  # ======================= fact：有明确答案 =======================
+
+  - id: fact-logistics-code-jtsd
+    kind: fact
+    q: 微信视频号的发货设置里，极兔快递对应的平台物流编码是什么？
+    source: 微信视频号电子面单
+    must_include: ['JTSD']
+    why: 映射表里的单个格子。这类问题最能暴露「表格被拍平成一坨」——
+      表格结构没了的话，模型会把编码和快递公司配错。
+
+  - id: fact-logistics-code-yunda
+    kind: fact
+    q: 微信视频号物流映射里韵达的平台编码是什么？
+    source: 微信视频号电子面单
+    must_include: ['YUNDA']
+    why: 同上换一行。两行都对才能说明表格的行对应关系保住了。
+
+  - id: fact-qimen-appkey
+    kind: fact
+    q: 外部ERP分销商做奇门自助对接时，旺店通的 WMS AppKey 是多少？
+    source: 奇门分销
+    must_include: ['23381383']
+    why: 一串纯数字。模型最容易在这种地方「顺手改一位」，而这种错在生产环境
+      是直接对接失败。
+
+  - id: fact-batch-exchange-limit
+    kind: fact
+    q: 订单审核界面的批量换货，一次最多能操作多少单？
+    source: 订单审核界面换货说明
+    must_include: ['500']
+    why: 有明确上限的操作。答不出数字或答了别的数字都算错。
+
+  - id: fact-xianyu-url
+    kind: fact
+    q: 对接闲鱼平台时，闲鱼管家的后台地址是什么？要选哪种模式？
+    source: 闲鱼平台对接
+    must_include: ['goofish.pro', '第三方']
+    why: URL + 一个选项。URL 是最容易被模型「补全」成看起来合理但错误的形式的。
+
+  - id: fact-xhs-sender-path
+    kind: fact
+    q: 1.3.9.7 及以上版本，小红书面单的寄件人信息在哪里维护？
+    source: 小红书面单模板
+    must_include: ['打印设置', '第三方打印', '寄件人']
+    why: 界面路径要原样保留。路径答错等于让实施顾问在系统里瞎找。
+
+  - id: fact-xhs-sender-priority
+    kind: fact
+    q: 小红书面单的寄件人信息，全局配置和按物流配置哪个优先级更高？
+    source: 小红书面单模板
+    must_include: ['按物流']
+    why: 优先级这种「二选一」的结论，模型有五成概率靠猜也对——
+      所以配了下面 must_not_include 的反例题一起看。
+
+  - id: fact-stopzone-import-overwrites
+    kind: fact
+    q: 物流停发区域用 Excel 导入时，会追加还是覆盖原有设置？
+    source: 物流停发区域
+    must_include: ['覆盖']
+    why: ⭐ 这是「答错代价最大」的一类：答成追加，客户导完发现全丢了。
+      材料里专门写了警告，模型该把警告带出来。
+
+  - id: fact-stopzone-copy-count
+    kind: fact
+    q: 物流停发区域的复制功能，一次能复制给几个物流公司？
+    source: 物流停发区域
+    must_include: ['一个']
+    why: 材料明确写「目前只能复制给一个物流」。答「多个」是幻觉。
+
+  - id: fact-taobao-hold-24h
+    kind: fact
+    q: 淘宝百亿补贴的订单最长会 hold 单多久？
+    source: 物流同步常见报错
+    must_include: ['24']
+    why: 常见问题库里的一个具体时长。客服场景下问得最多的就是这种。
+
+  - id: fact-bom-batch-times
+    kind: fact
+    q: 批量引用物料单保存之后，总生产次数会被算成几次？
+    source: 物料清单
+    must_include: ['1']
+    why: 一个反直觉的行为（填了多次也算 1 次）。材料里是「注意」段，
+      模型若靠常识推理一定答错——正好测「只用材料、不用常识」这条铁律。
+
+  - id: fact-production-import-required
+    kind: fact
+    q: 生产单批量导入时，哪些字段是必填的？
+    source: 分步生产
+    must_include: ['清单编号', '生产员', '生产方式', '生产次数', '生产商']
+    why: 多项枚举。测的是「答全」而不只是「答对一个」。
+
+  - id: fact-production-cost-default
+    kind: fact
+    q: 生产单导入时生产费用合计不填，系统默认取什么值？
+    source: 分步生产
+    must_include: ['物料清单', '生产次数']
+    why: 一个计算式。模型容易只说「默认为空」。
+
+  - id: fact-fx-price-mapping
+    kind: fact
+    q: 分销端从供销商复制货品到货品档案时，供销端的「分销价」对应分销端的哪个价格？
+    source: 分销商品维护
+    must_include: ['最低价']
+    why: 三组价格的对应关系，错一组就是全盘错。这类映射是纯记忆题，
+      没有任何常识可依赖。
+
+  - id: fact-fx-retail-zero
+    kind: fact
+    q: 如果供销端没有开启基础价，分销端复制过来的零售价默认是多少？
+    source: 分销商品维护
+    must_include: ['0']
+    why: 边界值。「默认为 0」这种细节最容易被概括掉。
+
+  - id: fact-print-batch-format
+    kind: fact
+    q: 打印批次序号按物流类型排序后，序号的命名规则是什么？PC 端显示完整序号吗？
+    source: 销售出库打印
+    must_include: ['x-n']
+    must_not_include: []
+    why: 规则 + 一个例外（PC 端只显示 x）。测「材料里的限制条件要保留」。
+
+  - id: fact-combo-ratio-schedule
+    kind: fact
+    q: 组合装金额占比支持自动执行吗？什么时候执行？
+    source: 组合装管理
+    must_include: ['凌晨']
+    why: 有/没有 + 时点。这类「系统什么时候自己动」的问题客户问得很多。
+
+  - id: fact-app-order-window
+    kind: fact
+    q: 旺店助手 APP 的「我的订单」里，订单能显示多长时间？
+    source: APP · 我的订单
+    must_include: ['480']
+    why: 一个非整天的小时数（480 小时），模型极易换算成「20 天」——
+      换算本身没错，但材料写的是 480 小时，改写就说明它在加工而不是引用。
+
+  - id: fact-app-query-limit
+    kind: fact
+    q: 旺店助手 APP 批量查询单号，一次上限是多少条？
+    source: APP · 我的订单
+    must_include: ['500']
+    why: 与 PC 端一致的上限，材料里有明确报错话术。
+
+  - id: fact-purchase-price-time
+    kind: fact
+    q: 配置采购价执行时间时，开始执行时间可以填今天以前的日期吗？
+    source: 配置采购执行时间
+    must_include: ['不能']
+    why: 校验规则。答「可以」会让客户配出一个永不生效的价格。
+
+  - id: fact-purchase-price-one
+    kind: fact
+    q: 一个供应商货品能同时维护几个采购价执行时间？
+    source: 配置采购执行时间
+    must_include: ['一个']
+    why: 同上文档的另一条约束，验「同一篇里的多个细节都取得到」。
+
+  - id: fact-reconcile-shipping-amount
+    kind: fact
+    q: 平台对账里的「发货金额」包含哪些部分？
+    source: 平台对账
+    must_include: ['货品', '邮费']
+    why: 财务字段定义。少说一项（漏了邮费）在对账场景就是差额对不上。
+
+  - id: fact-affair-sms-config
+    kind: fact
+    q: 想让事务新建后短信提醒责任人，需要在哪里开配置？
+    source: 新建事务
+    must_include: ['事务设置']
+    why: 「要做某事该开哪个开关」——实施顾问最高频的问法。
+
+  - id: fact-secure-login-policies
+    kind: fact
+    q: 安全登录提供了几种登录 IP 限制策略？
+    source: 安全登录
+    must_include: ['四']
+    why: 计数题。模型倾向于把枚举数错，且数错时语气一样自信。
+
+  - id: fact-jd-waybill-template
+    kind: fact
+    q: 京东电子面单模板怎么设置？
+    source: 京东面单模板
+    must_include: []
+    why: ⭐ M5 上线验收用的那道题（当时数据没灌完答不上来）。留在评测集里当
+      回归哨兵：它一旦退化，说明面单这条最常问的主线出了问题。
+      不设 must_include——这题看的是「有没有引对源、有没有编造系统内路径」。
+      ⚠️ source 起初写成「京东」，结果匹配上了「京东沧海使用手册」——
+      期望来源写太松，等于把「检索错了」判成对。必须写到能唯一指认那一篇。
+
+  - id: fact-jd-wdt-side-steps
+    kind: fact
+    q: 京东云模板下载到旺店通之后，怎么和系统里的物流建立对应关系？
+    source: 京东面单模板
+    must_include: ['模板类型', '物流']
+    why: ⭐ **这道题是 M8 最重要的发现留下的。**
+      M5 上线验收时问「京东电子面单模板怎么设置」，答案末尾诚实地补了一句
+      「材料中未提供旺店通系统内的具体设置步骤」，当时被当成防幻觉做得好的证据。
+      M8 建评测集时才查出来：那篇文档**第 7 块（共 7 块）就是**
+      「3.旺店通erp操作 › 3.1 下载京东云模板 / 3.2 配置 / 3.3 使用」——
+      知识库里一直有。模型没说谎，它对着自己拿到的上下文说的是实话；
+      **是重排 top-5 没把第 7 块捞上来。**
+      所以那句「诚实」其实盖住了一次召回失败——
+      这类失败没有评测集是发现不了的，因为答案读起来完全合理。
+      这道题专门盯这一块：答案要出现「模板类型」和「物流」（原文是
+      「依次选择模板类型和物流，点击保存」）。
+
+  # ======================= no_answer：材料里没有 =======================
+  # ⚠️ 这几道题上线前逐条验过：拿它们去检索，没有任何一块沾边。
+  #    出这类题最大的风险是**自己搞错**——万一知识库里其实有，
+  #    那模型答出来反而被判成幻觉，指标就整个歪了。
+
+  - id: none-annual-meeting
+    kind: no_answer
+    q: 公司今年的年会在哪里开？
+    must_include: []
+    why: 与 ERP 毫无关系的问题。最基本的兜底。
+
+  - id: none-stock-code
+    kind: no_answer
+    q: 旺店通的母公司慧策的股票代码是多少？
+    why: 听起来「像是该知道」的公司信息。模型的预训练知识里可能真有，
+      正好测「只用材料，不用自己的常识」。
+
+  - id: none-payroll
+    kind: no_answer
+    q: 怎么在旺店通里给员工发工资条？
+    why: ⭐ 最危险的一类：**听起来完全像个 ERP 功能**，但这套系统没有。
+      模型很容易照着「员工权限」「薪资」的相邻概念编出一套操作路径来。
+
+  - id: none-price-usd
+    kind: no_answer
+    q: 旗舰版 ERP 的年费是多少美元？
+    why: 商务信息，材料里只有功能文档。数字类幻觉的代价最高。
+
+  - id: none-sap-connector
+    kind: no_answer
+    q: 旺店通和 SAP 的标准对接方案是怎样的？
+    why: 平台对接文档很多（闲鱼/抖店/1688…），SAP 恰好没有。
+      测的是「相邻主题很丰富时，能不能守住『这一个没有』」。
+
+  - id: none-mysql-backup
+    kind: no_answer
+    q: 旗舰版 ERP 的数据库是 MySQL 还是 SQL Server，怎么手动备份？
+    why: 技术架构问题。文档是给实施顾问看的，不涉及底层。
+
+  - id: none-shopify
+    kind: no_answer
+    q: Shopify 店铺怎么对接旺店通？
+    why: 同 SAP，但换成一个更常被问的海外平台。
+
+  - id: none-hr-attendance
+    kind: no_answer
+    q: 系统里怎么做仓库人员的考勤打卡？
+    why: 有「上架员绩效」这类相邻文档，但考勤打卡没有。
+      测「相邻但不相同」时会不会硬凑。
+
+  # ======================= probe：材料里有，但问法偏 =======================
+  # M6 验收时撞见的那类：检索明明把答案排在第一，模型仍答「知识库暂无此内容」。
+  # 这几道题量的是**假阴性**——太保守的代价。
+
+  - id: probe-colloquial-waybill
+    kind: probe
+    q: 面单老是打歪，往上跑，这个偏移量在哪儿调啊？
+    source: 打印偏移
+    must_include: []
+    why: 口语化 + 带情绪的问法，和文档措辞完全不重合。真实用户就是这么问的。
+
+  - id: probe-vague-stopzone
+    kind: probe
+    q: 有些偏远地区快递根本到不了，能不能在系统里按省市区限制这些地方不允许发货？
+    source: 停发区域
+    why: 用户不知道「停发区域」这个术语，只会描述现象。
+      第一版问的是「能提前拦住吗」，检索命中的是「物流拦截功能」——
+      那其实也算对，是**我的题出得含糊**，不是检索错。改成带「按省市区」的问法，
+      才唯一指向停发区域。**这一条本身就是评测集要反复校准的例子**：
+      期望来源写窄了，量到的是自己出题的准头，不是系统的。
+
+  - id: probe-why-split-failed
+    kind: probe
+    q: 一键拆分点了没反应，提示来源非平台抓单，是什么意思？
+    source: 拆分
+    why: 直接贴报错话术来问——客服场景最真实的输入形态。
+
+  - id: probe-negation-form
+    kind: probe
+    q: 组合装是不是不能拆分？
+    source: 拆分
+    why: ⭐ 否定式提问。材料说的是「只支持打印方式为组合装明细的组合装拆分」，
+      正确答法是「有条件地能」。模型容易被否定句带着答「是的不能」。
+
+  - id: probe-two-hop
+    kind: probe
+    q: 我想让某个物流的寄件人跟别的物流不一样，可以吗？
+    # source 可以给多个：好几篇文档都能正当地回答同一个问题，
+    # 只认一篇就把「检索对了但不是我预设那篇」误判成失败
+    source: [寄件人, 发件人]
+    why: 需要从「按物流配置」这个功能反推出「可以」。多一跳推理，
+      但答案完全在材料里。
+
+  # ======================= partial：只覆盖一部分 =======================
+
+  - id: partial-sms-template
+    kind: partial
+    q: 营销短信的模板在哪里建？短信费用怎么收？
+    source: 营销管理
+    why: 前半段材料里有（设置–策略设置–短信策略），后半段（计费）没有。
+      正确答法是答前半段 + 明说后半段没有。
+
+  - id: partial-combo-auto-create
+    kind: partial
+    q: 平台货品编码带【】前后缀时能自动建组合装吗？失败了会怎样？
+    source: 组合装
+    why: 材料写了触发条件和「匹配失败则递交失败」，但没写失败后如何补救。
+      测「答已有的、点明缺的」这条铁律。

@@ -221,3 +221,57 @@ def test_parse_frontmatter_absent():
     meta, body = parse_frontmatter("没有 frontmatter 的正文")
     assert meta == {}
     assert body == "没有 frontmatter 的正文"
+
+
+# ---------- 二进制垃圾过滤（M8 清点索引时发现的） ----------
+
+
+def test_lakesheet_payload_is_junk():
+    """语雀内嵌表格的载荷。M8 清点发现索引里有 700 块这种东西（13%）。"""
+    from copilot.ingest.chunker import looks_like_junk
+
+    payload = '{"format":"lakesheet","version":"3.5.5","larkJson":true,"sheet":"x\x9c'
+    assert looks_like_junk(payload + "A" * 200)
+
+
+def test_compressed_garbage_is_junk():
+    """压缩数据被当文本读出来的样子：满屏拉丁扩展区字符。"""
+    from copilot.ingest.chunker import looks_like_junk
+
+    assert looks_like_junk("'MtÒD'MtÒD'MuÒT'ÍtÒL'­ê¤U´ªVuÒªNZÕI«:iU'­ê¤U´¦ÖtÒNZÓIk:iM" * 3)
+
+
+def test_real_content_is_not_junk():
+    """⭐ 反例最重要。误杀正文是比留着垃圾更严重的错——留着只是浪费，
+    误杀是让一整篇文档从知识库里消失，而且不会有任何报错。"""
+    from copilot.ingest.chunker import looks_like_junk
+
+    assert not looks_like_junk(
+        "一、电子面单设置\n\n先在【设置】-【基本设置】-【物流】里绑定物流账号，"
+        "再选择京东标准模板。注意：偏移量设置为上边距 3 毫米。"
+    )
+
+
+def test_mapping_table_with_multiplication_signs_is_not_junk():
+    """⭐ `×` 和 `÷`（U+00D7/U+00F7）落在拉丁扩展区里，但真实的对接映射表
+    大量用它们标「支持/不支持」。判定必须排除这两个字符，否则整张表被误杀——
+    第一版就踩了这个坑，把「授权信息一览表」判成了垃圾。"""
+    from copilot.ingest.chunker import looks_like_junk
+
+    assert not looks_like_junk(
+        "一、授权信息一览表\n\n| 平台 | 时效 | 抓单 | 发货 | 退款 |\n"
+        "| 格格家 | 永久 | × | √ | × |\n| 云集 | 永久 | × | √ | √ |\n"
+        "| 小米有品 | 永久 | √ | × | √ |\n| 每日一淘 | 永久 | × | √ | × |"
+    )
+
+
+def test_junk_chunks_never_enter_the_index():
+    """端到端：含载荷的文档切出来的块里不该有垃圾。"""
+    md = (
+        "## 销售排行\n\n这是一段正常的说明文字，讲的是销售排行怎么看。\n\n"
+        '{"format":"lakesheet","version":"3.5.5","larkJson":true,"sheet":"' + "Ò¥þ" * 400 + '"}'
+    )
+    chunks = chunk_markdown(md, size=500, overlap=80)
+    assert chunks, "把正文也一起滤掉了"
+    assert any("销售排行怎么看" in c.content for c in chunks)
+    assert not any("lakesheet" in c.content for c in chunks)

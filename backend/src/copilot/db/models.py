@@ -11,12 +11,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -167,6 +168,31 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TokenUsage(Base):
+    """每人每天的 token 用量。M8 的成本兜底。
+
+    **为什么单独一张表，而不是从 messages 表反推**：token 主要烧在**送进去的
+    上下文**上（5 块材料约 2500 字），答案正文往往只占三成。按答案长度反推
+    会低估到没有意义——而这张表的唯一目的就是防止有人（或某个脚本）
+    把额度刷穿，估不准就等于没做。
+
+    主键是 (user_id, day)：一人一天一行，用 upsert 累加。
+    """
+
+    __tablename__ = "token_usage"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    # 存 date 而不是 timestamp：配额是按「天」结算的，存时间点还得每次去截断
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Conversation(Base):

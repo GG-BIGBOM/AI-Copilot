@@ -37,6 +37,34 @@ _IMG_MARK_RE = re.compile(r"\[图:([0-9a-f]{4})\]")
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(\s*(\S+?)(?:\s+\"[^\"]*\")?\s*\)")
 
 
+# 语雀内嵌表格（Lake sheet）的载荷特征。正文里出现这些 = 这段不是人写的字，
+# 而是一张表格被序列化 + zlib 压缩后的二进制。
+_JUNK_MARKERS = ('"format":"lakesheet"', '"larkJson"', '"calcChain"')
+# 拉丁扩展区的带音符字母（Ã Ò þ ¥ 这类）。中文文档里几乎不出现，
+# 而压缩数据被当成文本读出来时满屏都是。**故意排除 × ÷**（U+00D7/U+00F7）——
+# 它们在真实的对接映射表里大量用作「支持/不支持」的标记，误杀了会丢掉整张表。
+_BINARY_RE = re.compile(r"[À-ÖØ-öø-ɏͰ-ӿ]")
+
+
+def looks_like_junk(text: str) -> bool:
+    """这段文本是二进制载荷、不是正文吗？
+
+    **为什么必须在入库前拦掉**：M8 评测时清点索引，发现 5268 个块里有 692 个
+    （13%）是「统计」库里内嵌表格的压缩数据。它们的代价是三重的：
+      1. 每一块都白烧一次 embedding 调用（免费额度也是额度）；
+      2. 占着 top-k 的名额——它们的向量是随机方向，偶尔会挤掉一个真结果；
+      3. 一旦被召回进上下文，模型看到的是一屏乱码。
+
+    而且这类块**永远不会被人发现**：没人会去搜「统计-销售排行」的正文，
+    答案里也不会出现它们。只有清点索引时才看得见。
+    """
+    if any(m in text for m in _JUNK_MARKERS):
+        return True
+    if len(text) < 60:  # 太短的判不准，宁可放过
+        return False
+    return len(_BINARY_RE.findall(text)) / len(text) > 0.04
+
+
 def clean_heading(text: str) -> str:
     """把 Markdown 标题洗成可直接展示的纯文本。"""
     text = _IMG_MARK_RE.sub("", text)  # 标题里混进图片标记，显示出来是噪声
@@ -250,6 +278,10 @@ def chunk_markdown(
         # 只有标题加一张截图的小节，靠标题仍然搜得到，图也就跟着能显示出来。
         # 这和 M1 坑 #5「正文全在标题里的文档整篇消失」是同一类问题。
         if len(_IMG_MARK_RE.sub("", content).strip()) < min_chars:
+            return
+        # 二进制载荷不入库。放在这里而不是切分之前：压缩数据会被
+        # _split_long_text 切成好几段，每段都得单独判
+        if looks_like_junk(content):
             return
         chunks.append(
             Chunk(

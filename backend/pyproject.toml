@@ -46,6 +46,11 @@ agent = [
     "pydantic-ai>=2.0",
     "openpyxl>=3.1",
 ]
+# 评测（M8）。只在本机跑，服务器不装——评测要打几百次 LLM，
+# 而且判分模型最好不是线上那个（自我偏好），跟线上服务没关系
+eval = [
+    "pyyaml>=6.0",
+]
 
 [project.scripts]
 copilot = "copilot.cli:app"

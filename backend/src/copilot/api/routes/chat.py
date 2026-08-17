@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import StreamingResponse
 
+from copilot import usage
 from copilot.api import providers, stream
 from copilot.api.schemas import ChatRequest, ConversationOut, MessageOut
 from copilot.auth.deps import CurrentUser, SessionDep
@@ -159,6 +160,14 @@ async def _chat_stream(
             )
             await session.commit()
 
+            # 记账。算的是「送进去的 + 吐出来的」——**上下文才是大头**
+            # （5 块材料约 2500 字，答案往往只有它的三成）
+            await usage.record(
+                session,
+                user_id,
+                usage.estimate_tokens(streamed.context_text, question, answer),
+            )
+
     except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("聊天流出错：user=%s question=%r", user_id, question[:80])
         if text_open:
@@ -171,11 +180,23 @@ async def _chat_stream(
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest, user: CurrentUser) -> StreamingResponse:
-    """提问，流式返回答案与引用。未登录 401。"""
+async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> StreamingResponse:
+    """提问，流式返回答案与引用。未登录 401，超出当日配额 429。
+
+    ⭐ 配额检查必须在 `StreamingResponse` **之前**。流一旦开始，
+    HTTP 状态码就已经发出去了，再想返回 429 也来不及——只能在流里塞一个
+    error 片段，那对客户端（尤其是脚本）来说完全是另一回事。
+    """
     question = body.last_user_text()
     if not question:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有找到用户消息")
+
+    exceeded, used, quota = await usage.over_quota(session, user)
+    if exceeded:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"今天的用量已达上限（{used}/{quota} tokens），明天再来或联系管理员调整。",
+        )
 
     return StreamingResponse(
         _chat_stream(user.id, question, body.id),

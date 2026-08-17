@@ -129,6 +129,14 @@ class Settings(BaseSettings):
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     )
 
+    # ===== 评测（M8，只在本机跑）=====
+    # ⚠️ **判分模型要和答题模型不一样。** 同一个模型判自己的答案会偏心
+    # （self-preference bias），指标会虚高。留空则退回 llm_* 那组配置，
+    # 但那时报告里必须写明「判分器和被判者同源」这个缺陷。
+    eval_judge_model: str = "deepseek-reasoner"
+    eval_judge_api_key: str = ""  # 留空复用 llm_api_key
+    eval_judge_base_url: str = ""  # 留空复用 llm_base_url
+
     # ===== 上传限制 =====
     upload_max_bytes: int = 20 * 1024 * 1024  # 20MB
     upload_max_docs_per_user: int = 200
