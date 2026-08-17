@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -23,6 +24,9 @@ from copilot.providers.llm import ChatLLM
 from copilot.retrieve import Citation, search
 
 NO_ANSWER = "知识库暂无此内容。"
+
+# 答案里的引用标记 `[1]`、`[2]`。用来区分「拒答」和「答了一部分、并说明另一部分没有」
+_CITE_MARK_RE = re.compile(r"\[\d{1,2}\]")
 
 SYSTEM_PROMPT = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
 
@@ -64,8 +68,26 @@ def is_no_answer(text: str) -> bool:
 
     ⚠️ **凡是展示引用的地方都必须先过这一关。** 一旦答案是「暂无此内容」，
     下面却挂着五条来源，用户会以为答案是有依据的——这比不做防幻觉更糟。
+
+    判定分两种情形，缺一不可：
+
+    1. **以那句话开头** —— prompt 要求的标准形态。
+    2. **提到了那句话，且全文没有任何 `[n]` 引用标记。**
+       M7 的 Agent 会先解释「我查到的是 X，不是你问的」再补一句
+       「知识库暂无此内容」——只认开头的话，这种答案会被判成"有答案"，
+       于是页面上出现「暂无此内容」下面挂着五条来源。**这是 M7 的评测
+       撞出来的真 bug，不是理论风险。**
+
+    为什么第 2 条要加「没有引用标记」这个条件：`partial` 类的答案长这样——
+    「模板在【设置–策略设置–短信策略】里建 [1]。短信费用怎么收，知识库暂无此内容。」
+    那是**答出来了**的，引用必须照常显示。带 `[n]` 就说明有据可依，
+    不能因为末尾提了一句「某部分没有」就把整条来源清单丢掉。
     """
-    return text.strip().startswith(NO_ANSWER.rstrip("。"))
+    body = text.strip()
+    needle = NO_ANSWER.rstrip("。")
+    if body.startswith(needle):
+        return True
+    return needle in body and not _CITE_MARK_RE.search(body)
 
 
 @dataclass(slots=True)

@@ -137,6 +137,16 @@ class Settings(BaseSettings):
     eval_judge_api_key: str = ""  # 留空复用 llm_api_key
     eval_judge_base_url: str = ""  # 留空复用 llm_base_url
 
+    # ===== Agent（M7）=====
+    # ⚠️ 默认关。M8 的评测证明「直接检索 + 回答」这条路已经 100%（41 题），
+    # 把所有问答都改成 Agent 循环是拿一个**已量化**的系统去换一个没量化的。
+    # 打开之前必须用 `eval/run.py --agent` 跑一遍，证明不退化。
+    agent_enabled: bool = False
+    # 最大模型请求数与工具调用数。Agent 跑飞时的硬闸门——
+    # 没有它，一个循环调用工具的模型能把额度和时间都烧光
+    agent_max_requests: int = 8
+    agent_max_tool_calls: int = 10
+
     # ===== 上传限制 =====
     upload_max_bytes: int = 20 * 1024 * 1024  # 20MB
     upload_max_docs_per_user: int = 200
@@ -155,6 +165,19 @@ class Settings(BaseSettings):
     def image_dir(self) -> Path:
         """镜像下来的语雀配图。线上由 nginx 直接发，不经过 Python。"""
         return self.data_dir / "images"
+
+    @property
+    def export_dir(self) -> Path:
+        """M7 Agent 导出的 xlsx。一个会话一份，按 user_id 分目录。"""
+        return self.data_dir / "exports"
+
+    def export_path(self, rel: str) -> Path:
+        """同 `upload_path` 的规矩：存相对路径 + 越界检查。"""
+        base = self.export_dir.resolve()
+        p = (base / rel).resolve()
+        if p != base and base not in p.parents:
+            raise ValueError(f"导出路径越界：{rel!r}")
+        return p
 
     def upload_path(self, stored_path: str) -> Path:
         """把 `documents.stored_path` 还原成绝对路径。

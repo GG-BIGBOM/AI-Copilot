@@ -102,6 +102,45 @@ def data_part(name: str, data: Any) -> str:
     return encode({"type": f"data-{name}", "data": data})
 
 
+# ---------- 工具调用（M7）----------
+#
+# 字段名是从 `frontend/node_modules/ai/dist/index.d.ts` 的 UIMessageChunk 联合类型里
+# **逐个核对**出来的，不是照记忆写的：
+#     tool-input-start      toolCallId, toolName
+#     tool-input-available  toolCallId, toolName, input
+#     tool-output-available toolCallId, output
+#     tool-output-error     toolCallId, errorText
+# 错一个字段前端不会报错，只是那一段工具调用**安静地不显示**——
+# 和文件头说的同一类故障。
+
+
+def tool_input_start(call_id: str, tool_name: str) -> str:
+    """工具开始被调用。前端据此先渲染一个「正在检索…」的占位。"""
+    return encode({"type": "tool-input-start", "toolCallId": call_id, "toolName": tool_name})
+
+
+def tool_input_available(call_id: str, tool_name: str, args: Any) -> str:
+    """参数齐了。`input` 是工具的入参对象。"""
+    return encode(
+        {
+            "type": "tool-input-available",
+            "toolCallId": call_id,
+            "toolName": tool_name,
+            "input": args,
+        }
+    )
+
+
+def tool_output_available(call_id: str, output: Any) -> str:
+    return encode({"type": "tool-output-available", "toolCallId": call_id, "output": output})
+
+
+def tool_output_error(call_id: str, message: str) -> str:
+    """工具失败。**用它而不是 `error`**：`error` 会让整轮对话变成错误态，
+    而单个工具失败时 Agent 还能换个方式继续——这是 M7「工具失败恢复」的前提。"""
+    return encode({"type": "tool-output-error", "toolCallId": call_id, "errorText": message})
+
+
 def error(message: str) -> str:
     """错误片段。前端会把 errorText 渲染出来，所以这里只放能给用户看的话，
     堆栈和内部细节留在服务端日志里。"""

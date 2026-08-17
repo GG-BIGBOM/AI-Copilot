@@ -1,0 +1,2709 @@
+{
+  "tag": "agent-v2",
+  "ran_at": "2026-08-17T16:15:50+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 5268 块",
+  "config": {
+    "prompt": "current",
+    "path": "agent",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "e1bcb531",
+    "chunk_count": 4568
+  },
+  "judge_model": "deepseek-reasoner",
+  "metrics": {
+    "题数": 41,
+    "准确率": 87.8,
+    "检索命中率": 93.9,
+    "引用正确率": 90.9,
+    "幻觉率": 12.5,
+    "假阴性率": 0.0,
+    "无据陈述率": 2.9,
+    "分类准确率": {
+      "fact": 88.5,
+      "probe": 80.0,
+      "partial": 100.0,
+      "no_answer": 87.5
+    }
+  },
+  "cases": [
+    {
+      "id": "fact-logistics-code-jtsd",
+      "kind": "fact",
+      "q": "微信视频号的发货设置里，极兔快递对应的平台物流编码是什么？",
+      "answer": "微信视频号发货设置中，极兔快递对应的平台物流编码是 **JTSD**，对应的系统物流类别为**极兔速递**。[1]\n\n维护位置：【设置】【基本设置】【店铺】-物流公司。\n\n注意：快运编码与物流映射一定不要维护错误，否则会导致发货后店铺后台信息没有物流流转信息。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "四、发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.5387
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 获取单号常见报错及解决方案",
+          "heading": "49、Q：抖音获取单号报错FailCode : 14081 FailMsg : 服务不可达:未匹配到对应地址",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/gkhqdi3qii9oa83g",
+          "score": 0.2818
+        },
+        {
+          "n": 3,
+          "title": "平台事项 · 👀各平台对应系统商家编码填写位置",
+          "heading": "7.2微信视频号：规格编码",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/gk8qcx",
+          "score": 0.2148
+        },
+        {
+          "n": 4,
+          "title": "设置 · 订单变更流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lq4l9445zm762kts",
+          "score": 0.105
+        },
+        {
+          "n": 5,
+          "title": "设置 · 唯品会MP面单模板设置步骤",
+          "heading": "三.发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/som424",
+          "score": 0.1017
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "📒常见问题库 · 获取单号常见报错及解决方案",
+        "平台事项 · 👀各平台对应系统商家编码填写位置",
+        "设置 · 订单变更流程解析",
+        "设置 · 唯品会MP面单模板设置步骤"
+      ],
+      "top_score": 0.5387,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案给出的平台编码JTSD、系统物流类别极兔速递、维护位置及注意事项均与参考材料[1]一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-logistics-code-yunda",
+      "kind": "fact",
+      "q": "微信视频号物流映射里韵达的平台编码是什么？",
+      "answer": "根据知识库中微信视频号电子面单对接的物流映射表 [3]：\n\n**韵达**在微信视频号平台的编码是 **YUNDA**，对应系统物流类别为「韵达快递」。\n\n映射表如下：\n\n| 快递名称 | 平台编码 | 系统物流类别 |\n| --- | --- | --- |\n| 中通 | ZTO | 中通快递 |\n| 圆通 | YTO | 圆通速递 |\n| 韵达 | YUNDA | 韵达快递 |\n| 极兔 | JTSD | 极兔速递 |\n| 申通 | STO | 申通快递 |\n\n维护位置：【设置】【基本设置】【店铺】-物流公司。注意快运编码与物流映射一定不要维护错误，否则会导致发货后店铺后台信息没有物流流转信息 [3]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "92、Q： 微信视频号物流失败，平台msg: 订单状态错误，不允许执行此操作 rid: 63f1d908-6c785a3d-40d8bb73",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.5513
+        },
+        {
+          "n": 2,
+          "title": "平台事项 · 👀各平台对应系统商家编码填写位置",
+          "heading": "7.2微信视频号：规格编码",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/gk8qcx",
+          "score": 0.4367
+        },
+        {
+          "n": 3,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "四、发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.3734
+        },
+        {
+          "n": 4,
+          "title": "设置 · 唯品会MP面单模板设置步骤",
+          "heading": "三.发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/som424",
+          "score": 0.1874
+        },
+        {
+          "n": 5,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.1768
+        }
+      ],
+      "retrieved_titles": [
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "平台事项 · 👀各平台对应系统商家编码填写位置",
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "设置 · 唯品会MP面单模板设置步骤",
+        "设置 · 微信视频号电子面单对接及模板设置"
+      ],
+      "top_score": 0.5513,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确给出韵达平台编码为YUNDA，且与参考材料[3]中的物流映射表完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-qimen-appkey",
+      "kind": "fact",
+      "q": "外部ERP分销商做奇门自助对接时，旺店通的 WMS AppKey 是多少？",
+      "answer": "旺店通 WMS AppKey 是 **23381383**。[1][3]\n\n补充说明：外部ERP分销商拿到这个 AppKey 后，需和自己 ERP 的客服申请，让客服在奇门后台向旺店通发起合作申请。[2][3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.9882
+        },
+        {
+          "n": 2,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备 › 外部ERP分销商",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.9733
+        },
+        {
+          "n": 3,
+          "title": "分销 · 旺店通奇门分销自助对接流程",
+          "heading": "四、对接前准备",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nozx98ggn227fn50",
+          "score": 0.9716
+        },
+        {
+          "n": 4,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "二、对接流程以及注意事项 › 外部ERP分销商 › 1.登陆供销平台",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.868
+        },
+        {
+          "n": 5,
+          "title": "设置 · 旗舰版对接唯品会JIT外仓操作手册",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/vvwoq66p3vm9ne9u",
+          "score": 0.8227
+        }
+      ],
+      "retrieved_titles": [
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 旺店通奇门分销自助对接流程",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "设置 · 旗舰版对接唯品会JIT外仓操作手册"
+      ],
+      "top_score": 0.9882,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确给出旺店通WMS AppKey为23381383，且补充说明与参考材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-batch-exchange-limit",
+      "kind": "fact",
+      "q": "订单审核界面的批量换货，一次最多能操作多少单？",
+      "answer": "根据知识库资料，订单审核界面的批量换货操作上限为**一次500单**，且目前无法提高操作上限。[1]\n\n另外补充几点相关注意事项：\n- 换货以子单维度进行换货，一次只能操作一个子单的货品换货，无法同时操作多种货品换货。[1]\n- 换货货品等可以保存为策略，后面可以直接引用策略换货，不用手动再添加货品。[1]\n\n（注：知识库中关于\"批量自动合并\"提到一次最多默认可选50单，那是合并功能的上限，与批量换货的500单上限不同，请注意区分。）",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 订单审核界面换货说明",
+          "heading": "一、批量换货",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ga4gy1",
+          "score": 0.9735
+        },
+        {
+          "n": 2,
+          "title": "销售 · 批量自动合并",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/dwgvziaffslurxf0",
+          "score": 0.8801
+        },
+        {
+          "n": 3,
+          "title": "销售 · 订单审核界面换货说明",
+          "heading": "八、批量换货为整单数量为1 › 1、使用场景",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ga4gy1",
+          "score": 0.8529
+        },
+        {
+          "n": 4,
+          "title": "销售 · 订单审核界面换货说明",
+          "heading": "八、批量换货为整单数量为1 › 2、操作流程",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ga4gy1",
+          "score": 0.8431
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 订单审核界面换货说明",
+        "销售 · 批量自动合并",
+        "销售 · 订单审核界面换货说明",
+        "销售 · 订单审核界面换货说明"
+      ],
+      "top_score": 0.9735,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确引用参考材料中“批量换货的操作上限为一次500单”的说明，且补充内容均能在材料中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-xianyu-url",
+      "kind": "fact",
+      "q": "对接闲鱼平台时，闲鱼管家的后台地址是什么？要选哪种模式？",
+      "answer": "我先检索一下知识库中关于闲鱼平台对接的相关内容。根据知识库内容，回答如下：\n\n**闲鱼管家后台地址：** `https://goofish.pro/index` [1][2]\n\n**对接模式：** 选择【第三方模式】，找到\"旺店通\"，点击\"添加\" [1][2]\n\n具体操作步骤如下：\n\n1. 登录闲鱼管家，进入开放平台（地址：`https://goofish.pro/index`）\n2. 选择【第三方模式】，找到\"旺店通\"，点击\"添加\" [图1]\n3. 需要按需订购 [图2]\n4. 完善个人信息，点击\"完成\"即开通成功 [图3]\n5. 开通完成后，找到\"旺店通\"，在列表或应用详情里点击\"上线\"即可 [图4][图5]\n\n之后在旺店通 ERP 内完成授权：\n- 设置→基本设置→店铺→添加，店铺平台选择闲鱼、子平台选择默认，点击保存 [图6]\n- 选中闲鱼平台的店铺，右键选择\"店铺授权\"，在跳转页面中添加平台后台获得的授权信息，保存后店铺授权状态显示已授权即可 [图7]\n\n**注意事项：**\n- 一个闲鱼管家号最多绑定 10 个闲鱼账号 [2]\n- 若多个闲鱼账号分别对应 ERP 中不同店铺，需分别注册不同的闲鱼管家账号，每套授权信息分别授权不同的 ERP 店铺 [2]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 闲鱼平台对接步骤",
+          "heading": "二、授权店铺",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mzqmgr19d46m8iqa",
+          "score": 0.9438
+        },
+        {
+          "n": 2,
+          "title": "设置 · 闲鱼平台对接步骤",
+          "heading": "三、对接常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mzqmgr19d46m8iqa",
+          "score": 0.813
+        },
+        {
+          "n": 3,
+          "title": "设置 · 抖音平台-厂家代打平台对接步骤",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lnsqib",
+          "score": 0.2141
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "79、Q：发件人信息无效，请在店铺后台维护对应的信息",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.0496
+        },
+        {
+          "n": 5,
+          "title": "设置 · 闲鱼平台对接步骤",
+          "heading": "一、erp对接场景",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mzqmgr19d46m8iqa",
+          "score": 0.0283
+        },
+        {
+          "n": 6,
+          "title": "设置 · 京东定制中心-授权对接文档",
+          "heading": "一、对接进度一览",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/inee4k4et9vngib0",
+          "score": 0.1382
+        },
+        {
+          "n": 7,
+          "title": "设置 · 结算",
+          "heading": "7. 【按数量对账的店铺】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg6g768p4qheeuql",
+          "score": 0.0825
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 闲鱼平台对接步骤",
+        "设置 · 闲鱼平台对接步骤",
+        "设置 · 抖音平台-厂家代打平台对接步骤",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 闲鱼平台对接步骤",
+        "设置 · 京东定制中心-授权对接文档",
+        "设置 · 结算"
+      ],
+      "top_score": 0.9438,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确给出闲鱼管家后台地址为https://goofish.pro/index，并说明选择第三方模式对接旺店通，步骤与参考材料完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-xhs-sender-path",
+      "kind": "fact",
+      "q": "1.3.9.7 及以上版本，小红书面单的寄件人信息在哪里维护？",
+      "answer": "1.3.9.7 及以上版本，小红书面单的寄件人信息维护路径如下：\n\n**操作路径：设置——打印设置——第三方打印——寄件人信息。** [2]\n\n具体说明：\n\n1. **全局配置**：适用于所有物流，默认值取：店铺联系人、店铺联系人手机、仓库地址。[2]\n2. **按物流配置**：可以单独按照物流设置使用的寄件人信息。[2]\n   - 寄件人/联系电话/发货地址的下拉框中，支持选择店铺/仓库/物流/代发类型。由于代发比较特殊，是提取出来的完整地址，所以若三项任意一项选择了代发，那么其余两项也必须是代发类型的。[2]\n\n**注意事项：**\n- 全局配置适用于所有物流，**按物流配置的优先级高于全局设置**。[2]\n- 对于升级之前的设置：全局配置默认如上；按物流配置，则依据之前物流授权中的配置自动创建一条数据。[2]\n\n[图4][图5]\n\n另外，如果遇到「发件人信息无效」的报错，需要到**店铺后台维护地址库的寄件人地址信息**，维护好后在 ERP 系统的「销售—信息同步—物流同步」界面选中报错的订单右键重新同步。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "79、Q：发件人信息无效，请在店铺后台维护对应的信息",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.6097
+        },
+        {
+          "n": 2,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "三、物流单寄件人地址维护 › 1.3.9.7及以上版本修改方式",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.5911
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 获取单号常见报错及解决方案",
+          "heading": "133、Q：获取单号报错授权异常：寄件人姓名为空",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/gkhqdi3qii9oa83g",
+          "score": 0.144
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "23、Q：无效的联系人,请检查发货人相关信息，如手机号码，电话等 #CD08",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.1237
+        },
+        {
+          "n": 5,
+          "title": "设置 · 修改物流单发件人信息操作方式",
+          "heading": "一、线上模板修改发件人信息",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lp31i6",
+          "score": 0.1186
+        }
+      ],
+      "retrieved_titles": [
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 小红书面单模板设置",
+        "📒常见问题库 · 获取单号常见报错及解决方案",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 修改物流单发件人信息操作方式"
+      ],
+      "top_score": 0.6097,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确引用了材料中1.3.9.7及以上版本寄件人信息维护路径及配置说明，所有细节均有依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-xhs-sender-priority",
+      "kind": "fact",
+      "q": "小红书面单的寄件人信息，全局配置和按物流配置哪个优先级更高？",
+      "answer": "我来检索知识库中关于小红书面单寄件人信息配置的相关内容。根据知识库内容，回答如下：\n\n**按物流配置的优先级更高。**\n\n在「设置——打印设置——第三方打印——寄件人信息」中，全局配置适用于所有物流，默认值取店铺联系人、店铺联系人手机、仓库地址；按物流配置可以单独按照物流设置使用的寄件人信息。[1]\n\n明确说明：**全局配置适用于所有物流，按物流配置的优先级高于全局设置。**[1]\n\n另外补充一个相关细节：在获取面单号时，若勾选了「获取单号时根据此配置传输寄件人」，会按照配置（全局配置和物流设置，**以物流设置中的配置为准**）生成并传递；若未勾选，则按照物流-仓库-店铺的顺序生成。[1]\n\n材料中未涉及小红书面单在寄件人信息上与其他物流有特殊差异的说明。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 修改物流单发件人信息操作方式",
+          "heading": "一、线上模板修改发件人信息",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lp31i6",
+          "score": 0.9249
+        },
+        {
+          "n": 2,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "三、物流单寄件人地址维护 › 1.3.9.7及以上版本修改方式",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.8731
+        },
+        {
+          "n": 3,
+          "title": "分销 · 分销-供销订单支持多级推送",
+          "heading": "三、多级分销配置",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nerieq",
+          "score": 0.1367
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 修改物流单发件人信息操作方式",
+        "设置 · 小红书面单模板设置",
+        "分销 · 分销-供销订单支持多级推送"
+      ],
+      "top_score": 0.9249,
+      "source_hit": true,
+      "cited_source": false,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确回答按物流配置优先级更高，并引用了材料中‘按物流配置的优先级高于全局设置’及‘以物流设置中的配置为准’等依据，与材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-stopzone-import-overwrites",
+      "kind": "fact",
+      "q": "物流停发区域用 Excel 导入时，会追加还是覆盖原有设置？",
+      "answer": "根据知识库内容，物流停发区域用 Excel 导入时是**覆盖**原有设置，不是追加。\n\n具体说明如下：\n\n1. **导入行为**：选择物流公司后，可以用 Excel 导入停发区域，**导入会覆盖当前物流设置的所有内容**。字段为：省、市、区，系统会校验导入的内容是否准确。[1]\n\n2. **注意事项（容易踩坑）**：\n   - 由于导入会覆盖所有内容，导入前一定要确认导入的内容是否正确。[1]\n   - 如果表格中内容部分有问题，则正确的内容会导入成功，有误的内容导入失败，**之前设置的物流停发区域全部被覆盖**。[1]\n   - 如果全部有问题导致导入失败的话，会**清除当前物流设置的内容**。[1]\n\n3. **操作位置**：设置 · 物流停发区域界面，选择物流公司后点击「导入」按钮。[1]\n\n另外补充一点：知识库中「冷链包装推荐」的「维护收货区域」页面提供了「区域导入」（覆盖）和「区域追加导入」（新增）两种方式 [5]，但**物流停发区域**目前只有覆盖式导入，没有追加导入的选项。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 2、界面按钮说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.9851
+        },
+        {
+          "n": 2,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 3、流程设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.7276
+        },
+        {
+          "n": 3,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 4、影响范围",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.369
+        },
+        {
+          "n": 4,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 1、界面展示以及说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.3648
+        },
+        {
+          "n": 5,
+          "title": "设置 · 冷链包装推荐",
+          "heading": "四、功能说明 › 4.3、维护收货区域",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fy53hpey4py0ls75",
+          "score": 0.3604
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 物流停发区域",
+        "设置 · 物流停发区域",
+        "设置 · 物流停发区域",
+        "设置 · 物流停发区域",
+        "设置 · 冷链包装推荐"
+      ],
+      "top_score": 0.9851,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确说明物流停发区域Excel导入会覆盖原有设置，并引用了材料中导入覆盖的相关内容，与参考材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-stopzone-copy-count",
+      "kind": "fact",
+      "q": "物流停发区域的复制功能，一次能复制给几个物流公司？",
+      "answer": "根据知识库内容：\n\n物流停发区域的**复制**功能，目前一次只能复制给**一个**物流公司。材料中明确说明：「目前只能复制给一个物流，后续版本优化可以复制给多个物流公司。【1.3.9.1版本支持】」[1]\n\n也就是说，当前版本（1.3.9.1）一次只能复制给一个物流公司，复制给多个物流公司的能力还在后续版本优化中。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 2、界面按钮说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.9951
+        },
+        {
+          "n": 2,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 1、界面展示以及说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.6771
+        },
+        {
+          "n": 3,
+          "title": "设置 · 物流选择流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/bz1nczhrwrcpgvzr",
+          "score": 0.639
+        },
+        {
+          "n": 4,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.5908
+        },
+        {
+          "n": 5,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 3、流程设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.5346
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 物流停发区域",
+        "设置 · 物流停发区域",
+        "设置 · 物流选择流程解析",
+        "设置 · 递交后处理流程解析",
+        "设置 · 物流停发区域"
+      ],
+      "top_score": 0.9951,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与参考材料[1]中关于复制功能一次只能复制给一个物流公司的说明完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-taobao-hold-24h",
+      "kind": "fact",
+      "q": "淘宝百亿补贴的订单最长会 hold 单多久？",
+      "answer": "淘宝百亿补贴订单最长会 **hold 单 24 小时**。\n\n原因说明：百亿补贴订单因防黑灰产，平台会做订单安全检查，检查完成之前先不让发货（即 hold 单）。扫描到黑灰产订单后会进行关单；无风险订单在风控审核后解除 hold 单，商家即可正常发货（在物流同步界面右键订单重新同步）[1]。\n\n[图1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "120、淘宝平台物流同步报错：Remote service error物流订单不存在",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.9548
+        },
+        {
+          "n": 2,
+          "title": "设置 · 同步设置",
+          "heading": "1.【启用订单自动下载】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg3k7xqwrdlrhipi",
+          "score": 0.0304
+        },
+        {
+          "n": 3,
+          "title": "APP · 我的订单",
+          "heading": "二、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/app/xs2hp358sh0s6d8g",
+          "score": 0.0292
+        },
+        {
+          "n": 4,
+          "title": "设置 · 店铺授权有效期及注意事项",
+          "heading": "一、授权信息一览表",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wnivtny7e7ptk8wc",
+          "score": 0.0177
+        },
+        {
+          "n": 5,
+          "title": "设置 · 新订单递交流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/qv80kde88l8dz30c",
+          "score": 0.0161
+        }
+      ],
+      "retrieved_titles": [
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 同步设置",
+        "APP · 我的订单",
+        "设置 · 店铺授权有效期及注意事项",
+        "设置 · 新订单递交流程解析"
+      ],
+      "top_score": 0.9548,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与参考材料[1]中‘百亿补贴订单，最长会hold单24小时’的表述完全一致，且原因说明也来自同一材料。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-bom-batch-times",
+      "kind": "fact",
+      "q": "批量引用物料单保存之后，总生产次数会被算成几次？",
+      "answer": "批量引用物料单保存后，**无论引用时生产次数填写几次，都认为总生产次数为 1 次**。[1]\n\n注意：若引用的多个物料单生产次数相同，可在引用时填写 1 次，然后在生产开单界面把生产次数填写多次，方便进行分批生产。另外，一个物料清单可以多次使用。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "货品 · 物料清单",
+          "heading": "物料清单 › 3、【生产】",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/fx2cgg",
+          "score": 0.9855
+        },
+        {
+          "n": 2,
+          "title": "货品 · 快速生产操作流程",
+          "heading": "1、【生产开单】",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/umgrri",
+          "score": 0.5139
+        },
+        {
+          "n": 3,
+          "title": "货品 · 快速生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/umgrri",
+          "score": 0.5081
+        },
+        {
+          "n": 4,
+          "title": "货品 · 分步生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tayk4s",
+          "score": 0.5068
+        },
+        {
+          "n": 5,
+          "title": "货品 · 分步生产操作流程",
+          "heading": "1、【生产开单】",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tayk4s",
+          "score": 0.4803
+        }
+      ],
+      "retrieved_titles": [
+        "货品 · 物料清单",
+        "货品 · 快速生产操作流程",
+        "货品 · 快速生产操作流程",
+        "货品 · 分步生产操作流程",
+        "货品 · 分步生产操作流程"
+      ],
+      "top_score": 0.9855,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案直接引用材料[1]中的明确说明，批量引用物料单保存后总生产次数为1次，且补充内容也来自同一材料，完全有依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-production-import-required",
+      "kind": "fact",
+      "q": "生产单批量导入时，哪些字段是必填的？",
+      "answer": "生产单批量导入时，**必填字段**如下 [1][2]：\n\n1. **清单编号**：必填，对应物流清单编号；需校验是否能和系统中物流清单进行匹配\n2. **生产员**：必填；需校验是否存在对应生产员，不存在则导入后报错\n3. **生产方式**：必填，快速生产/分步生产；需校验枚举值是否正确，不正确则报错\n4. **生产次数**：必填\n5. **生产商**：必填，需校验生产商是否在系统中存在，不存在则报错\n\n**非必填字段**包括：出货仓库、入货仓库、生产费用合计（不填则默认取【物料清单的生产费用×生产次数】）、备注 [1][2]。\n\n**注意事项** [1][2]：\n- 导入后按照**清单编号、生产次数**匹配原料和成品，并按每一个清单编号生成一张**待审核**的生产单\n- 导入不做库存是否充足校验，直接导入成功即可\n- 生产日期受【设置-系统设置-货品设置-生产开单-生产日期默认为空】配置控制（不勾选则默认生产日期当天，勾选则生产日期为空）[1][2]\n\n操作位置：**货品-生产单管理**，点击新增导入按钮，支持导入、导出 excel 模板 [1][2]。\n\n另外，物料清单本身也支持批量导入，标红字段为必填项，建议先少量导入测试再批量操作 [3]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "货品 · 快速生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/umgrri",
+          "score": 0.9887
+        },
+        {
+          "n": 2,
+          "title": "货品 · 分步生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tayk4s",
+          "score": 0.9879
+        },
+        {
+          "n": 3,
+          "title": "货品 · 物料清单",
+          "heading": "物料清单 › 1、【功能描述】",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/fx2cgg",
+          "score": 0.8933
+        }
+      ],
+      "retrieved_titles": [
+        "货品 · 快速生产操作流程",
+        "货品 · 分步生产操作流程",
+        "货品 · 物料清单"
+      ],
+      "top_score": 0.9887,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案列出的必填和非必填字段及注意事项均与参考材料一致，未发现材料不支持的说法。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-production-cost-default",
+      "kind": "fact",
+      "q": "生产单导入时生产费用合计不填，系统默认取什么值？",
+      "answer": "生产单导入时，**生产费用合计**字段为**非必填**，若不填则系统默认取 **【物料清单的生产费用 × 生产次数】**。[1][2]\n\n另外补充一点：导入后系统会按照**清单编号、生产次数**匹配原料和成品，并按每一个清单编号生成一张**待审核**的生产单。导入不做库存是否充足校验，直接导入成功即可。[1][2]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "货品 · 分步生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tayk4s",
+          "score": 0.9402
+        },
+        {
+          "n": 2,
+          "title": "货品 · 快速生产操作流程",
+          "heading": "2、【生产单管理】 › 2.1、生产单据支持批量导入",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/umgrri",
+          "score": 0.9386
+        },
+        {
+          "n": 3,
+          "title": "采购 · 采购流程",
+          "heading": "三、更新优化 › 1、采购单管理界面使用采购单导入时，可以直接自动引用系统设置的默认价格，不需要填写采购价",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/upzw5p",
+          "score": 0.2185
+        }
+      ],
+      "retrieved_titles": [
+        "货品 · 分步生产操作流程",
+        "货品 · 快速生产操作流程",
+        "采购 · 采购流程"
+      ],
+      "top_score": 0.9402,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案直接引用材料，准确指出生产费用合计不填时默认取物料清单的生产费用×生产次数，并补充了匹配与生成规则，均有材料依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-fx-price-mapping",
+      "kind": "fact",
+      "q": "分销端从供销商复制货品到货品档案时，供销端的「分销价」对应分销端的哪个价格？",
+      "answer": "根据知识库内容，供销端的「分销价」对应分销端的**最低价**。\n\n具体对应关系如下 [1][2]：\n\n- **市场价** → 对应分销端的**市场价**\n- **分销价** → 对应分销端的**最低价**\n- **基础价** → 对应分销端的**零售价**（若供销端未开启基础价，则分销端对应的零售价默认为 0）[1]\n\n操作路径：在「分销-我是分销商-供销商管理」找到对应供销商，右键【查看供销商商品信息】，选中货品后点击【复制商品到我的货品档案】即可完成复制 [1][2]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "分销 · 旗舰版供销分销商品维护",
+          "heading": "二、分销端复制货品",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/mn9o2y",
+          "score": 0.9822
+        },
+        {
+          "n": 2,
+          "title": "分销 · 旗舰版供销-e快帮分销功能操作",
+          "heading": "1.旗舰版供销商端 › 2. 分销端/ekb操作",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/ez2u4h",
+          "score": 0.9574
+        },
+        {
+          "n": 3,
+          "title": "分销 · 旗舰版供销分销商品维护",
+          "heading": "一、供销端添加分销货品",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/mn9o2y",
+          "score": 0.9398
+        },
+        {
+          "n": 4,
+          "title": "分销 · 旗舰版供销分销商品维护",
+          "heading": "三、【1.5.3.1更新】无需做货品匹配数据直接推单给供销端",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/mn9o2y",
+          "score": 0.8502
+        }
+      ],
+      "retrieved_titles": [
+        "分销 · 旗舰版供销分销商品维护",
+        "分销 · 旗舰版供销-e快帮分销功能操作",
+        "分销 · 旗舰版供销分销商品维护",
+        "分销 · 旗舰版供销分销商品维护"
+      ],
+      "top_score": 0.9822,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确指出供销端分销价对应分销端最低价，且与材料[1][2]完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-fx-retail-zero",
+      "kind": "fact",
+      "q": "如果供销端没有开启基础价，分销端复制过来的零售价默认是多少？",
+      "answer": "根据检索到的知识库内容，关于\"供销端没有开启基础价时，分销端复制过来的零售价默认是多少\"这个问题，材料中并没有直接给出这个具体场景下的默认值说明。\n\n材料中涉及的相关信息是：\n\n- 通用价格设置中，基础价和固定价来源首次进入页面时需选择，可选字段来自单品列表（如零售价等）[1][2]。\n- 分销价计算公式为：N级分销价 = 固定加价 + 基础价×基础价折扣 + 固定价×固定价折扣；固定加价不填默认为0，折扣不填默认为1（不打折）[1][2]。\n- 分销端订单推送进入供销端时，订单详情中的总回款会根据分销货品映射的系统货品的零售价进行显示计算[5]。\n\n但关于\"供销端未开启基础价时，分销端复制过来的零售价默认是多少\"这一具体问题，知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "分销 · 通用价格/供销商品价格/特殊价格设置",
+          "heading": "一、通用价格设置",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tag39s",
+          "score": 0.9534
+        },
+        {
+          "n": 2,
+          "title": "分销 · 分销价格设置",
+          "heading": "一、通用价格设置",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/hi32sllngwngf350",
+          "score": 0.4402
+        },
+        {
+          "n": 3,
+          "title": "分销 · 通用价格/供销商品价格/特殊价格设置",
+          "heading": "三、特殊价格设置 › 1.使用场景",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tag39s",
+          "score": 0.424
+        },
+        {
+          "n": 4,
+          "title": "分销 · 旗舰版供销-企业版分销功能操作",
+          "heading": "一、旗舰版供销商端 › 3、生成合作码",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/sg0qm9",
+          "score": 0.3586
+        },
+        {
+          "n": 5,
+          "title": "分销 · 分销常见问题",
+          "heading": "Q:供销端中订单的金额显示问题以及订单优惠的计算",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/pfdlcy",
+          "score": 0.3196
+        }
+      ],
+      "retrieved_titles": [
+        "分销 · 通用价格/供销商品价格/特殊价格设置",
+        "分销 · 分销价格设置",
+        "分销 · 通用价格/供销商品价格/特殊价格设置",
+        "分销 · 旗舰版供销-企业版分销功能操作",
+        "分销 · 分销常见问题"
+      ],
+      "top_score": 0.9534,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确指出知识库中没有该具体场景的默认值说明，且所引用的相关材料均真实存在，未添加额外信息。",
+      "passed": false,
+      "fail_why": "判分：no_answer／答案明确指出知识库中没有该具体场景的默认值说明，且所引用的相关材料均真实存在，未添加额外信息。",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-print-batch-format",
+      "kind": "fact",
+      "q": "打印批次序号按物流类型排序后，序号的命名规则是什么？PC 端显示完整序号吗？",
+      "answer": "我来检索知识库中关于打印批次序号的相关内容。根据知识库内容，我来回答你的问题。\n\n## 打印批次序号按物流类型排序的命名规则\n\n**命名规则为 `x-n`**，其中：\n- **x**：当前打印批次中，该物流类型单据的序号\n- **n**：该物流类型在该批次的总单据数量\n\n例如（来源[1]）：\n\n| 物流公司 | 打印序号 |\n|---------|---------|\n| 拼多多-韵达 | 1-10 |\n| 京东-韵达 | 8-10 |\n| 拼多多-圆通 | 6-15 |\n| 淘宝-圆通 | 1-15 |\n| 抖音-韵达 | 10-10 |\n\n## PC 端是否显示完整序号？\n\n**PC 端不显示完整序号。** 具体说明如下（来源[1]）：\n\n- 只改变物流单上的打印序号为 `x-n`，PC 端不会按照物流类型改变页面显示的单据排列顺序\n- PC 端【打印批次序号】字段**仅显示 x，不显示 x-n**\n\n## 相关配置说明\n\n该功能仅针对**混合打印**的客户，配置位置为：**设置——仓储设置——销售出库打印**，勾选「打印批次序号按物流类型排序」，默认不开启。[1]\n\n另外注意：不清除打印批次时，打印批次序号数不变。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 销售出库打印",
+          "heading": "14.前置任意混合物流进行打印物流单，打印批次序号按物流类型维度进行重新排序展示",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/emi77iaq76f1ngzk",
+          "score": 0.9926
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 爆款订单拣货方式和功能说明",
+          "heading": "2、爆款拣货",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/syqls6",
+          "score": 0.3785
+        },
+        {
+          "n": 3,
+          "title": "设置 · 销售出库打印",
+          "heading": "10.【发货单、物流单货品排序方式】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/emi77iaq76f1ngzk",
+          "score": 0.3471
+        },
+        {
+          "n": 4,
+          "title": "设置 · 一筐一种单",
+          "heading": "二、逻辑说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/krni94wmz6r1u6g1",
+          "score": 0.1672
+        },
+        {
+          "n": 5,
+          "title": "设置 · 销售出库打印",
+          "heading": "11.【分拣单货品排序方式】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/emi77iaq76f1ngzk",
+          "score": 0.1183
+        },
+        {
+          "n": 6,
+          "title": "设置 · 系统本地条码模板设置及打印步骤",
+          "heading": "一、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pa5n73lidd77205c",
+          "score": 0.1996
+        },
+        {
+          "n": 7,
+          "title": "仓储 · 打印批次管理",
+          "heading": "1、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/vlnmd8bknkg2wn4m",
+          "score": 0.1482
+        },
+        {
+          "n": 8,
+          "title": "仓储 · 序列号溯源看板",
+          "heading": "一.操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qqlzkxgyk1m3i05l",
+          "score": 0.0941
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 销售出库打印",
+        "仓储 · 爆款订单拣货方式和功能说明",
+        "设置 · 销售出库打印",
+        "设置 · 一筐一种单",
+        "设置 · 销售出库打印",
+        "设置 · 系统本地条码模板设置及打印步骤",
+        "仓储 · 打印批次管理",
+        "仓储 · 序列号溯源看板"
+      ],
+      "top_score": 0.9926,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确概括了材料[1]中打印批次序号按物流类型排序的命名规则x-n及PC端仅显示x不显示x-n的说明，且未添加材料外内容。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-combo-ratio-schedule",
+      "kind": "fact",
+      "q": "组合装金额占比支持自动执行吗？什么时候执行？",
+      "answer": "支持自动执行。\n\n**执行时间：每天凌晨自动执行。**\n\n具体说明如下：\n\n1. 组合装金额占比支持每天凌晨自动执行（更新版本 1.5.5.1）[1]。\n2. 系统自动刷新**不记录组合装日志**，执行日志可查看「统计-系统日志」[1]。\n\n另外补充相关配置信息：\n\n- 该功能在「设置-系统设置-货品设置」中配置，**仅系统运行成本价为计划成本 & 加权平均时可选** [2]。\n- 当系统运行成本价为「个别计价法」时，不可使用该功能，此时同仓同一个 SKU 会有多个不同的价格，无法进行准确分摊 [2]。\n- 手动刷新方式：货品-组合装-选中组合装右键-「刷新固定售价和金额占比」（单次最多操作 3000 条）[2]。\n\n[图2]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "货品 · 组合装管理",
+          "heading": "5、更新优化 › 5.1组合装库存查询",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tnsoeg",
+          "score": 0.952
+        },
+        {
+          "n": 2,
+          "title": "设置 · 系统设置-货品设置",
+          "heading": "八、组合装金额占比计算取值 › （一）、功能设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/qwucmbuet47a1185",
+          "score": 0.8839
+        },
+        {
+          "n": 3,
+          "title": "设置 · 系统设置-货品设置",
+          "heading": "八、组合装金额占比计算取值 › （四）、举例",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/qwucmbuet47a1185",
+          "score": 0.8753
+        },
+        {
+          "n": 4,
+          "title": "货品 · 组合装管理",
+          "heading": "4、字段介绍 › 4.2刷新固定售价和金额占比",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tnsoeg",
+          "score": 0.789
+        }
+      ],
+      "retrieved_titles": [
+        "货品 · 组合装管理",
+        "设置 · 系统设置-货品设置",
+        "设置 · 系统设置-货品设置",
+        "货品 · 组合装管理"
+      ],
+      "top_score": 0.952,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答支持自动执行且每天凌晨执行，并引用了材料中关于版本、日志和配置限制的说明，均与参考材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-app-order-window",
+      "kind": "fact",
+      "q": "旺店助手 APP 的「我的订单」里，订单能显示多长时间？",
+      "answer": "根据知识库资料，旺店助手 APP 的「我的订单」中，订单显示时长限制如下：\n\n- 订单的显示通过订单日志中的**创建时间**进行限制，显示时长为 **480 小时**；超过此时间范围的订单不直接显示。[1]\n\n另外，该功能还有以下相关限制：\n\n- 只显示有权限的店铺订单。[1]\n- 订单的业务员是当前账号，且订单必须是**手工创建**的。[1]\n- 支持按【订单编号/原始单号/物流单号】批量查询，查询后不校验当前界面的搜索条件，直接按单号结果展示。[1]\n- 批量查询上限为 **500** 条，超过后提示「当前批量查询仅支持500内」。[1]\n\n[图1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "APP · 我的订单",
+          "heading": "二、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/app/xs2hp358sh0s6d8g",
+          "score": 0.4537
+        },
+        {
+          "n": 2,
+          "title": "APP · 订单处理进度",
+          "heading": "二、功能介绍​",
+          "url": "https://www.yuque.com/wdterpqjb/app/nb8d7fm76u4epkwv",
+          "score": 0.3835
+        },
+        {
+          "n": 3,
+          "title": "APP · 发货情况统计",
+          "heading": "二、功能介绍​",
+          "url": "https://www.yuque.com/wdterpqjb/app/skfriigw45k8fez5",
+          "score": 0.3261
+        },
+        {
+          "n": 4,
+          "title": "设置 · 设置物流资费",
+          "heading": "二、使用说明 › 2.3、物流资费支持预设和设置执行生效时间",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ixfbxq",
+          "score": 0.3229
+        },
+        {
+          "n": 5,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.1、淘宝 › 2.1.1 淘宝订购服务 › 旺店通erp的应用",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.2924
+        }
+      ],
+      "retrieved_titles": [
+        "APP · 我的订单",
+        "APP · 订单处理进度",
+        "APP · 发货情况统计",
+        "设置 · 设置物流资费",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程"
+      ],
+      "top_score": 0.4537,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确指出订单按创建时间显示480小时，且相关限制均来自材料[1]。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-app-query-limit",
+      "kind": "fact",
+      "q": "旺店助手 APP 批量查询单号，一次上限是多少条？",
+      "answer": "旺店助手 APP 批量查询单号的上限是 **500 条**。\n\n具体说明：\n- 批量查询上限跟 PC 端上限一致，上限数量为 **500**。\n- 超过 500 条时会提示：「当前批量查询仅支持500内，当前查询量XXX，请减少查询量后再进行搜索。」[1][2][3][4]\n- 该批量查询功能支持按照【订单编号/原始单号/物流单号】进行查询，查询后不校验当前界面的搜索条件，直接按单号搜索结果展示。[1][2][4]\n\n此功能在订单审核、我的订单、财务审核、订单查询等多个界面均适用，上限规则一致。[1][2][3][4]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "APP · 订单审核",
+          "heading": "三、功能说明 › 2、拆分、换货、添加赠品",
+          "url": "https://www.yuque.com/wdterpqjb/app/uvw5d0ufrtbxuslq",
+          "score": 0.9603
+        },
+        {
+          "n": 2,
+          "title": "APP · 我的订单",
+          "heading": "二、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/app/xs2hp358sh0s6d8g",
+          "score": 0.9569
+        },
+        {
+          "n": 3,
+          "title": "APP · 财务审核",
+          "heading": "三、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/app/wr8ghquah9evdzaa",
+          "score": 0.9457
+        },
+        {
+          "n": 4,
+          "title": "APP · 订单查询",
+          "heading": "三、功能说明 › 1、单个订单筛选",
+          "url": "https://www.yuque.com/wdterpqjb/app/cigdvb10wm7kd3un",
+          "score": 0.8689
+        },
+        {
+          "n": 5,
+          "title": "APP · 订单查询",
+          "heading": "三、功能说明 › 4、驳回审核 › ### 5.【订单】旺店助手APP增加预订单的处理",
+          "url": "https://www.yuque.com/wdterpqjb/app/cigdvb10wm7kd3un",
+          "score": 0.6663
+        }
+      ],
+      "retrieved_titles": [
+        "APP · 订单审核",
+        "APP · 我的订单",
+        "APP · 财务审核",
+        "APP · 订单查询",
+        "APP · 订单查询"
+      ],
+      "top_score": 0.9603,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与材料一致，多个材料均明确说明批量查询上限为500条。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-purchase-price-time",
+      "kind": "fact",
+      "q": "配置采购价执行时间时，开始执行时间可以填今天以前的日期吗？",
+      "answer": "不可以。\n\n配置采购价执行时间时，**开始执行时间不能小于当前日期**，否则保存时会报错。[1]\n\n具体规则如下：\n\n1. 在「采购-供应商货品」页面点击「配置采购价执行时间」，维护「新采购价、新折扣、新税率以及开始执行时间」四个字段。[1]\n2. **开始执行时间不能小于当前日期**，否则保存时报错。[1]\n3. 到开始执行日期后，系统会将「新采购价、新折扣、新税率」填充到供应商货品的「采购价、折扣、税率」字段，执行成功后会在配置弹窗中清除该货品。[1]\n\n另外，如果通过表格批量导入的方式配置，执行日期同样**不能小于当前时间**，且格式需符合 `yyyy/MM/dd`，否则会报错。[2][3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "采购 · 配置采购执行时间",
+          "heading": "3、功能详情",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/kdgnqw",
+          "score": 0.9474
+        },
+        {
+          "n": 2,
+          "title": "采购 · 新建供应商货品",
+          "heading": "三、升级优化 › 3.1【采购】【配置采购价执行时间，支持按表格批量导入新增/修改】",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/euqko8im5nf5x36v",
+          "score": 0.9416
+        },
+        {
+          "n": 3,
+          "title": "采购 · 配置采购执行时间",
+          "heading": "4..优化",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/kdgnqw",
+          "score": 0.9154
+        }
+      ],
+      "retrieved_titles": [
+        "采购 · 配置采购执行时间",
+        "采购 · 新建供应商货品",
+        "采购 · 配置采购执行时间"
+      ],
+      "top_score": 0.9474,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "材料明确说明开始执行时间不能小于当前日期，否则保存时报错，答案与材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-purchase-price-one",
+      "kind": "fact",
+      "q": "一个供应商货品能同时维护几个采购价执行时间？",
+      "answer": "一个供应商货品只能维护**一个**执行时间。[1]\n\n具体说明如下：\n\n1. 在「采购-供应商货品」页面，点击「配置采购价执行时间」功能（该功能受权限控制，需在「设置-安全设置-员工权限」处开启）[1]。\n2. 点击「添加货品」可添加不同供应商的货品，维护「新采购价、新折扣、新税率以及开始执行时间」四个字段，开始执行时间即为新价格执行的时间。[1]\n3. **一个供应商货品只能维护一个执行时间**，支持删除配置。[1]\n4. 开始执行时间不能小于当前日期，否则保存时报错；到开始执行日期后，系统会将新采购价、新折扣、新税率填充到供应商货品的对应字段，执行成功后自动清除该配置。[1]\n5. 支持按表格批量导入新增/修改（1.5.4.3版本起），导入时若已存在同供应商货品的执行规则，会提示「当前供应商货品已存在执行规则」。[2][3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "采购 · 配置采购执行时间",
+          "heading": "3、功能详情",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/kdgnqw",
+          "score": 0.9862
+        },
+        {
+          "n": 2,
+          "title": "采购 · 新建供应商货品",
+          "heading": "三、升级优化 › 3.1【采购】【配置采购价执行时间，支持按表格批量导入新增/修改】",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/euqko8im5nf5x36v",
+          "score": 0.8476
+        },
+        {
+          "n": 3,
+          "title": "采购 · 配置采购执行时间",
+          "heading": "4..优化",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/kdgnqw",
+          "score": 0.7641
+        },
+        {
+          "n": 4,
+          "title": "采购 · 配置采购执行时间",
+          "heading": "1、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/kdgnqw",
+          "score": 0.7018
+        }
+      ],
+      "retrieved_titles": [
+        "采购 · 配置采购执行时间",
+        "采购 · 新建供应商货品",
+        "采购 · 配置采购执行时间",
+        "采购 · 配置采购执行时间"
+      ],
+      "top_score": 0.9862,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确回答了一个供应商货品只能维护一个采购价执行时间，且所有具体细节均能在参考材料中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-reconcile-shipping-amount",
+      "kind": "fact",
+      "q": "平台对账里的「发货金额」包含哪些部分？",
+      "answer": "平台对账里的「发货金额」包含**货品金额和邮费**两部分。[1]\n\n具体解释为：订单发货后，对应原始订单的发货金额，包含货品金额和邮费。[1]\n\n另外补充一个相关公式供参考：**发货金额 - 退款金额 = 收支金额 = 平台账单的收入 - 支出**。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "账款 · 平台对账",
+          "heading": "二、平台对账 › 2、字段解释",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.9792
+        },
+        {
+          "n": 2,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.7474
+        },
+        {
+          "n": 3,
+          "title": "账款 · 平台对账",
+          "heading": "二、平台对账 › 1、对账方式",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.7001
+        },
+        {
+          "n": 4,
+          "title": "账款 · 抓取京东平台账单",
+          "heading": "三 功能说明 › 4.平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/uua33p",
+          "score": 0.5535
+        }
+      ],
+      "retrieved_titles": [
+        "账款 · 平台对账",
+        "账款 · 平台对账",
+        "账款 · 平台对账",
+        "账款 · 抓取京东平台账单"
+      ],
+      "top_score": 0.9792,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与参考材料一致，明确指出发货金额包含货品金额和邮费，补充公式也有依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-affair-sms-config",
+      "kind": "fact",
+      "q": "想让事务新建后短信提醒责任人，需要在哪里开配置？",
+      "answer": "在 **系统设置 → 事务设置** 中勾选【事务新建/转发，短信提醒责任人】即可。[1][2]\n\n具体说明：\n\n1. 进入 **系统设置 → 事务设置**。\n2. 勾选【事务新建/转发，短信提醒责任人】配置。\n3. 勾选后，事务新建/转发时会发送短信给事务选择的责任人；不勾选则不发送。[1]\n\n补充说明：\n- 这里的「责任人」不是创建事务的人，而是**处理事务的人**，默认为当前登录账号，可以自行修改。事务建成后会以短信形式通知选择的责任人，提示有一条事务待接收。[2]\n- 另外，如果勾选【事务新建/转发，邮件提醒抄送人】，则会以邮件形式通知抄送列表。[3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 系统设置-事务设置",
+          "heading": "3. 【事务新建/转发，短信提醒责任人】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/gm6bdxtb7g8umkmf",
+          "score": 0.9911
+        },
+        {
+          "n": 2,
+          "title": "事务 · 新建事务",
+          "heading": "一、操作流程",
+          "url": "https://www.yuque.com/wdterpqjb/shiwu/trxbcm",
+          "score": 0.973
+        },
+        {
+          "n": 3,
+          "title": "设置 · 系统设置-事务设置",
+          "heading": "4. 【事务新建/转发，邮件提醒抄送人】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/gm6bdxtb7g8umkmf",
+          "score": 0.9226
+        },
+        {
+          "n": 4,
+          "title": "事务 · 新建事务",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shiwu/trxbcm",
+          "score": 0.4301
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 系统设置-事务设置",
+        "事务 · 新建事务",
+        "设置 · 系统设置-事务设置",
+        "事务 · 新建事务"
+      ],
+      "top_score": 0.9911,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确指出在系统设置→事务设置中勾选【事务新建/转发，短信提醒责任人】，且补充内容均与参考材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-secure-login-policies",
+      "kind": "fact",
+      "q": "安全登录提供了几种登录 IP 限制策略？",
+      "answer": "旺店通旗舰版的安全登录提供了**四种登录 IP 限制策略**，通过 IP 白名单和账号白名单的不同组合方式实现 [1]：\n\n1. **任意IP可登录**：任意员工在任何地点均可登录，不受 IP 白名单和账号白名单限制，只要用户名和密码正确就可以登录 [1]。\n\n2. **白名单之外需动态口令（账号白名单不限）**：除了 IP 白名单和账号白名单之外，其他员工在公司以外登录时，需要填写正确的动态口令才可以登录 [1]。\n\n3. **只允许IP白名单（账号白名单不限）**：员工只能在公司（IP 白名单）内登录，不在 IP 白名单网段内则不可登录；但账号白名单不受 IP 白名单影响，在任意地点都可以登录 [1]。\n\n4. **IP白名单之外需动态口令（仅限账号白名单）**：对第三种方式的限定，非账号白名单的员工账号在公司以外地点均不可登录；账号白名单内的账户在公司外登录时需要添加动态口令验证 [1]。\n\n**注意事项**：\n- 只有 **admin 账号（账户管理员）** 有权限修改登录 IP 限制策略，其他员工没有此权限 [2][4]。\n- admin 作为管理员拥有至高无上的权限，不受任何限制，也不需要输入动态口令，因此管理员账户密码非常重要，一定要做好保护措施 [2][4]。\n- 如果启用了 IP 白名单，请注意保证电脑 IP 地址的固定 [5]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 安全登录",
+          "heading": "四、动态口令 › 问题5：不同的公司有不同的需要，如何满足不同公司的需求呢？",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dopidwggetnwflq7",
+          "score": 0.9875
+        },
+        {
+          "n": 2,
+          "title": "设置 · 安全登录",
+          "heading": "二、安全登录 › 1、登录限制",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dopidwggetnwflq7",
+          "score": 0.9567
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · ERP登录常见报错",
+          "heading": "13、Q：登录账号提示：登录IP限制：------，请联系管理员",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ygtw01uwakduhviq",
+          "score": 0.8073
+        },
+        {
+          "n": 4,
+          "title": "设置 · 安全登录",
+          "heading": "四、动态口令 › 追问2：什么是IP白名单？",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dopidwggetnwflq7",
+          "score": 0.7292
+        },
+        {
+          "n": 5,
+          "title": "设置 · 安全登录",
+          "heading": "一、特殊字段",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dopidwggetnwflq7",
+          "score": 0.7089
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 安全登录",
+        "设置 · 安全登录",
+        "📒常见问题库 · ERP登录常见报错",
+        "设置 · 安全登录",
+        "设置 · 安全登录"
+      ],
+      "top_score": 0.9875,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了四种登录IP限制策略，且各策略描述和注意事项均能在参考材料中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-jd-waybill-template",
+      "kind": "fact",
+      "q": "京东电子面单模板怎么设置？",
+      "answer": "关于京东电子面单模板的设置，知识库中有以下内容：\n\n**京东面单模板设置步骤：**\n\n1. 登录京东模板后台设置网址，需要登录京东主账号进行设置：`https://template-design.jd.com/#/home/customs` [4]\n\n2. 在系统内设置模板后，回到系统界面进行下载，选择模板使用的物流保存，模板即可使用。[1]\n\n**京东物流单 logo 打印开启/关闭设置：**\n\n京东：打印机-打印选项-选择打印机-调整配置-保存 [2]\n\n**注意事项：**\n\n- 获取面单号这个配置只会引用寄件人和联系电话，不引用发货地址，发货地址是按照物流引用的网点地址去使用的。[3]\n- 全局配置适用于所有物流，按物流配置的优先级高于全局设置。[3]\n\n---\n\n关于京东电子面单模板在旺店通系统内的具体创建入口（如「设置-打印设置-物流单」中如何找到京东模板），知识库中主要给出的是得物品牌直发的模板设置路径，京东的具体系统内操作入口材料中没有详细说明。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 得物品牌直发电子面单模板设置",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/zenhk8o7640uv31q",
+          "score": 0.9391
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "A3.8：设置开机自启动组件，如开启后未自动启动，按以下流程排查 › 七、打印效果调整 › Q7：物流单logo打印开启/关闭如何设置",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.844
+        },
+        {
+          "n": 3,
+          "title": "设置 · 修改物流单发件人信息操作方式",
+          "heading": "一、线上模板修改发件人信息",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lp31i6",
+          "score": 0.8403
+        },
+        {
+          "n": 4,
+          "title": "设置 · 京东面单模板设置步骤",
+          "heading": "1.登录网址",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/glc644",
+          "score": 0.8386
+        },
+        {
+          "n": 5,
+          "title": "设置 · 爱库存电子面单对接及模板设置",
+          "heading": "六、更新优化 › 【1.5.3.1】版本",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dpgb9w5vygxfd94v",
+          "score": 0.8362
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 得物品牌直发电子面单模板设置",
+        "📒常见问题库 · 打印相关问题",
+        "设置 · 修改物流单发件人信息操作方式",
+        "设置 · 京东面单模板设置步骤",
+        "设置 · 爱库存电子面单对接及模板设置"
+      ],
+      "top_score": 0.9391,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "partial",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案提供了京东模板后台网址、logo开关设置及注意事项，但未完整回答京东电子面单模板在系统内的具体设置流程，且引用的保存步骤来自得物而非京东专用，属于部分回答。",
+      "passed": false,
+      "fail_why": "判分：partial／答案提供了京东模板后台网址、logo开关设置及注意事项，但未完整回答京东电子面单模板在系统内的具体设置流程，且引用的保存步骤来自得物而非京东专用，属于部分回答。",
+      "context_chars": 0
+    },
+    {
+      "id": "fact-jd-wdt-side-steps",
+      "kind": "fact",
+      "q": "京东云模板下载到旺店通之后，怎么和系统里的物流建立对应关系？",
+      "answer": "我先检索一下知识库中关于京东云模板与物流对应关系的相关内容。关于京东云模板下载后与系统物流建立对应关系，知识库中检索到的相关内容如下：\n\n**京东平台物流对应关系**\n\n京东平台对应的是**京东无界物流类型**。在设置物流时，需要设置主物流，操作位置在：**设置→基本设置→物流**。[6]\n\n物流设置界面增加主物流下拉选项（所有物流名称），物流界面增加展示主物流字段。注意：\n- ①选择的主物流必须和该物流的物流类别相对应；\n- ②已经是其他物流的主物流，不能再选择其他物流为主物流；\n- ③主物流的主物流字段为自己（系统默认）。[6]\n\n**平台和物流对应关系**中明确：**京东平台 - 京东无界物流类型**。[6]\n\n**关于模板下载与物流映射**\n\n知识库中关于「模板下载后与系统物流建立对应关系」的具体操作，材料里提到的是通过**店铺界面下载物流公司**来检查映射关系，例如：\n\n> 旺店通内设置—基本设置—店铺界面，选中店铺点【下载物流公司】，下载检查物流公司映射关系正确，保存。[3][4][5]\n\n不过，这几条来源分别针对的是速卖通、拼多多、凡科商城等平台，**并非专门针对京东云模板**。关于京东云模板下载后与系统物流建立对应关系的具体操作步骤，知识库中暂无此内容。\n\n如果你能补充一下具体是哪个平台/模板（比如京东云模板的具体名称），我可以再帮你精确检索。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "二、【旺店通ERP内操作】 › ERP新增物流设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.9618
+        },
+        {
+          "n": 2,
+          "title": "设置 · 美团医药电子面单操作手册",
+          "heading": "二、设置打印模板",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/tk2lcdsmuocactl5",
+          "score": 0.9559
+        },
+        {
+          "n": 3,
+          "title": "设置 · 速卖通店铺对接",
+          "heading": "四、物流映射 旺店通内设置—基本设置—店铺界面，选中店铺点【下载物流公司】，下载检查物流公司映射关系正确，保存。",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/kfnpgw8n7sehn9yb",
+          "score": 0.9336
+        },
+        {
+          "n": 4,
+          "title": "设置 · 拼多多店铺授权步骤",
+          "heading": "四、物流映射",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ae7nqwzbhrwuzp38",
+          "score": 0.9213
+        },
+        {
+          "n": 5,
+          "title": "设置 · 微信连接器-凡科商城",
+          "heading": "三、物流映射",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hhphrrenpd5zuorz",
+          "score": 0.9203
+        },
+        {
+          "n": 6,
+          "title": "设置 · 流程图中选物流条件说明",
+          "heading": "12、按平台类型选物流（需要设置主物流）",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xnw0ln",
+          "score": 0.7631
+        },
+        {
+          "n": 7,
+          "title": "分销 · 旺店通奇门分销自助对接流程",
+          "heading": "五、对接流程及注意事项 › 注意事项 › 二、物流 › 1、物流发货回传",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nozx98ggn227fn50",
+          "score": 0.7188
+        },
+        {
+          "n": 8,
+          "title": "设置 · 物流匹配",
+          "heading": "一、功能描述",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wefo7hzdg8p3udw5",
+          "score": 0.4234
+        },
+        {
+          "n": 9,
+          "title": "设置 · 物流匹配",
+          "heading": "二、操作流程 › 1、按设置方式选择物流匹配规则",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wefo7hzdg8p3udw5",
+          "score": 0.3748
+        },
+        {
+          "n": 10,
+          "title": "分销 · 分销物流资费",
+          "heading": "二 功能说明 › 4.【1.5.1.1】版本更新--支持供销商把物流资费模版同步给分销商，分销商通过模板里的物流去查看预估邮费并指定物流",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/btkip6",
+          "score": 0.2376
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 小红书面单模板设置",
+        "设置 · 美团医药电子面单操作手册",
+        "设置 · 速卖通店铺对接",
+        "设置 · 拼多多店铺授权步骤",
+        "设置 · 微信连接器-凡科商城",
+        "设置 · 流程图中选物流条件说明",
+        "分销 · 旺店通奇门分销自助对接流程",
+        "设置 · 物流匹配",
+        "设置 · 物流匹配",
+        "分销 · 分销物流资费"
+      ],
+      "top_score": 0.9618,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "模板类型"
+      ],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确表示知识库中暂无京东云模板下载后建立物流对应关系的具体操作步骤，只是引用了相关平台映射和主物流设置，未给出直接回答。",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['模板类型']",
+      "context_chars": 0
+    },
+    {
+      "id": "none-annual-meeting",
+      "kind": "no_answer",
+      "q": "公司今年的年会在哪里开？",
+      "answer": "我先检索一下知识库，看看有没有相关信息。我查到的知识库内容是旺店通旗舰版 ERP 的操作说明（拣货登记、企业公告等），与公司年会地点无关。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "仓储 · 拣货登记",
+          "heading": "一、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/irb8fvfbrbiycbm5",
+          "score": 0.0065
+        },
+        {
+          "n": 2,
+          "title": "事务 · 企业公告",
+          "heading": "2、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/shiwu/ot63zf",
+          "score": 0.0062
+        }
+      ],
+      "retrieved_titles": [
+        "仓储 · 拣货登记",
+        "事务 · 企业公告"
+      ],
+      "top_score": 0.0065,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-stock-code",
+      "kind": "no_answer",
+      "q": "旺店通的母公司慧策的股票代码是多少？",
+      "answer": "我检索了知识库中关于\"慧策 股票代码 母公司\"的内容，检索到的材料都是关于慧策客服通、慧策账号授权、慧策技术中台等产品功能相关的信息，没有涉及慧策公司的股票代码或上市信息。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "分销 · 供销端按分销商维度设置员工权限",
+          "heading": "（1.4.13及以上版本功能）",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/sbgmdn",
+          "score": 0.1182
+        },
+        {
+          "n": 2,
+          "title": "平台事项 · ✍️ 旗舰版【慧策客服通】千牛插件操作指引",
+          "heading": "一、订购服务",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/ry9avp",
+          "score": 0.0443
+        },
+        {
+          "n": 3,
+          "title": "🤨其它 · 旗舰版授权码获取步骤",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/other/hqa61lzu7lwgfdwe",
+          "score": 0.0395
+        },
+        {
+          "n": 4,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 2、界面按钮说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.0114
+        }
+      ],
+      "retrieved_titles": [
+        "分销 · 供销端按分销商维度设置员工权限",
+        "平台事项 · ✍️ 旗舰版【慧策客服通】千牛插件操作指引",
+        "🤨其它 · 旗舰版授权码获取步骤",
+        "设置 · 物流停发区域"
+      ],
+      "top_score": 0.1182,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-payroll",
+      "kind": "no_answer",
+      "q": "怎么在旺店通里给员工发工资条？",
+      "answer": "我先检索一下知识库，看看有没有相关内容。我检索了知识库中关于「员工工资条」「工资条发放」的内容，检索到的材料涉及发票样例、打印批次管理、动态口令、成本权限管控、分销充值、发货单打印等，均与「给员工发工资条」无关。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "账款 · 国补开票操作手册",
+          "heading": "发票样例展示",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/ytfg1s8x6x94q6wl",
+          "score": 0.079
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 打印批次管理",
+          "heading": "2、新增界面-打印批次管理",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/vlnmd8bknkg2wn4m",
+          "score": 0.0229
+        },
+        {
+          "n": 3,
+          "title": "设置 · 安全登录",
+          "heading": "四、动态口令 › 追问1：扫描条形码和输入提供的密钥在哪里可以找到呢？",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/dopidwggetnwflq7",
+          "score": 0.0218
+        },
+        {
+          "n": 4,
+          "title": "账款 · 【账款】成本价相关优化",
+          "heading": "四、成本价、金额等字段支持权限管控",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/mzb5ggxzltzah5zl",
+          "score": 0.0197
+        },
+        {
+          "n": 5,
+          "title": "分销 · 分销账款--供销充值",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/mtnmg3",
+          "score": 0.0188
+        },
+        {
+          "n": 6,
+          "title": "分销 · 分销账款--分销充值",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/wcfg0tfvpnf4urq4",
+          "score": 0.0195
+        },
+        {
+          "n": 7,
+          "title": "设置 · 系统打印模板设置及打印位置",
+          "heading": "1.打印【发货单】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nlmwnstk1x4ggaca",
+          "score": 0.0161
+        },
+        {
+          "n": 8,
+          "title": "设置 · 销售出库打印",
+          "heading": "15.单据打印支持按页面订单顺序打印发货单（1.6.0.1）",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/emi77iaq76f1ngzk",
+          "score": 0.0122
+        }
+      ],
+      "retrieved_titles": [
+        "账款 · 国补开票操作手册",
+        "仓储 · 打印批次管理",
+        "设置 · 安全登录",
+        "账款 · 【账款】成本价相关优化",
+        "分销 · 分销账款--供销充值",
+        "分销 · 分销账款--分销充值",
+        "设置 · 系统打印模板设置及打印位置",
+        "设置 · 销售出库打印"
+      ],
+      "top_score": 0.079,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-price-usd",
+      "kind": "no_answer",
+      "q": "旗舰版 ERP 的年费是多少美元？",
+      "answer": "知识库中检索到的内容是关于各电商平台（淘宝、京东、抖音、拼多多等）的**平台授权费/订购服务费**，例如抖音平台「旺店通ERP」为 2000 元/年，京东为 1000 元/年等，这些是各平台服务市场的订购费用，并非旗舰版 ERP 产品的年费。\n\n关于「旗舰版 ERP 的年费是多少美元」这一具体问题，知识库中未检索到相关定价信息。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "平台事项 · 返款汇总",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/zfg543lfftwhra1p",
+          "score": 0.2058
+        },
+        {
+          "n": 2,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.7抖音（放心购）",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.1448
+        },
+        {
+          "n": 3,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.2京东",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0544
+        },
+        {
+          "n": 4,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.10微盟",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0342
+        }
+      ],
+      "retrieved_titles": [
+        "平台事项 · 返款汇总",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程"
+      ],
+      "top_score": 0.2058,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-sap-connector",
+      "kind": "no_answer",
+      "q": "旺店通和 SAP 的标准对接方案是怎样的？",
+      "answer": "我先检索一下知识库中关于旺店通与 SAP 对接的内容。我检索了知识库，但需要说明一下检索结果的情况。\n\n我查到的内容主要是关于旺店通与**京东、抖音、达令家、微信视频号、称重机**等平台的对接，以及**旺店通奇门分销**（旺店通作为 WMS 对接上游分销商 OMS）的对接流程，**并没有检索到旺店通与 SAP 的标准对接方案**。\n\n知识库中与「对接」相关、可能对你有参考价值的内容如下：\n\n- **奇门分销对接**：旺店通供应商作为 WMS（仓储发货系统）对接上游分销商 OMS（订单管理系统），上游分销商 OMS 可推送发货单至下游供销商进行系统发货，整体适配旺店通分销流程，其它对接方式供销平台暂不支持。若为自研系统，需提前和客户沟通按旺店通&奇门标准进行对接，否则无法进行对接。[9]\n- **对接前准备**：外部 ERP 分销商需拿到旺店通 WMSAppKey（=23381383）后向客服申请，在奇门后台向旺店通发起合作申请；并注册供销平台账号。[6]\n- **版本要求**：旗舰版供销商用户需升级到 1.4.0.2 版本及以上（包含 1.4.0.2 版本），否则双方数据无法互通。[8]\n\n知识库暂无此内容（关于旺店通与 SAP 的标准对接方案）。\n\n如果你需要的是旺店通与 SAP 的对接，建议你补充说明具体需求（例如是订单、库存还是财务数据对接），我可以帮你进一步确认知识库里是否有相关方案。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 京东定制中心-授权对接文档",
+          "heading": "一、对接进度一览",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/inee4k4et9vngib0",
+          "score": 0.1114
+        },
+        {
+          "n": 2,
+          "title": "设置 · 抖音平台-厂家代打平台对接步骤",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lnsqib",
+          "score": 0.0881
+        },
+        {
+          "n": 3,
+          "title": "设置 · 称重机对接说明",
+          "heading": "1.ERP支持的称重机",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lgw78u",
+          "score": 0.0872
+        },
+        {
+          "n": 4,
+          "title": "设置 · 微信视频号对接步骤",
+          "heading": "授权流程 › 3、对接常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/en5krz",
+          "score": 0.0304
+        },
+        {
+          "n": 5,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "二、对接流程以及注意事项 › 外部ERP分销商 › 4.维护基础资料 › 1.商品资料",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.028
+        },
+        {
+          "n": 6,
+          "title": "分销 · 旺店通奇门分销自助对接流程",
+          "heading": "四、对接前准备",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nozx98ggn227fn50",
+          "score": 0.9553
+        },
+        {
+          "n": 7,
+          "title": "设置 · 达令家店铺对接步骤与配置信息",
+          "heading": "一、对接步骤 › 第一步：新建店铺",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fl8g2b",
+          "score": 0.9498
+        },
+        {
+          "n": 8,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备 › 旺店通供销商",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.94
+        },
+        {
+          "n": 9,
+          "title": "分销 · 旺店通奇门分销自助对接流程",
+          "heading": "一、前言说明",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nozx98ggn227fn50",
+          "score": 0.9264
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 京东定制中心-授权对接文档",
+        "设置 · 抖音平台-厂家代打平台对接步骤",
+        "设置 · 称重机对接说明",
+        "设置 · 微信视频号对接步骤",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 旺店通奇门分销自助对接流程",
+        "设置 · 达令家店铺对接步骤与配置信息",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 旺店通奇门分销自助对接流程"
+      ],
+      "top_score": 0.1114,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案明确表示知识库中暂无旺店通与SAP的标准对接方案，所列举的相关内容均来自参考材料，未虚构信息。",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 0
+    },
+    {
+      "id": "none-mysql-backup",
+      "kind": "no_answer",
+      "q": "旗舰版 ERP 的数据库是 MySQL 还是 SQL Server，怎么手动备份？",
+      "answer": "我先检索一下知识库中关于数据库类型和备份的相关内容。我检索了知识库中关于数据库类型和手动备份的内容，但检索到的材料都是关于平台对接、仓库绩效、物流追踪、称重机对接、分销操作、客户端安装包等主题，没有涉及旗舰版 ERP 的数据库类型（MySQL 或 SQL Server）以及手动备份方法的相关内容。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 抖音平台-厂家代打平台对接步骤",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lnsqib",
+          "score": 0.3031
+        },
+        {
+          "n": 2,
+          "title": "设置 · 仓库绩效策略",
+          "heading": "1、介绍",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wdrtgr",
+          "score": 0.1647
+        },
+        {
+          "n": 3,
+          "title": "😁统计 · 物流追踪授权方式介绍",
+          "heading": "功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/tongji/xdk60ebh1117gwyr",
+          "score": 0.1461
+        },
+        {
+          "n": 4,
+          "title": "设置 · 内仓销售出库指定批次",
+          "heading": "二、适用客户群体",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ywawt8b480z1vfxn",
+          "score": 0.0939
+        },
+        {
+          "n": 5,
+          "title": "设置 · 称重机对接说明",
+          "heading": "1.ERP支持的称重机",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lgw78u",
+          "score": 0.091
+        },
+        {
+          "n": 6,
+          "title": "分销 · 旗舰版供销-e快帮分销功能操作",
+          "heading": "1.旗舰版供销商端 › 2. 分销端/ekb操作",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/ez2u4h",
+          "score": 0.7468
+        },
+        {
+          "n": 7,
+          "title": "设置 · 得物对接仓内实物库存操作手册",
+          "heading": "erp配置流程以及操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pq87194ke29vcazs",
+          "score": 0.4632
+        },
+        {
+          "n": 8,
+          "title": "🤨其它 · 💻旗舰版客户端安装包",
+          "heading": "ERP 客户端-直接扫码登录后下载",
+          "url": "https://www.yuque.com/wdterpqjb/other/deinz0",
+          "score": 0.2267
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 抖音平台-厂家代打平台对接步骤",
+        "设置 · 仓库绩效策略",
+        "😁统计 · 物流追踪授权方式介绍",
+        "设置 · 内仓销售出库指定批次",
+        "设置 · 称重机对接说明",
+        "分销 · 旗舰版供销-e快帮分销功能操作",
+        "设置 · 得物对接仓内实物库存操作手册",
+        "🤨其它 · 💻旗舰版客户端安装包"
+      ],
+      "top_score": 0.3031,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-shopify",
+      "kind": "no_answer",
+      "q": "Shopify 店铺怎么对接旺店通？",
+      "answer": "我先检索一下知识库中关于 Shopify 对接的内容。我检索到的知识库内容是关于达令家、京东定制中心、每日一淘、外部ERP分销商、招商银行掌上生活等平台的对接，**没有**关于 Shopify 店铺对接旺店通的具体内容。\n\n知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 达令家店铺对接步骤与配置信息",
+          "heading": "一、对接步骤 › 第一步：新建店铺",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fl8g2b",
+          "score": 0.9939
+        },
+        {
+          "n": 2,
+          "title": "设置 · 京东定制中心-授权对接文档",
+          "heading": "一、对接进度一览",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/inee4k4et9vngib0",
+          "score": 0.965
+        },
+        {
+          "n": 3,
+          "title": "设置 · 每日一淘店铺对接步骤与配置信息",
+          "heading": "二、对接常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/cpvp3y",
+          "score": 0.9533
+        },
+        {
+          "n": 4,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备 › 旺店通供销商",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.9496
+        },
+        {
+          "n": 5,
+          "title": "设置 · 招商银行掌上生活",
+          "heading": "三、物流映射",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/tgq6na0dhl2gflw1",
+          "score": 0.9378
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 达令家店铺对接步骤与配置信息",
+        "设置 · 京东定制中心-授权对接文档",
+        "设置 · 每日一淘店铺对接步骤与配置信息",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "设置 · 招商银行掌上生活"
+      ],
+      "top_score": 0.9939,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "none-hr-attendance",
+      "kind": "no_answer",
+      "q": "系统里怎么做仓库人员的考勤打卡？",
+      "answer": "我检索了知识库中关于\"仓库人员考勤打卡\"的内容，但查到的材料主要涉及**仓库绩效策略、绩效对比、拣货登记、巡仓补货**等功能，并没有找到关于\"考勤打卡\"的专门功能说明。\n\n知识库暂无此内容。\n\n如果您想了解的是仓库人员的**绩效管理**（如积分、绩效对比、拣货登记等），我可以为您详细说明相关功能；如果是其他需求，也欢迎进一步说明。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 仓库绩效策略",
+          "heading": "4、积分方式说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wdrtgr",
+          "score": 0.1008
+        },
+        {
+          "n": 2,
+          "title": "设置 · 仓储绩效优化",
+          "heading": "三 功能说明 › （2）绩效对比",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rr9iz9",
+          "score": 0.0871
+        },
+        {
+          "n": 3,
+          "title": "设置 · 仓储绩效优化",
+          "heading": "一 使用场景",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rr9iz9",
+          "score": 0.0644
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 拣货登记",
+          "heading": "一、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/irb8fvfbrbiycbm5",
+          "score": 0.0409
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 巡仓补货",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/fzrbqx",
+          "score": 0.0321
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 仓库绩效策略",
+        "设置 · 仓储绩效优化",
+        "设置 · 仓储绩效优化",
+        "仓储 · 拣货登记",
+        "仓储 · 巡仓补货"
+      ],
+      "top_score": 0.1008,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "probe-colloquial-waybill",
+      "kind": "probe",
+      "q": "面单老是打歪，往上跑，这个偏移量在哪儿调啊？",
+      "answer": "我先检索一下知识库，看看面单偏移量在哪里调整。面单打歪、往上跑，属于打印偏移问题。偏移量调整的位置取决于你用的是哪个平台的打印组件，具体如下：\n\n**各平台打印组件调整偏移的位置：**\n\n- **拼多多**：打印机-打印选项-选择打印用的打印机-根据实际情况调整偏移-确定 [1][3]\n- **菜鸟**：打印机-打印机配置-选择要调整的打印机-调整偏移量-点击确认 [1][3]\n- **京东**：打印机-打印机选项-选择打印用的打印机-调节偏移-点击确认 [1][3]\n- **快手**：打印机-打印机设置-选择要调整的打印机-调整完偏移后保存 [1][3]\n- **唯品会**：打印机偏移量进行调整-保存配置 [1][3]\n- **抖音**：打印机-打印选项-选择打印机-调整完偏移后保存 [1][3]\n\n**调整方向提示：** 面单往哪边偏移，就往对应的反方向调整。比如往上跑，就往反方向（下）调。[2][3]\n\n**另外两种情况：**\n\n1. **如果是线下模板（非平台组件）**：在 ERP 内「设置-打印设置-物流单-选择偏移的模板-点击打印机偏移-找到对应的打印机-往哪边偏移调整对应的反方向-保存」[2]\n\n2. **如果只是某些单子偏移、某些单子不偏移**：属于模板打印项位置问题，不是打印机偏移。调整云模板设置，添加的自定义打印项不要靠左边，向右偏移 2 毫米左右；调整后系统更新模板，再到单据打印界面清除模板缓存。[1]\n\n---\n\n需要确认一下：你用的是哪个平台的打印组件（拼多多/菜鸟/京东/快手/抖音/唯品会）？这样我可以给你更精确的路径。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "A3.8：设置开机自启动组件，如开启后未自动启动，按以下流程排查 › 七、打印效果调整 › Q3：面单信息打印不全（侧面或者上下面缺失）如何调整？",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.9958
+        },
+        {
+          "n": 2,
+          "title": "设置 · 各平台打印偏移调整位置",
+          "heading": "前言 › 线下模版",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ggbt18",
+          "score": 0.902
+        },
+        {
+          "n": 3,
+          "title": "设置 · 各平台打印偏移调整位置",
+          "heading": "前言",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ggbt18",
+          "score": 0.8139
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "A3.8：设置开机自启动组件，如开启后未自动启动，按以下流程排查 › 七、打印效果调整 › Q1：面单重复打印、漏打、如何排查？",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.1963
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "A3.8：设置开机自启动组件，如开启后未自动启动，按以下流程排查 › 七、打印效果调整 › Q7：物流单logo打印开启/关闭如何设置",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.1514
+        },
+        {
+          "n": 6,
+          "title": "仓储 · 移位流程",
+          "heading": "一 .操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/nn46h7",
+          "score": 0.0644
+        }
+      ],
+      "retrieved_titles": [
+        "📒常见问题库 · 打印相关问题",
+        "设置 · 各平台打印偏移调整位置",
+        "设置 · 各平台打印偏移调整位置",
+        "📒常见问题库 · 打印相关问题",
+        "📒常见问题库 · 打印相关问题",
+        "仓储 · 移位流程"
+      ],
+      "top_score": 0.9958,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确汇总了各平台偏移调整位置和反方向调整原则，与参考材料一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "probe-vague-stopzone",
+      "kind": "probe",
+      "q": "有些偏远地区快递根本到不了，能不能在系统里按省市区限制这些地方不允许发货？",
+      "answer": "我先检索一下知识库，看看系统是否支持按省市区限制发货。可以的，系统支持按省市区限制发货，主要通过「物流停发区域」策略来实现。具体如下：\n\n**1. 物流停发区域（推荐方式）**\n\n在「设置–物流停发区域」中维护停发地址，更新停发区域即可，不需要修改流程。[6]\n\n- 目前只有【按地址选物流】流程块受【物流停发区域】策略限制。[6]\n- 在订单审核时校验省市区是否在所选物流的停发区域中，如果在的话，无论自动审核还是人工手动审核都会失败，报错\"订单地址在XXX的停发区域中\"，强制审核可以成功。[6]\n- 强制审核密码如果忘记，可以在「设置–系统设置–订单设置」界面修改保存。[6]\n\n[图5]\n\n**2. 阻止审核设置（按条件拦截）**\n\n在「设置–阻止审核设置方式」中，可以用订单条件限制店铺、仓库以及地区，例如\"河北区域阻止审核\"。[9]\n\n[图9]\n\n**3. 偏远地区物流不送（拼多多专用）**\n\n如果希望对拼多多的偏远地区订单进行可发校验，可以在「订单审核–阻止审核流程图」中拖用\"偏远地区物流不送\"判断流程块，并同时拖用\"是\"流程块。此时会对拼多多平台的偏远地区订单进行判断，如果该订单目前所选的物流不在拼多多接口信息提示的可发物流中，将对该订单进行阻止审核。[1]\n\n**注意事项：**\n- 如果之前没有调整过流程，建议联系实施协助修改。[9]\n- 另外，物流商本身也可能因地域限制无法收寄（如\"因收寄管控，该订单无法收寄\"报错），这类情况需要联系物流商确认是否可以解除管控，或更换其他支持该地区收寄的物流商。[2]\n\n关于「阻止审核设置」中是否支持按省市区精确到区级来限制，材料里主要提到的是按地区（如河北区域）设置，具体到区级的粒度材料里没有明确说明。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 阻止审核设置方式",
+          "heading": "二、使用方法 › 2.2、属性块介绍",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ukdyb7kmbopndxck",
+          "score": 0.4318
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 获取单号常见报错及解决方案",
+          "heading": "250、因收寄管控，该订单无法收寄【可联系物流商咨询详情或更换其他物流商打单发货】",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/gkhqdi3qii9oa83g",
+          "score": 0.0956
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 获取面单号常见报错及解决方案",
+          "heading": "27、Q:京东快递获取单号报错“超增值服务范围”",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/smbh33",
+          "score": 0.0708
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 获取单号常见报错及解决方案",
+          "heading": "27、Q:京东快递获取单号报错“超增值服务范围”",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/gkhqdi3qii9oa83g",
+          "score": 0.0618
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 获取单号常见报错及解决方案",
+          "heading": "79、Q：拼多多返回信息：业务服务错误1:尊敬的客户，您好！因当前流向件量激增，为更好地保障您的寄件体验，暂不提供此产品寄递服务，您可选择其他产品寄递，带来不便请您理解。",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/gkhqdi3qii9oa83g",
+          "score": 0.0601
+        },
+        {
+          "n": 6,
+          "title": "设置 · 物流停发区域",
+          "heading": "二、使用说明 › 4、影响范围",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rlhg8c",
+          "score": 0.6534
+        },
+        {
+          "n": 7,
+          "title": "设置 · 订单审核",
+          "heading": "6.【阻止省市区与详细地址冲突的订单通过审核】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mh1dfa6ob6k9dglb",
+          "score": 0.2686
+        },
+        {
+          "n": 8,
+          "title": "设置 · 订单审核",
+          "heading": "5.【阻止订单地址省市区与系统不匹配通过审核】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mh1dfa6ob6k9dglb",
+          "score": 0.1426
+        },
+        {
+          "n": 9,
+          "title": "设置 · 阻止审核设置方式",
+          "heading": "二、使用方法 › 2.3、举例设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ukdyb7kmbopndxck",
+          "score": 0.1044
+        },
+        {
+          "n": 10,
+          "title": "设置 · 称重",
+          "heading": "10.【重量超过物流公司重量上限禁止通过称重和发货】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/bilhok02bpytparz",
+          "score": 0.101
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 阻止审核设置方式",
+        "📒常见问题库 · 获取单号常见报错及解决方案",
+        "仓储 · 获取面单号常见报错及解决方案",
+        "📒常见问题库 · 获取单号常见报错及解决方案",
+        "📒常见问题库 · 获取单号常见报错及解决方案",
+        "设置 · 物流停发区域",
+        "设置 · 订单审核",
+        "设置 · 订单审核",
+        "设置 · 阻止审核设置方式",
+        "设置 · 称重"
+      ],
+      "top_score": 0.4318,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确回答了问题，所有说法均能在参考材料中找到依据，且最后对区级粒度的说明也符合材料未明确说明的情况。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "probe-why-split-failed",
+      "kind": "probe",
+      "q": "一键拆分点了没反应，提示来源非平台抓单，是什么意思？",
+      "answer": "我先检索一下知识库，看看有没有关于「一键拆分」和「来源非平台抓单」的相关内容。知识库里正好有这个问题，我直接回答。\n\n**「来源非平台抓单」是什么意思？**\n\n一键拆分只针对**线上订单**。提示这个，说明当前订单不是线上抓单的订单。\n\n**怎么确认和处理：**\n\n1. 检查订单来源。\n2. 到 **销售-订单管理-原始订单** 界面，按原始单号搜索。如果搜不到信息，说明该订单不是线上订单，一键拆分不适用。[1]\n\n**解决办法：** 对于非线上订单，可以采用**其他方法拆分**此订单（比如右键「订单拆分-拆分」等手动拆分方式）。[1]\n\n另外补充一点：一键拆分（针对合并订单）只会拆分线上单据，**线下和赠品不会参与拆分**。[4]\n\n[图1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 订单审核页面拆分条件说明",
+          "heading": "一 订单拆分 › 二 常见问题 › 1、Q：一键拆分提示：来源非平台抓单",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/pgq8bk",
+          "score": 0.9882
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 订单审核常见问题",
+          "heading": "订单拆分 › Q5：供销端拆分提示标记为不可拆分合并，取消标记 提示：平台标记为不可拆分合并",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/of3g4qgmlblawe8h",
+          "score": 0.5745
+        },
+        {
+          "n": 3,
+          "title": "销售 · 拆单发货使用说明",
+          "heading": "支持拆单发货的平台",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/xqfkpb",
+          "score": 0.3741
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 订单审核常见问题",
+          "heading": "订单拆分 › Q1：按货品/数量库存不足拆分的区别",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/of3g4qgmlblawe8h",
+          "score": 0.3705
+        },
+        {
+          "n": 5,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按平台关键字拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.2009
+        },
+        {
+          "n": 6,
+          "title": "销售 · 订单审核页面拆分条件说明",
+          "heading": "一 订单拆分",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/pgq8bk",
+          "score": 0.1
+        },
+        {
+          "n": 7,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.0992
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 订单审核页面拆分条件说明",
+        "📒常见问题库 · 订单审核常见问题",
+        "销售 · 拆单发货使用说明",
+        "📒常见问题库 · 订单审核常见问题",
+        "设置 · 流程中拆分条件说明",
+        "销售 · 订单审核页面拆分条件说明",
+        "设置 · 递交后处理流程解析"
+      ],
+      "top_score": 0.9882,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确解释了提示含义、检查方法和处理方式，均可在参考材料[1]和[4]中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "probe-negation-form",
+      "kind": "probe",
+      "q": "组合装是不是不能拆分？",
+      "answer": "组合装**是可以拆分的**，但能否拆分取决于组合装的**打印方式**和是否开启「支持组合装拆分」配置。具体规则如下：\n\n**按货品标签拆分场景下**（[4]）：\n\n- **未开启「支持组合装拆分」**：\n  1. 组合装打印方式为「组合装」时，不拆\n  2. 组合装打印方式为「组合装明细」时，将单品拆出\n  3. 组合装打印方式为「组合装以及明细」时，不拆\n\n- **开启「支持组合装拆分」**：\n  1. 组合装打印方式为「组合装」时，将组合装拆出\n  2. 组合装打印方式为「组合装明细」时，将单品拆出\n  3. 组合装打印方式为「组合装以及明细」时，将组合装拆出\n\n**其他拆分方式**：\n- **组合装大件拆分**：当订单中有拆分属性为大件拆分的组合装时，订单会被拆分。独立大件必须单独发，普通大件可与非大件一起发；包含单品大件时，组合装大件全部拆分出去 [1]\n- **按指定组合装拆分**：订单包含设置的组合装就会拆分，可配置「1个1单」（按组合装数量拆分）或「1种1单」（按组合装种类拆分）[2]\n- **按品牌拆分**：默认不勾选「按组合装的品牌进行判断」时，按其中单品的品牌做拆分；勾选后按整个组合装的品牌做拆分 [3]\n\n**订单审核页快速拆分**：在「销售-订单审核-货品列表TAB页-右键-快速拆分（含组合装）」可手动拆分，支持组合装打印方式为「组合装」「组合装及明细」时的拆分 [5]\n\n**注意**：组合装的打印方式只能为「组合装」或者「组合装以及明细」[2]。如果组合装打印方式为「组合装」且组合装未设置标签，则按货品标签拆分时不会拆分 [4]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "组合装大件拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9931
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.993
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按品牌拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9918
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 订单递交常见问题",
+          "heading": "订单拆分常见问题 › Q3:设置了按货品标签拆分，订单包含组合装A、组合装B，其中组合装A中单品a有设置对应标签（A、B未设置标签），为什么没有拆分",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/hg4i5igiag7t5he7",
+          "score": 0.9871
+        },
+        {
+          "n": 5,
+          "title": "销售 · 订单审核页面拆分条件说明",
+          "heading": "一 订单拆分 › 21.订单审核货品TAB页增加组合装的快速拆分",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/pgq8bk",
+          "score": 0.9861
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "📒常见问题库 · 订单递交常见问题",
+        "销售 · 订单审核页面拆分条件说明"
+      ],
+      "top_score": 0.9931,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确说明了组合装能否拆分取决于打印方式和配置，并引用了材料中关于按货品标签拆分、大件拆分、指定组合装拆分、按品牌拆分和快速拆分等规则，所有说法均有材料依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "probe-two-hop",
+      "kind": "probe",
+      "q": "我想让某个物流的寄件人跟别的物流不一样，可以吗？",
+      "answer": "我先检索一下知识库，看看旺店通旗舰版是否支持按物流区分寄件人信息。可以。旺店通旗舰版支持按物流单独设置寄件人信息。\n\n**操作路径：** 设置——打印设置——第三方打印——寄件人信息 [1][2]\n\n具体说明：\n\n1. **全局配置**适用于所有物流，默认值取：店铺联系人、店铺联系人手机、仓库地址。[1][2]\n2. **按物流配置**可以单独按照物流设置使用的寄件人信息，即不同物流可以用不同的寄件人。[1][2]\n3. 按物流配置中寄件人/联系电话/发货地址的下拉框，支持选择店铺/仓库/物流/代发类型。注意：由于代发比较特殊，是提取出来的完整地址，所以若三项任意一项选择了代发，其余两项也必须是代发类型。[1][2]\n4. **优先级：** 按物流配置的优先级高于全局设置。[2]\n\n**关于获取单号/打印面单时的取值逻辑：**\n- 获取单号时，若勾选了\"获取单号时根据此配置传输寄件人\"，则按照配置（全局配置和物流设置，以物流设置中的配置为准）生成并传递；没有勾选则按 物流-仓库-店铺 的顺序生成。[1]\n- 注意：勾选\"获取单号时根据此配置传输寄件人\"时，手机号和联系人信息用配置的，但**地址还是用物流的去传输**。[1]\n- 打印面单时，若勾选\"打印面单 根据此配置在打印面单时选定寄件人信息\"，会优先按此配置打印。[1]\n\n**版本说明：** 以上为 1.3.9.7 及以上版本的修改方式。若你的版本低于 1.3.9.7，则需通过 设置——基本设置——物流，找到对应物流双击——物流授权——XXX打印，查看使用的哪个位置的发件人信息来修改。[2]\n\n材料里没有涉及\"1.3.9.7 以下版本按物流区分寄件人\"的具体操作细节，仅说明需在物流授权中查看发件人信息来源位置。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 修改物流单发件人信息操作方式",
+          "heading": "一、线上模板修改发件人信息",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lp31i6",
+          "score": 0.8477
+        },
+        {
+          "n": 2,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "三、物流单寄件人地址维护 › 1.3.9.7及以上版本修改方式",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.7146
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 物流追踪常见问题及解决方案",
+          "heading": "Q10:京东和顺丰订阅物流轨迹逻辑如下",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/mtxgw4pwrgvp4v8m",
+          "score": 0.5608
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+          "heading": "一、设置 › 1.物流设置 › 1）第三方物流授权和模板设置的常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ghydd246hc90gbse",
+          "score": 0.3788
+        },
+        {
+          "n": 5,
+          "title": "分销 · 分销-供销订单支持多级推送",
+          "heading": "三、多级分销配置",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nerieq",
+          "score": 0.3388
+        },
+        {
+          "n": 6,
+          "title": "设置 · 物流匹配",
+          "heading": "二、操作流程 › 3、不同收件地区设置不同的物流匹配策略",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/wefo7hzdg8p3udw5",
+          "score": 0.2975
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 修改物流单发件人信息操作方式",
+        "设置 · 小红书面单模板设置",
+        "📒常见问题库 · 物流追踪常见问题及解决方案",
+        "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+        "分销 · 分销-供销订单支持多级推送",
+        "设置 · 物流匹配"
+      ],
+      "top_score": 0.8477,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": false,
+      "unsupported": "答案中称“旺店通旗舰版”，但参考材料未提及该产品名称；其余内容均有依据。",
+      "reason": "答案正确说明了可以按物流单独设置寄件人，且路径和规则均与材料一致，但引入了材料未出现的产品名称。",
+      "passed": false,
+      "fail_why": "判分：correct／答案正确说明了可以按物流单独设置寄件人，且路径和规则均与材料一致，但引入了材料未出现的产品名称。",
+      "context_chars": 0
+    },
+    {
+      "id": "partial-sms-template",
+      "kind": "partial",
+      "q": "营销短信的模板在哪里建？短信费用怎么收？",
+      "answer": "我来帮您检索这两个问题。关于营销短信模板的创建位置，材料里有明确说明；但短信费用如何收取，检索到的材料都是关于物流资费的内容，与短信费用无关。\n\n**营销短信模板在哪里建：**\n\n1. 进入 **设置–策略设置–短信策略–短信发送模板** 新建模板 [1]。\n2. 新建时短信类型选择**营销短信**，模板的标题以及内容自定义 [1]。\n3. 保存后，在 **CRM–营销管理** 新建营销方案，选择刚才设计的短信模板，再确定营销目标、点击开始营销即可 [1]。\n\n补充说明（淘系店铺相关）：\n- 淘系店铺的短信模板需要填写\"使用场景\"字段，并通过平台审核后才能正常使用；非淘系店铺的模板无需审核 [4]。\n- 短信签名需在 **设置-短信策略-短信签名** 处设置，根据工信部实名制要求需填写公司名称、法人信息、管理员姓名、身份证号、组织结构代码（公司税号）等 [3]。\n\n**短信费用怎么收：**\n\n知识库暂无此内容。检索到的材料均为物流资费的计算方式，与短信费用无关。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "CRM · 营销管理/短信发送查询",
+          "heading": "一、营销管理 › 1、 营销步骤",
+          "url": "https://www.yuque.com/wdterpqjb/crm/hi6uptq27ivsg082",
+          "score": 0.9642
+        },
+        {
+          "n": 2,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 1、非淘系店铺",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.7648
+        },
+        {
+          "n": 3,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 6、注意",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.739
+        },
+        {
+          "n": 4,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 3、短信模版",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.1914
+        },
+        {
+          "n": 5,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "二、模板设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.0765
+        },
+        {
+          "n": 6,
+          "title": "设置 · 设置物流资费",
+          "heading": "二、使用说明 › 2.2、资费设置说明 › 1、取值方式举例说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ixfbxq",
+          "score": 0.1103
+        },
+        {
+          "n": 7,
+          "title": "设置 · 物流资费计算方式",
+          "heading": "2、按重量计算",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/owsf3w",
+          "score": 0.0654
+        },
+        {
+          "n": 8,
+          "title": "设置 · 设置物流资费",
+          "heading": "二、使用说明 › 2.1、新旧版切换",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ixfbxq",
+          "score": 0.0481
+        },
+        {
+          "n": 9,
+          "title": "平台事项 · 返款汇总",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/zfg543lfftwhra1p",
+          "score": 0.0347
+        },
+        {
+          "n": 10,
+          "title": "设置 · 设置物流资费",
+          "heading": "二、使用说明 › 2.2、资费设置说明 › 2、订单重量满足哪条，就走哪条邮资计算方法，多条策略不进行累加",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/ixfbxq",
+          "score": 0.0242
+        }
+      ],
+      "retrieved_titles": [
+        "CRM · 营销管理/短信发送查询",
+        "设置 · 短信策略",
+        "设置 · 短信策略",
+        "设置 · 短信策略",
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "设置 · 设置物流资费",
+        "设置 · 物流资费计算方式",
+        "设置 · 设置物流资费",
+        "平台事项 · 返款汇总",
+        "设置 · 设置物流资费"
+      ],
+      "top_score": 0.9642,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "partial",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确回答了营销短信模板的创建位置及步骤，且均有材料依据；但短信费用问题未给出具体答案，仅表示知识库无此内容，因此只答对了一部分。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    },
+    {
+      "id": "partial-combo-auto-create",
+      "kind": "partial",
+      "q": "平台货品编码带【】前后缀时能自动建组合装吗？失败了会怎样？",
+      "answer": "我先检索一下知识库中关于组合装和货品编码的相关内容。可以自动建组合装，但需要先开启配置，且对编码格式有要求。\n\n**能自动建组合装，但需满足条件：**\n\n1. **先开启配置**：路径「设置-系统设置-货品设置」，勾选「平台货品后台编码为多值时，自动创建对应组合装并进行关联（格式为商家编码1\\*数量+商家编码2\\*数量）」，该配置项默认不勾选 [3]。\n\n2. **编码格式要求**：平台后台商家编码需填写为【】前后缀格式，示例：【SS001\\*1+SS002\\*2】。符号不区分大小写，多个商家编码不允许重复，商家编码最多填写50位 [3]。\n\n3. **自动创建逻辑**：勾选配置后，在原始订单递交进行货品匹配时，如果发现是【】前后缀格式，则按多个商家编码来识别后自动创建系统组合装 [2]。\n\n**失败会怎样：**\n\n只有当+号分隔的每一个商家编码和数量都**全部成功识别**时，才自动按单品的商家编码和数量创建组合装；否则**匹配失败，则递交失败** [2][3]。也就是说，只要有一个单品识别不出来，整个订单递交就会失败，不会只创建部分组合装。\n\n**其他注意事项：**\n\n- 自动创建的组合装**不会自动删除**，如需删除请到「货品-组合装」页面手动删除 [3]。\n- 自动创建的组合装请**谨慎修改**，修改后可能会出现匹配错误的情况 [3]。\n- 自动创建组合装时会记录日志，日志内容为「系统设置-开启'平台货品后台编码为多值自动创建组合装配置'触发组合装自动创建，组合装编码为xxx」[2]。\n\n关于「失败后是否有重试机制或补救措施」这部分，知识库材料里没有提及。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "货品 · 根据平台货品编码自动创建组合装",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/huopin/zfl0vx52uk4xudhu",
+          "score": 0.9209
+        },
+        {
+          "n": 2,
+          "title": "货品 · 根据平台货品编码自动创建组合装",
+          "heading": "二、功能说明 › 2.4 注意事项",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/zfl0vx52uk4xudhu",
+          "score": 0.8345
+        },
+        {
+          "n": 3,
+          "title": "货品 · 根据平台货品编码自动创建组合装",
+          "heading": "二、功能说明 › 2.1 操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/zfl0vx52uk4xudhu",
+          "score": 0.6975
+        },
+        {
+          "n": 4,
+          "title": "货品 · 组合装管理",
+          "heading": "5、更新优化 › 5.5、 【 1.5.9.9】组合装改成单品功能支持自动生成物料清单",
+          "url": "https://www.yuque.com/wdterpqjb/huopin/tnsoeg",
+          "score": 0.5538
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+          "heading": "一、设置 › 4.流程设置 › 1）订单拆分与合并常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ghydd246hc90gbse",
+          "score": 0.4235
+        },
+        {
+          "n": 6,
+          "title": "设置 · 系统设置-货品设置",
+          "heading": "九、手动指定进行货品匹配后自动回传商家编码",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/qwucmbuet47a1185",
+          "score": 0.4249
+        }
+      ],
+      "retrieved_titles": [
+        "货品 · 根据平台货品编码自动创建组合装",
+        "货品 · 根据平台货品编码自动创建组合装",
+        "货品 · 根据平台货品编码自动创建组合装",
+        "货品 · 组合装管理",
+        "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+        "设置 · 系统设置-货品设置"
+      ],
+      "top_score": 0.9209,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了能自动建组合装的条件及失败后果，所有说法均可在参考材料[2][3]中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 0
+    }
+  ]
+}

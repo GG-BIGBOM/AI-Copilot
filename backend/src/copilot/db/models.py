@@ -205,6 +205,20 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(512), default="新对话")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # ===== M7 Agent：多轮收集的状态 =====
+    #
+    # ⚠️ **必须落库，不能只放在内存里。** 一轮追问跨好几个 HTTP 请求，
+    # 每个请求都是一次全新的 Agent run；状态放进程内存的话，用户答完第二个问题，
+    # 第一个答案就没了——表现是 Agent 反复问同一件事。
+    #
+    # profile   已收集的需求（Requirement 的 dict）
+    # checklist 生成的配置清单（Checklist 的 dict）
+    # export_path 落盘的 xlsx，相对 data/exports/。一个会话一份，够用了，
+    #             省掉一张 exports 表和一套额外的权限校验
+    profile: Mapped[dict | None] = mapped_column(NullableJSONB, nullable=True)
+    checklist: Mapped[dict | None] = mapped_column(NullableJSONB, nullable=True)
+    export_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     messages: Mapped[list[Message]] = relationship(
         back_populates="conversation", cascade="all, delete-orphan"
     )

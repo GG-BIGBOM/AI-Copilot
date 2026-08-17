@@ -474,3 +474,35 @@ async def test_provider_failure_becomes_an_error_part(
     assert r.text.endswith("data: [DONE]\n\n")
     # 错误详情只进服务端日志。errorText 会原样渲染在聊天框里
     assert "sk-secret-should-not-leak" not in r.text
+
+
+# ---------- is_no_answer 的边界（M7 评测撞出来的）----------
+
+
+def test_no_answer_detected_when_phrase_comes_last():
+    """⭐ M7 的 Agent 会先解释「我查到的是 X」再补一句「暂无此内容」。
+
+    只认开头的话，这种答案会被判成"有答案"，于是页面上出现
+    「知识库暂无此内容」下面挂着五条来源——正是 M1 最不想要的那个样子。
+    """
+    from copilot.qa import is_no_answer
+
+    assert is_no_answer("知识库中检索到的内容均与员工工资条无关。\n\n知识库暂无此内容。")
+
+
+def test_partial_answer_with_citations_is_not_no_answer():
+    """⭐ 反例，比上面那条更要紧：答出了一部分、并说明另一部分没有，
+    引用必须照常显示。带 [n] 就说明有据可依，不能因为末尾提了一句
+    「某部分材料里没有」就把整条来源清单丢掉。"""
+    from copilot.qa import is_no_answer
+
+    assert not is_no_answer(
+        "短信模板在【设置–策略设置–短信策略–短信发送模板】里新建 [1]。\n"
+        "至于短信费用怎么收，知识库暂无此内容。"
+    )
+
+
+def test_plain_answer_is_not_no_answer():
+    from copilot.qa import is_no_answer
+
+    assert not is_no_answer("批量换货一次最多 500 单 [1]。")

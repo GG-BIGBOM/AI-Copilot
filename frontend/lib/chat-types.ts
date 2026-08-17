@@ -13,6 +13,8 @@ export type CopilotDataParts = {
   conversation: { id: string; title: string };
   citations: { citations: Citation[] };
   images: { images: AnswerImage[] };
+  /** M7：Agent 导出的 xlsx。url 是根相对路径，用时拼 API_BASE */
+  download: { url: string; name: string };
 };
 
 /** 答案正文里 `[图1]` 的编号 → 图片地址。地址是根相对路径，用时拼 API_BASE。 */
@@ -50,4 +52,42 @@ export function messageImages(message: CopilotUIMessage): AnswerImage[] {
     if (part.type === "data-images") return part.data.images;
   }
   return [];
+}
+
+/** M7：这条消息有没有可下载的方案（xlsx）。 */
+export function messageDownload(
+  message: CopilotUIMessage,
+): { url: string; name: string } | null {
+  for (const part of message.parts) {
+    if (part.type === "data-download") return part.data;
+  }
+  return null;
+}
+
+/**
+ * M7：这条消息里 Agent 调过的工具。
+ *
+ * AI SDK 把工具调用收进 `tool-<toolName>` 类型的 part 里（不是 `tool-call`），
+ * 每个 part 带 `state`：`input-streaming` / `input-available` /
+ * `output-available` / `output-error`。这里只取渲染要用的三样。
+ *
+ * ⚠️ 后端发的 `toolName` 已经是中文标签（「检索知识库」），不是 `search_kb`——
+ * 转换在服务端做（见 agent/runner.py 的 TOOL_LABELS），前端不用维护第二份映射表。
+ */
+export type ToolStep = { id: string; name: string; done: boolean; failed: boolean };
+
+export function messageTools(message: CopilotUIMessage): ToolStep[] {
+  const out: ToolStep[] = [];
+  for (const part of message.parts) {
+    if (!part.type.startsWith("tool-") || part.type === "tool-invocation") continue;
+    const p = part as { type: string; toolCallId?: string; state?: string };
+    if (!p.toolCallId) continue;
+    out.push({
+      id: p.toolCallId,
+      name: part.type.slice("tool-".length),
+      done: p.state === "output-available",
+      failed: p.state === "output-error",
+    });
+  }
+  return out;
 }

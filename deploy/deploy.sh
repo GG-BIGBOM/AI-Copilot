@@ -69,10 +69,15 @@ echo "==> [6/6] 装依赖、跑迁移、重启"
 # ⚠️ `uv sync` 是**声明式**的：它把环境同步成「你这次列出的样子」，
 #    没列的 extra 会被**卸掉**。本机踩过——`uv sync --extra eval` 之后
 #    python-docx/pptx 全被移除，10 个解析测试当场变红。要装两组就一起列。
+#
+# ⭐ `--extra agent` 是 M7 的（pydantic-ai + openpyxl）。它拖进来四十来个包，
+#    但**只在有人真的要方案时才 import**（`routes/chat.py` 里那几个 import
+#    写在函数内部，不在模块顶层）。所以普通问答的常驻内存不受影响——
+#    这在 1.6GB 的机器上不是洁癖，是能不能装的问题。
 $SSH "set -e
       export PATH=/root/.local/bin:\$PATH COPILOT_ROOT=$APP_DIR
       cd $APP_DIR
-      uv sync --no-dev --extra parse 2>&1 | tail -2
+      uv sync --no-dev --extra parse --extra agent 2>&1 | tail -2
       uv run alembic upgrade head 2>&1 | tail -2
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker

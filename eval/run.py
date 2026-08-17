@@ -37,6 +37,7 @@ import json
 import re
 import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -50,7 +51,8 @@ sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
 
 # ---------- 判分器的 prompt ----------
 
-JUDGE_SYSTEM = """你是严格的评测判分员。给你一个问题、检索到的「参考材料」、以及被评测系统给出的「答案」。
+JUDGE_SYSTEM = """你是严格的评测判分员。给你一个问题、检索到的「参考材料」、
+以及被评测系统给出的「答案」。
 
 只依据参考材料判断，不要用你自己的知识补充。输出**纯 JSON**，不要代码块围栏，字段如下：
 
@@ -101,6 +103,7 @@ class Config:
     rerank_k: int = 0
     threshold: float = -1.0  # <0 = 用默认
     prompt: str = "current"  # current = 线上那版；其余取 eval/prompts.py 的存档
+    agent: bool = False  # True = 评 M7 的 Agent 路径（检索由 Agent 自己决定）
 
     def system_prompt(self) -> str | None:
         if self.prompt == "current":
@@ -121,6 +124,7 @@ class Config:
         prompt_text = self.system_prompt() or SYSTEM_PROMPT
         return {
             "prompt": self.prompt,
+            "path": "agent" if self.agent else "direct",
             "top_k": self.top_k or s.retrieve_top_k,
             "rerank_k": self.rerank_k or s.rerank_top_k,
             "threshold": s.rerank_score_threshold if self.threshold < 0 else self.threshold,
@@ -232,7 +236,7 @@ def retrieve_all(cases: list[dict], cfg: Config, quiet: bool = False) -> list[Ca
                     cr.source_hit = any(w in t for w in wants for t in cr.retrieved_titles)
                 out.append(cr)
                 if not quiet:
-                    flag = "" if cr.source_hit is None else ("命中" if cr.source_hit else "未命中")
+                    flag = "" if cr.source_hit is None else ("命中" if cr.source_hit else "未中")
                     print(f"  [{i:2}/{len(cases)}] {case['id']:34} {flag}")
         client.close()
         return out
@@ -262,9 +266,10 @@ def answer_all(
             # 第一道闸门：什么都没召回，线上会直接返回兜底话术，不调 LLM
             cr.answer = NO_ANSWER
         else:
+            user_msg = USER_TEMPLATE.format(context=cr.context, question=cr.q)
             messages = [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": USER_TEMPLATE.format(context=cr.context, question=cr.q)},
+                {"role": "user", "content": user_msg},
             ]
             try:
                 # ⚠️ 评测里把温度压到 0，线上是 0.1。
@@ -281,6 +286,81 @@ def answer_all(
             if not quiet and i % 5 == 0:
                 print(f"  已生成 {i}/{len(results)}")
     llm.close()
+
+
+# ---------- Agent 路径（M7）----------
+
+
+def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
+    """让 Agent 自己跑每一道题。
+
+    **和直路的评测不是同一件事**：直路是「先检索固定 top-k，再答」，Agent 是
+    「自己决定检索几次、用什么词」。所以这里量到的检索命中率含义也不同——
+    它衡量的是 Agent **会不会问对问题**，而不是检索器准不准。
+
+    串行跑。Agent 一轮里要打好几次 SiliconFlow，并发会把那个非线程安全的
+    限速器踩坏（见文件头第 3 条）。代价是慢，41 题大约十几分钟。
+    """
+    import asyncio
+
+    from sqlalchemy import func, select
+
+    from copilot.agent.deps import AgentDeps
+    from copilot.agent.runner import run_agent_stream
+    from copilot.db.models import Chunk
+    from copilot.db.session import SessionLocal
+    from copilot.providers.siliconflow import (
+        SiliconFlowClient,
+        SiliconFlowEmbedder,
+        SiliconFlowReranker,
+    )
+    from copilot.qa import is_no_answer
+
+    async def main() -> list[CaseResult]:
+        client = SiliconFlowClient()
+        emb, rr = SiliconFlowEmbedder(client=client), SiliconFlowReranker(client=client)
+        out: list[CaseResult] = []
+        async with SessionLocal() as session:
+            CORPUS_STATS["chunk_count"] = await session.scalar(
+                select(func.count(Chunk.id)).where(Chunk.owner_id.is_(None))
+            )
+            for i, case in enumerate(cases, 1):
+                deps = AgentDeps(
+                    session=session,
+                    # 评测只打公共库。用一个随机 uuid 当"当前用户"：它没有任何
+                    # 私有文档，可见范围就等于公共库
+                    user_id=uuid.uuid4(),
+                    conversation_id=uuid.uuid4(),
+                    embedder=emb,
+                    reranker=rr,
+                )
+                answer = ""
+                try:
+                    async for _part, so_far in run_agent_stream(case["q"], deps):
+                        answer = so_far
+                except Exception as e:  # noqa: BLE001 - 单题失败不该毁掉整轮
+                    answer = f"__ERROR__ {type(e).__name__}: {e}"
+
+                cr = CaseResult(
+                    id=case["id"],
+                    kind=case["kind"],
+                    q=case["q"],
+                    answer=answer,
+                    citations=deps.citations,
+                    context=deps.context_text,
+                    retrieved_titles=[c.get("title", "") for c in deps.citations],
+                    top_score=deps.citations[0].get("score", 0.0) if deps.citations else 0.0,
+                    said_no_answer=is_no_answer(answer),
+                )
+                if wants := wanted_sources(case):
+                    cr.source_hit = any(w in t for w in wants for t in cr.retrieved_titles)
+                out.append(cr)
+                flag = "" if cr.source_hit is None else ("命中" if cr.source_hit else "未命中")
+                print(f"  [{i:2}/{len(cases)}] {case['id']:34} {flag}")
+        client.close()
+        return out
+
+    return asyncio.run(main())
 
 
 # ---------- 阶段三：判分（并行） ----------
@@ -547,7 +627,7 @@ def compare(tags: list[str]) -> None:
         if flips:
             print()
             print(f"相对 {runs[0]['tag']}，{r['tag']} 变化的题：")
-            for cid, was, now, why in flips:
+            for cid, was, _now, why in flips:
                 arrow = "过 → 没过" if was else "没过 → 过"
                 print(f"  {cid:32} {arrow}  {why[:70]}")
 
@@ -604,7 +684,12 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=0)
     ap.add_argument("--rerank-k", type=int, default=0)
     ap.add_argument("--threshold", type=float, default=-1.0)
-    ap.add_argument("--prompt", default="current", help="用哪版 system prompt（见 eval/prompts.py）")
+    ap.add_argument(
+        "--prompt", default="current", help="用哪版 system prompt（见 eval/prompts.py）"
+    )
+    ap.add_argument(
+        "--agent", action="store_true", help="评 M7 的 Agent 路径而不是直路"
+    )
     ap.add_argument("--workers", type=int, default=5)
     args = ap.parse_args()
 
@@ -614,7 +699,11 @@ def main() -> None:
 
     meta, cases = load_cases(args.only or None)
     cfg = Config(
-        top_k=args.top_k, rerank_k=args.rerank_k, threshold=args.threshold, prompt=args.prompt
+        top_k=args.top_k,
+        rerank_k=args.rerank_k,
+        threshold=args.threshold,
+        prompt=args.prompt,
+        agent=args.agent,
     )
 
     if args.check:
@@ -624,10 +713,15 @@ def main() -> None:
     tag = args.tag or datetime.now().strftime("run-%m%d-%H%M")
     t0 = time.monotonic()
     print(f"评测 {len(cases)} 题　参数 {cfg.resolved()}")
-    print("── 检索（串行，受 SiliconFlow 限速）──")
-    results = retrieve_all(cases, cfg)
-    print("── 生成答案 ──")
-    answer_all(results, workers=args.workers, system_prompt=cfg.system_prompt())
+    if cfg.agent:
+        # Agent 自己决定检索几次，所以「检索」和「生成」分不开，只能一起跑
+        print("── Agent 逐题跑（检索由它自己决定）──")
+        results = run_agent_cases(cases, cfg)
+    else:
+        print("── 检索（串行，受 SiliconFlow 限速）──")
+        results = retrieve_all(cases, cfg)
+        print("── 生成答案 ──")
+        answer_all(results, workers=args.workers, system_prompt=cfg.system_prompt())
     print("── 判分 ──")
     judge = judge_all(results, cases, workers=args.workers)
 

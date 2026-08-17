@@ -31,12 +31,13 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import iterate_in_threadpool
-from starlette.responses import StreamingResponse
+from starlette.responses import FileResponse, StreamingResponse
 
 from copilot import usage
 from copilot.api import providers, stream
 from copilot.api.schemas import ChatRequest, ConversationOut, MessageOut
 from copilot.auth.deps import CurrentUser, SessionDep
+from copilot.config import get_settings
 from copilot.db.models import Conversation, Message
 from copilot.db.session import SessionLocal
 from copilot.qa import ask_stream, is_no_answer
@@ -179,6 +180,167 @@ async def _chat_stream(
     yield stream.DONE
 
 
+async def _agent_stream(
+    user_id: uuid.UUID, question: str, client_id: str | None
+) -> AsyncIterator[str]:
+    """M7 的 Agent 路径。默认不走这条（`agent_enabled`）。
+
+    和直路的差别只在中间那段：这里由 Agent 决定检索几次、要不要追问、
+    要不要出方案。前后的规矩完全一样——会话落库、说了不知道就不挂来源、
+    记 token 账。
+
+    ⚠️ **多轮状态必须进出数据库。** `profile` / `checklist` 存在 conversations 上，
+    进来读、出去写。放内存里的话，用户答完第二个问题，第一个答案就没了。
+    """
+    from copilot.agent.checklist import Checklist, Requirement
+    from copilot.agent.deps import AgentDeps
+    from copilot.agent.runner import run_agent_stream, to_message_history
+
+    message_id = stream.new_id("msg")
+    yield stream.start(message_id)
+    yield stream.start_step()
+
+    answer = ""
+    try:
+        async with SessionLocal() as session:
+            conv = await _resolve_conversation(session, user_id, client_id, question)
+            history_rows = list(
+                (
+                    await session.execute(
+                        select(Message.role, Message.content)
+                        .where(Message.conversation_id == conv.id)
+                        .order_by(Message.created_at, Message.id)
+                        .limit(20)  # 只带最近的，上下文撑爆了对「接着聊」也没帮助
+                    )
+                ).all()
+            )
+            session.add(Message(conversation_id=conv.id, role="user", content=question))
+            await session.commit()
+
+            yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
+
+            deps = AgentDeps(
+                session=session,
+                user_id=user_id,
+                conversation_id=conv.id,
+                embedder=providers.get_embedder(),
+                reranker=providers.get_reranker(),
+                profile=Requirement(**(conv.profile or {})),
+                checklist=Checklist(**conv.checklist) if conv.checklist else None,
+            )
+
+            async for part, so_far in run_agent_stream(
+                question, deps, to_message_history([(r, c) for r, c in history_rows])
+            ):
+                answer = so_far
+                yield part
+
+            # 配图在正文之后发（和直路相反）：Agent 边跑边检索，
+            # 开始流的时候还不知道会用到哪些图
+            if deps.images:
+                yield stream.data_part("images", {"images": deps.images})
+
+            # ⚠️ 同直路：说了"不知道"就不能挂来源
+            shown = [] if is_no_answer(answer) else deps.citations
+            if shown:
+                yield stream.data_part("citations", {"citations": shown})
+            if deps.download_url:
+                yield stream.data_part(
+                    "download", {"url": deps.download_url, "name": "实施配置方案.xlsx"}
+                )
+
+            # ⚠️ 空字典也要写进去，**不能 `or None`**。
+            # `profile is not None` 是「这条会话在走 Agent」的标记，而第一轮
+            # Agent 通常只是提个问题、一个字段都没记——写成 None 的话，
+            # 下一轮就被路由回直路，对话直接散掉（线上实测踩到过）。
+            conv.profile = deps.profile.model_dump(exclude_none=True)
+            if deps.checklist is not None:
+                conv.checklist = deps.checklist.model_dump()
+            if deps.download_url:
+                conv.export_path = f"{user_id}/{conv.id}.xlsx"
+            session.add(
+                Message(
+                    conversation_id=conv.id,
+                    role="assistant",
+                    content=answer,
+                    citations=shown or None,
+                    images=(deps.images or None) if shown else None,
+                )
+            )
+            await session.commit()
+
+            # ⚠️ 要把检索到的材料算进去。只算问题和答案会漏掉八成——
+            # Agent 一轮可能检索好几次，那些材料每一份都进了模型的上下文
+            await usage.record(
+                session,
+                user_id,
+                usage.estimate_tokens(deps.context_text, question, answer),
+            )
+
+    except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
+        logger.exception("Agent 流出错：user=%s question=%r", user_id, question[:80])
+        yield stream.error(GENERIC_ERROR)
+
+    yield stream.finish_step()
+    yield stream.finish()
+    yield stream.DONE
+
+
+# 走 Agent 的意图词。**只认「要一份方案/清单」这一件事**——
+# 那是 Agent 独有的能力（多轮追问 + 结构化输出 + 导出）。
+# 别往这里加「怎么设置」「在哪里配」之类的词：那些是普通问答，
+# 走直路更准（见 _use_agent 的数字）。
+AGENT_TRIGGERS = (
+    "实施方案",
+    "配置方案",
+    "实施清单",
+    "配置清单",
+    "上线清单",
+    "上线方案",
+    "实施配置",
+    "配置检查表",
+)
+
+
+async def _use_agent(session: AsyncSession, user, question: str, client_id: str | None) -> bool:
+    """这一轮走 Agent 还是走直路。
+
+    ⭐ **依据是数字，不是偏好。** M8 的 41 题评测上（`eval/results/`）：
+
+        指标        直路      Agent
+        准确率      100%      87.8%
+        幻觉率        0%      12.5%
+        检索命中率   100%      93.9%
+
+    Agent 自己决定检索词，命中率反而更低，还会把相邻主题的材料凑进答案
+    （典型：拿「得物」的面单步骤回答「京东」的问题）。所以**普通问答一律走直路**，
+    Agent 只接它独有的那件事：多轮收集需求 + 出方案 + 导出 xlsx。
+
+    两个入口：
+      1. 问题里出现意图词（「帮我出个实施方案」）
+      2. **这条会话已经在走 Agent 了**（`profile is not None`）。这条不能少——
+         少了它，用户答完第一个追问，第二轮就被路由回直路，
+         Agent 那边的状态就断了。
+
+    ⚠️ 判据是 `profile is not None`，**不是「profile 有内容」**。
+    第一轮 Agent 往往只是提个问题、一个字段都没记，此时 profile 是 `{}`。
+    按「有内容」判的话第二轮就掉回直路——线上实测踩到过：
+    用户答「淘宝和抖音两个平台」，回来的是一句「根据参考材料，无法回答」。
+    """
+    if get_settings().agent_enabled:
+        return True  # 总开关：留给评测和将来验证用
+    if any(kw in question for kw in AGENT_TRIGGERS):
+        return True
+    if not client_id:
+        return False
+    try:
+        cid = uuid.UUID(client_id)
+    except ValueError:
+        return False
+    conv = await session.get(Conversation, cid)
+    return bool(conv and conv.user_id == user.id and conv.profile is not None)
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> StreamingResponse:
     """提问，流式返回答案与引用。未登录 401，超出当日配额 429。
@@ -198,10 +360,41 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
             f"今天的用量已达上限（{used}/{quota} tokens），明天再来或联系管理员调整。",
         )
 
+    producer = _agent_stream if await _use_agent(session, user, question, body.id) else _chat_stream
     return StreamingResponse(
-        _chat_stream(user.id, question, body.id),
+        producer(user.id, question, body.id),
         media_type="text/event-stream",
         headers=stream.SSE_HEADERS,
+    )
+
+
+@router.get("/conversations/{conversation_id}/export")
+async def download_export(
+    conversation_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> FileResponse:
+    """下载 Agent 生成的《实施配置方案.xlsx》。
+
+    别人的会话一律当**不存在**（404 而非 403），和 `list_messages` 同一个理由：
+    403 等于告诉对方「这个 id 是有效的」。
+    """
+    conv = await session.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id or not conv.export_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有可下载的方案")
+
+    try:
+        path = get_settings().export_path(conv.export_path)
+    except ValueError as e:
+        logger.error("导出路径越界 conv=%s：%s", conversation_id, e)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有可下载的方案") from e
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "文件已不存在，请让助手重新导出")
+
+    from copilot.agent.tools import conversation_export_name
+
+    return FileResponse(
+        path,
+        filename=conversation_export_name(conversation_id),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
