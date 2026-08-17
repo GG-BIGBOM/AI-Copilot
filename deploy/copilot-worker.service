@@ -1,0 +1,46 @@
+[Unit]
+Description=Copilot 知识库后台 worker（解析上传的文档）
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User=copilot
+Group=copilot
+WorkingDirectory=/opt/copilot
+
+# ⭐ 显式给 COPILOT_ROOT。config.py 也能靠「向上找 .env.example」猜对，
+# 但它猜错时是**静默**的：读不到 .env 就用字段默认值，最后报出来的是
+# 「数据库密码错误」，排查方向被带到 pg_hba 上（M5 踩过的坑 #1）。
+Environment=COPILOT_ROOT=/opt/copilot
+# PrivateTmp 下 /tmp 是这个服务私有的，给它当 HOME 用（copilot 是 nologin
+# 账号，家目录就是 /opt/copilot，而下面 ProtectSystem=strict 让那里只有
+# data/ 可写）
+Environment=HOME=/tmp
+
+ExecStart=/opt/copilot/.venv/bin/copilot worker --poll 5
+
+Restart=always
+RestartSec=5
+
+# ⭐ 优雅停止：worker 收到 SIGTERM 会**跑完手上那条任务**再退出。
+# 硬杀的话，那条 running 会留在库里，得等 30 分钟的 stale 回收才恢复——
+# 对用户就是「解析中」卡了半小时。`systemctl restart` 走的正是这条路。
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+# 收敛权限，和 API 一致
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 只有数据目录可写（读上传的文件、写不下去别的地方）
+ReadWritePaths=/opt/copilot/data
+
+# 单独限内存，比 API 少：解析一份 20MB 的 pptx 是这台机器上最容易吃内存的
+# 操作。真跑飞了，被 systemd 收走的是 worker，网站本身还在（这也是它单独
+# 一个进程、不塞进 API 的原因之一）。
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

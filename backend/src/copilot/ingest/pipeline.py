@@ -1,12 +1,19 @@
-"""入库管线：本地 Markdown → documents + chunks（含向量）。
+"""入库管线：Markdown → documents + chunks（含向量）。
 
 三条不能破的规矩：
 
 1. **chunks.owner_id 必须与所属 document 一致。** 这是数据隔离的地基，
-   写错了就是把 A 的文档泄漏给 B。整个项目只有这里往 chunks 写 owner_id。
+   写错了就是把 A 的文档泄漏给 B。整个项目只有 `write_chunks()` 一处
+   往 chunks 写 owner_id，两条入库路径（语雀批量、用户上传）都走它。
 2. **content_hash 没变就整篇跳过。** 省的是 embedding 调用，是真金白银。
 3. **重新入库先删旧块。** 否则同一篇文档会在库里留下两代块，
    检索时旧内容和新内容一起冒出来，且没有任何报错。
+
+两条入库路径的差别只在 documents 行谁建：
+    语雀批量  `ingest_documents()` —— 按 source_url 找或建
+    用户上传  `write_chunks()`     —— 行在上传那一刻就建好了（status=pending，
+                                     好让用户立刻在列表里看到「排队中」），
+                                     worker 只补块
 """
 
 from __future__ import annotations
@@ -125,6 +132,55 @@ async def ingest_documents(
     return stats
 
 
+async def write_chunks(
+    session: AsyncSession,
+    doc: Document,
+    markdown: str,
+    embedder: Embedder,
+    settings=None,
+) -> int:
+    """切分 + 向量化 + 用新块整体替换该文档的旧块。返回块数，0 表示切不出内容。
+
+    ⚠️ **这是全项目唯一往 `chunks.owner_id` 写值的地方**，且只能取
+    `doc.owner_id`。隔离的地基在这一行上——写成别的值不会报错，
+    只会在某天让 A 的私有文档出现在 B 的答案里。
+
+    不提交事务，交给调用方：上传那条路径还要在同一个事务里改 `status`。
+    """
+    s = settings or get_settings()
+    chunks = chunk_markdown(markdown, size=s.chunk_size, overlap=s.chunk_overlap)
+    if not chunks:
+        return 0
+
+    # 先向量化、再动库。embedding 是网络调用，失败率远高于本地写库；
+    # 顺序反了的话，旧块已删、新块还没到，文档就凭空空了一段。
+    vectors = embedder.embed_documents([c.content for c in chunks])
+
+    await session.flush()  # 新建的 Document 在这里才拿到 id
+    # 重新入库必须先清旧块，否则库里会留下两代内容一起被检索到
+    await session.execute(delete(ChunkRow).where(ChunkRow.document_id == doc.id))
+
+    session.add_all(
+        [
+            ChunkRow(
+                document_id=doc.id,
+                # ⚠️ 隔离红线：必须跟着文档走，不能是别的值
+                owner_id=doc.owner_id,
+                ordinal=c.ordinal,
+                content=c.content,
+                embedding=vec,
+                title=doc.title,
+                heading=c.heading,
+                source_url=doc.source_url,
+                images=c.images or None,
+            )
+            for c, vec in zip(chunks, vectors, strict=True)
+        ]
+    )
+    doc.chunk_count = len(chunks)
+    return len(chunks)
+
+
 async def _ingest_one(
     session: AsyncSession,
     src: SourceDoc,
@@ -150,18 +206,8 @@ async def _ingest_one(
     if existing and existing.content_hash == digest and not force and existing.status == "done":
         return None
 
-    chunks = chunk_markdown(
-        src.markdown, size=settings.chunk_size, overlap=settings.chunk_overlap
-    )
-    if not chunks:
-        return None
-
-    vectors = embedder.embed_documents([c.content for c in chunks])
-
     if existing:
         doc = existing
-        # 重新入库必须先清旧块，否则库里会留下两代内容一起被检索到
-        await session.execute(delete(ChunkRow).where(ChunkRow.document_id == doc.id))
     else:
         doc = Document(owner_id=owner_id, source_type=src.source_type)
         session.add(doc)
@@ -174,25 +220,13 @@ async def _ingest_one(
     doc.content_hash = digest
     doc.status = "done"
     doc.error = None
-    doc.chunk_count = len(chunks)
-    await session.flush()  # 拿到 doc.id
 
-    session.add_all(
-        [
-            ChunkRow(
-                document_id=doc.id,
-                # ⚠️ 隔离红线：必须跟着文档走，不能是别的值
-                owner_id=doc.owner_id,
-                ordinal=c.ordinal,
-                content=c.content,
-                embedding=vec,
-                title=src.title,
-                heading=c.heading,
-                source_url=src.source_url,
-                images=c.images or None,
-            )
-            for c, vec in zip(chunks, vectors, strict=True)
-        ]
-    )
+    n = await write_chunks(session, doc, src.markdown, embedder, settings)
+    if n == 0:
+        # 切不出块就当整篇没来过：回滚掉刚才对 documents 的插入/改动，
+        # 已存在的那篇保持原样（连旧块一起）
+        await session.rollback()
+        return None
+
     await session.commit()
-    return len(chunks)
+    return n

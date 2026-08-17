@@ -270,9 +270,9 @@ Copilot/
 │       │   ├── yuque.py        # ⭐ 语雀 JSON 接口链路 + 限速 + 重试
 │       │   └── sync.py         # 落成带 frontmatter 的 Markdown + 增量台账
 │       ├── ingest/
-│       │   ├── parser.py       # Docling 统一解析入口　（M6）
+│       │   ├── parsers.py      # 上传文件 → Markdown（md/txt/docx/pptx/pdf，轻量库）
 │       │   ├── chunker.py      # 中文切分，带溯源元数据
-│       │   └── pipeline.py     # 切分 → 嵌入 → 写 pgvector
+│       │   └── pipeline.py     # 切分 → 嵌入 → 写 pgvector；⭐ write_chunks 是写 owner_id 的唯一处
 │       ├── retrieve.py         # ⭐ 隔离过滤唯一收敛点；检索 → rerank → 带编号引用
 │       ├── qa.py               # ⭐ 防幻觉双闸门 + is_no_answer()
 │       ├── agent/              # （M7）
@@ -283,7 +283,8 @@ Copilot/
 │       │   ├── invites.py      # 发码 + 原子核销
 │       │   └── deps.py         # FastAPI 依赖：CurrentUser / SessionDep / cookie 读写
 │       ├── jobs/
-│       │   └── worker.py       # Postgres SKIP LOCKED 队列消费者　（M6）
+│       │   ├── queue.py        # ⭐ SKIP LOCKED 取放 + 状态机 + 僵尸任务回收
+│       │   └── worker.py       # 独立进程的消费循环（优雅停止）
 │       └── api/
 │           ├── app.py          # FastAPI 装配 + lifespan + CORS
 │           ├── stream.py       # ⭐ AI SDK 协议编码器（字段名错一个前端就空白）
@@ -299,7 +300,7 @@ Copilot/
 │   │   ├── page.tsx            # 分流：登录了去 /chat，没登录去 /login
 │   │   ├── login/ · register/  # 注册页填邀请码
 │   │   ├── chat/page.tsx       # useChat + 侧栏历史
-│   │   └── docs/page.tsx       # 上传 + 解析状态　（M6）
+│   │   └── documents/page.tsx  # 上传（拖拽）+ 解析状态轮询 + 删除
 │   ├── components/
 │   │   ├── chat/               # chat-view / message-list / composer / citations / sidebar
 │   │   └── ui/                 # shadcn/ui
@@ -309,8 +310,8 @@ Copilot/
 │       └── chat-types.ts       # data-citations / data-conversation 的类型
 ├── deploy/
 │   ├── nginx.conf              # / → out/ 静态；/api → FastAPI；/aura → Aura Note 保留
-│   ├── kb-api.service          # systemd: uvicorn
-│   ├── kb-worker.service       # systemd: 解析 worker
+│   ├── copilot-api.service     # systemd: uvicorn（MemoryMax=600M）
+│   ├── copilot-worker.service  # systemd: 解析 worker（MemoryMax=400M，优雅停止）
 │   ├── setup-server.sh         # swap + postgres + pgvector + certbot 一次性初始化
 │   └── deploy.sh               # 本机构建 out/ → rsync 上传 → 重启服务
 ├── eval/
@@ -323,7 +324,11 @@ Copilot/
     ├── test_auth.py            # 密码哈希 / JWT / 邀请码
     ├── test_stream_protocol.py # ⭐ AI SDK 协议字段固化
     ├── test_api_auth.py        # 注册 / 登录 / 登出 端到端
-    └── test_api_chat.py        # ⭐ SSE 序列 + 「不知道就不挂来源」
+    ├── test_api_chat.py        # ⭐ SSE 序列 + 「不知道就不挂来源」
+    ├── samples.py              # 造真 docx / pptx / pdf 样例（含扫描件 PDF）
+    ├── test_parsers.py         # 编码兜底 / 表格不跑位 / 扫描件要报错
+    ├── test_jobs.py            # ⭐ SKIP LOCKED + 重试语义 + worker 端到端
+    └── test_api_documents.py   # ⭐ 上传安全项逐条 + 跨用户删不掉
 ```
 
 ---
@@ -342,14 +347,19 @@ Copilot/
 | **上线期** | M3 认证 + 聊天 API | 2 d | 10 d | M1 | ✅ |
 | | M4 Next.js 前端 | 2–3 d | 13 d | M3 | ✅ |
 | | **M5 上线** ⭐ | 1–2 d | 15 d | M2, M4 | ✅ |
-| **增强期** | M6 上传 + 私有库 | 2–3 d | 18 d | M5 | ⬜ |
+| **增强期** | M6 上传 + 私有库 | 2–3 d | 18 d | M5 | ✅ |
 | | M7 Agent 化 | 2–3 d | 21 d | M5 | ⬜ |
 | | M8 评测 + 优化 | 2–3 d | 24 d | M7 | ⬜ |
 
 **合计 16–24 净工作日。** 按业余投入折算，约 6–10 周日历时间。
 
-**进度：M0–M5 全部完成（含计划外的 M4.5 配图）。上线是分水岭，已经穿过去了。**
-站点在 https://liushun666.cn 运行中，真实用户可注册使用。剩余 M6 上传 / M7 Agent / M8 评测。
+**进度：M0–M6 全部完成（含计划外的 M4.5 配图），均已上线。剩余 M7 Agent / M8 评测。**
+站点在 https://liushun666.cn 运行中，已有 3 个真实注册账号；公共库 746 篇 / 5268 块，
+每个人还能传自己的文档进私有库。
+
+> M6 验收时撞见一件事：**材料里有答案、却被答成「知识库暂无此内容」**（见 M6 那节
+> 末尾）。M8 的评测集是唯一能量化这件事的手段。按 4.2 的依赖图 M7 在 M8 之前，
+> 但这两者其实互不依赖——先做哪个由你定。
 
 ### 4.2 关键路径
 
@@ -864,26 +874,108 @@ free -h 可用 1.1Gi ← 健康线 200MB 以上
 
 **验收**：**别人在自己手机上打开 `https://liushun666.cn`，用你发的邀请码注册，问出带引用的答案。** 到这一步项目就活了。同时确认 `/aura` 仍能打开，且 `free -h` 剩余内存 > 200MB。
 
-### M6 — 上传 + 私有库（2–3 天）
+### M6 — 上传 + 私有库（2–3 天）　✅ **已完成 2026-08-17（含上线）**
 
-- [ ] `routes/docs.py` 上传接口，安全项**逐条**落实：
-  - 白名单扩展名 `.md .txt .docx .pptx`（PDF 仅纯文本提取）
-  - 大小上限 20MB + 每用户文档数上限
+- [x] `routes/docs.py` 上传接口，安全项**逐条**落实：
+  - 白名单扩展名 `.md .txt .docx .pptx .pdf`（PDF 仅纯文本提取）
+  - 大小上限 20MB（**边写盘边判**，不是先读进内存）+ 每用户 200 份
   - ⭐ **落盘用 uuid 重命名**，原始文件名只存 DB —— 防路径穿越
-  - 存 `data/uploads/{user_id}/`
-- [ ] 上传后 `enqueue` 解析任务
-- [ ] `jobs/worker.py`：Postgres `FOR UPDATE SKIP LOCKED` 消费；状态机 `pending→running→done/failed`，失败存 `error`
-- [ ] 解析结果以 `owner_id={user_id}` 入库
-- [ ] 文档管理页：列表 + 状态 + 删除（**同时删向量块**）
-- [ ] 前端轮询 `GET /api/documents` 刷新状态（不必上 WebSocket）
-- [ ] ⭐ `tests/test_isolation.py`：用户 A 检索不到用户 B 的文档
+  - 存 `data/uploads/{user_id}/`，库里存**相对路径**（绝对路径搬不了机器）
+- [x] 上传后 `enqueue` 解析任务（**与 documents 行同一个事务**）
+- [x] `ingest/parsers.py`：md / txt / docx / pptx / pdf → Markdown
+- [x] `jobs/queue.py` + `jobs/worker.py`：`FOR UPDATE SKIP LOCKED` 消费；
+      状态机 `pending→running→done/failed`，失败存 `error`
+- [x] 解析结果以 `owner_id={user_id}` 入库（复用 `write_chunks`，红线仍只有一处）
+- [x] 文档管理页 `/documents`：上传（拖拽）+ 列表 + 状态 + 删除（**同时删向量块**）
+- [x] 前端轮询 `GET /api/documents`，**只在有文档没解析完时轮**，跑完自己停
+- [x] ⭐ `tests/test_isolation.py`：加了「真上传 → 真 worker → 真检索」的端到端隔离
+- [x] `copilot worker` / `copilot-worker.service`（独立进程，`MemoryMax=400M`）
+- [x] `deploy.sh`：同步 systemd 单元文件 + `uv sync --extra parse` + 重启两个服务
+- [x] 部署上线 + 线上换账号实测
 
-**验收**
+**本机验收（真 uvicorn + 真 multipart + worker 独立进程 + 真 SiliconFlow）**
 ```
-上传 md/docx → 页面显示"解析中" → 变"已完成"
-提问 → 命中新文档，引用指向它
-换账号登录 → 同一问题搜不到那份文档      ← 隔离的线上验证
+上传 e2e-manual.docx  → pending → worker 跑一轮 → done / 1 块
+  正文含 `# 一、电子面单设置` 与 Markdown 表格 `| 字段 | 含义 |`  ← 标题层级和表格都保住了
+重复上传同一份       → duplicate=true，沿用原来那一行，不重复烧 embedding
+上传 x.exe           → 415「不支持的文件类型（.exe），只收 …」
+上传坏的 .docx       → failed，错误写着「打不开这个 Word 文件（PackageNotFoundError）」
+检索（真 embedder + 真 reranker，库里 5268 个真实块）：
+  本人   → 命中自己上传的那篇  True
+  另一人 → False        未登录 → False        ← 隔离
+删除                 → 204，块与落盘文件一起没了，公共库 746 篇不动
 ```
+**测试**：`pytest` 187 passed（M5 时 137，新增 50 条），`ruff` / `eslint` / `tsc` 全过。
+
+**做的时候想清楚的几件事**
+
+1. **worker 必须是独立进程。** 解析一份 20MB 的 pptx 是同步 CPU 活，塞进 API
+   进程就会顶住那个唯一的事件循环——别人正在流的答案会一起停住。分开还能
+   单独限内存：真跑飞了被 systemd 收走的是 worker，网站还在。
+2. **可重试与不可重试要分开。** 文件坏了（`ParseError`）重试一万次也是坏的，
+   只会白烧 CPU；embedding 撞限流是过一会儿就好的。分不开的话，要么坏文件
+   卡在队列里反复重试，要么一次网络抖动就让用户看到「解析失败」。
+3. **`run_once` 返回三态而不是布尔。** 「有没有活干」和「干成了没有」混在一起时，
+   主循环会把失败当成「还有活」→ 立刻接着取 → 同一条任务不带间隔地连撞三次，
+   把重试次数在一秒内烧光。**重试也就白设了**，而且日志上看不出异常。
+4. **落盘路径存相对的。** 绝对路径会把开发机的 `C:\Users\…` 写进库里，
+   搬到 `/opt/copilot` 全都指不对——而这个库是要跨机器用的。
+5. **删文档要连待办任务一起撤。** 不撤也不会坏（worker 认得出文档没了，
+   作废即可），但队列会攒一堆注定作废的行；更要紧的是它让测试变得随机失败——
+   下一个用例的 `run_once` 可能先取到这条孤儿任务。
+
+**踩到的坑**
+
+1. **⭐ `updated_at` 在复用旧行时会炸 `MissingGreenlet`。**
+   它是 `onupdate=func.now()`，值由数据库算，提交后属性处于**过期**状态，
+   序列化时一读就触发隐式 IO，在 async 会话里直接抛
+   `greenlet_spawn has not been called`。
+   可怕的是**新建行那条路径完全正常**——只有「重传上次失败的那份」会踩到，
+   极容易漏过测试。解法是提交后 `await session.refresh(doc)`。
+2. **`FakeEmbedder` 的桶下标带字符位置**（`ord(ch)*7 + i`），
+   所以「块正文 = 标题 + 空行 + 原文」时，拿原文去搜反而**搜不到自己**——
+   前面多几个字就把整个向量错开了。真实 embedder 没这毛病，
+   但测试差点得出「隔离过度」的错误结论。测试数据要么不带标题，要么用原文当查询。
+3. **单跑一个测试文件会全红**：`pytest ../tests/test_jobs.py` 时 rootdir 变成
+   `Copilot/`，找不到 `backend/pyproject.toml` 里的 `asyncio_mode = "auto"`，
+   于是所有 async 测试被当成同步的，报的是
+   「requested an async fixture, with no plugin that handled it」。
+   要么不带路径跑（`uv run pytest`），要么显式 `-c pyproject.toml`。
+4. **`nginx client_max_body_size` 要比应用上限宽一点**（21m vs 20MB）：
+   multipart 的分隔符和头也算进 body 长度，正好卡 20m 会让 19.9MB 的文件
+   被 nginx 拦下，而 nginx 回的是一页 HTML，前端拿不到那句「文件超过 20MB 上限」。
+5. **`uv sync --no-dev` 不装 extra。** 服务器上漏了 `--extra parse` 的表现是：
+   网站一切正常，上传也成功，只是每份文档都转成「解析失败：服务端缺少 docx
+   解析组件」。
+
+**上线验收（公网实测，2026-08-17）**
+
+用两个临时账号做的，验完已连数据一起删干净（`未用邀请码 0`、`文档 746` / `块 5268` 与灌数据时一致）。
+
+```
+/  /chat/  /documents/  /api/health   全 200
+POST /api/documents 无 cookie          401
+copilot-api / copilot-worker           active + enabled（开机自启）
+服务器上 import docx/pptx/pypdf         ok      ← --extra parse 真的装上了
+free -h 可用 1.0Gi                              ← 健康线 200MB
+
+A 上传 m6-rule.md → worker 在 1 秒内取到 → done / 1 块
+A 上传 x.exe      → 415        A 上传坏 docx → failed「打不开这个 Word 文件」
+B 的「我的文档」  → []         B 删 A 的文档 → 404，A 那份还在
+
+⭐ 隔离的线上验证（同一个问题，两个账号）
+   问「本公司京东面单用哪个模板，打印偏移量设多少」
+   A（主人）→「统一使用「JD-三联单-2026版」模板…[1] 偏移量上边距 3 毫米、
+              左边距 2 毫米，否则运单号会压到裁切线上。[1]」引用首条 = m6-rule
+   B（另一人）→「知识库暂无此内容。」无引用
+```
+
+**一个意外发现（留给 M8 量化）**：第一次验收用的测试文档写了「仅限内部查看」，
+问题也偏离 ERP 领域（「爱丽丝的客户报价是多少」）。结果**连文档主人都被答成
+「知识库暂无此内容」**——而检索层完全正常（那一块重排 0.9997 排第一，
+上下文里就是答案）。是 prompt 的第二道闸门（铁律 3 + 「ERP 实施顾问」的身份设定）
+把它挡了。对这个产品来说这个偏保守的取向大概是对的，但**保守到什么程度是没数的**，
+正好是 M8 评测集要回答的问题：假阴性率（材料里有、却答不知道）现在完全没有度量。
 
 ### M7 — Agent 化（2–3 天）
 
@@ -909,7 +1001,10 @@ free -h 可用 1.1Gi ← 健康线 200MB 以上
 
 - [ ] `eval/dataset.yaml`：30–50 题 = 常见 + 易错坑 + **"知识库没有、应答不知道"**
 - [ ] `eval/run.py`：LLM-as-Judge 自动打分，可复跑
-- [ ] 指标：准确率 / 引用正确率 / 幻觉率
+- [ ] 指标：准确率 / 引用正确率 / 幻觉率 /
+      ⭐ **假阴性率**（材料里有、却答「暂无此内容」）——M6 验收时撞见了真实案例，
+      现在这个数完全没有度量，而它和幻觉率是一对：prompt 的闸门收紧一分，
+      幻觉降一点、假阴性涨一点，不量化就只能凭感觉调
 - [ ] 跑一轮基线 → 调参（chunk 大小 / top-k / overlap）→ 出对比表
 - [ ] ⭐ **此时才评估要不要加 `pg_jieba` 混合检索**——用数字说话，不是凭感觉
 - [ ] 语雀定时增量同步（systemd timer）
@@ -921,7 +1016,6 @@ free -h 可用 1.1Gi ← 健康线 200MB 以上
 uv run python eval/run.py     # 出指标表
 # 改一个参数再跑 → 能看到指标变化对比
 ```
-
 ---
 
 ## 六、风险登记
@@ -969,7 +1063,11 @@ uv run copilot ask "<有的问题>"    # 期望：答案 + [1] 来源链接
 uv run copilot ask "公司年会在哪开" # 期望："知识库暂无此内容"
 uv run copilot invite -n 3        # 发邀请码
 uv run copilot serve              # 起 API，另开一个终端跑下面的 curl
+uv run copilot worker             # 另起一个进程解析上传（--once 则清空队列就退出）
 uv run pytest && uv run ruff check
+# ⚠️ 单跑一个测试文件要带 -c：`pytest ../tests/x.py` 时 rootdir 变成 Copilot/，
+#    读不到 backend/pyproject.toml 里的 asyncio_mode=auto，async 测试会全红
+uv run pytest -c pyproject.toml ../tests/test_jobs.py
 
 cd ../frontend && npm run dev  # 本机全链路
 npm run build                  # 必须能产出 out/
@@ -984,12 +1082,12 @@ npm run build                  # 必须能产出 out/
 # ── 线上 https://liushun666.cn ───────
 # 1. 邀请码注册 → 登录
 # 2. 提问 → 流式输出 + 引用可点击跳语雀原文
-# 3. 上传 md/docx → pending → done
+# 3. 上传 md/docx → pending → done（`systemctl status copilot-worker` 看进展）
 # 4. 提问命中新文档
 # 5. 换账号 → 搜不到那份文档          ← 隔离的线上验证
 # 6. "帮我做个实施方案" → Agent 追问 → 下载 xlsx
-# 7. https://liushun666.cn/aura 仍能打开
-# 8. ssh 上去 free -h，剩余内存 > 200MB   ← 1.6GB 的健康线
+# 7. ssh 上去 free -h，剩余内存 > 200MB   ← 1.6GB 的健康线
+#    （M5 起 Aura Note 已下线，别再去验 /aura；恢复办法在 deploy/nginx.conf 注释里）
 ```
 
 ---

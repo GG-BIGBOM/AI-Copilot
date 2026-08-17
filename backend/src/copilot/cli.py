@@ -230,9 +230,56 @@ def serve(
 
 
 @app.command()
-def worker() -> None:
-    """启动后台任务 worker（解析上传文档等）。"""
-    _todo("M6")
+def worker(
+    poll: float = typer.Option(3.0, "--poll", help="队列空时的轮询间隔（秒）"),
+    once: bool = typer.Option(False, "--once", help="只清空当前队列，跑完就退出"),
+) -> None:
+    """启动后台任务 worker（解析上传的文档）。
+
+    线上是 `copilot-worker.service` 常驻。`--once` 给手动补跑用：
+    worker 停过一段时间、队列里积了任务时，跑一次清空它。
+    """
+    import asyncio
+
+    asyncio.run(_worker(poll, once))
+
+
+async def _worker(poll: float, once: bool) -> None:
+    import logging
+
+    from copilot.api.providers import close_all, get_embedder
+    from copilot.jobs.worker import run_once, run_worker, startup_reclaim
+
+    # worker 的进展全在 logger 里（systemd 收进 journal）。不配置的话，
+    # 前台跑 `copilot worker` 就是一片死寂——看不出它到底在干活还是卡住了
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    try:
+        if once:
+            if n := await startup_reclaim():
+                typer.echo(f"回收了 {n} 条上次没跑完的任务")
+            done = failed = 0
+            # 失败的任务若可重试会回到 pending，这里会再取到它——MAX_ATTEMPTS
+            # 之内就地试完，不必等下一次手动补跑
+            while (outcome := await run_once(get_embedder())) != "idle":
+                done += outcome == "done"
+                failed += outcome == "failed"
+            typer.secho(
+                f"处理了 {done} 条任务" + (f"，{failed} 条失败" if failed else "") + "，队列已空。",
+                fg=typer.colors.GREEN if not failed else typer.colors.YELLOW,
+            )
+            return
+
+        await run_worker(poll_interval=poll, report=lambda m: typer.echo(m))
+    except KeyboardInterrupt:
+        # Windows 上装不了信号处理器（见 run_worker），Ctrl-C 走的是这条路
+        typer.echo("\n已中断。")
+    finally:
+        close_all()
 
 
 if __name__ == "__main__":

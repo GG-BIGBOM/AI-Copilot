@@ -148,6 +148,23 @@ class Settings(BaseSettings):
         """镜像下来的语雀配图。线上由 nginx 直接发，不经过 Python。"""
         return self.data_dir / "images"
 
+    def upload_path(self, stored_path: str) -> Path:
+        """把 `documents.stored_path` 还原成绝对路径。
+
+        **库里存的是相对 `upload_dir` 的路径**，不是绝对路径：绝对路径会把
+        开发机的目录（`C:\\Users\\...`）写进数据库，搬到服务器上
+        （`/opt/copilot`）全都指不对，而这个库是要跨机器用的。
+
+        顺手挡一道路径穿越：`stored_path` 正常情况下是我们自己生成的 uuid，
+        但万一哪天有别的写入路径把 `../../etc/passwd` 塞了进来，
+        这里直接拒绝，而不是老老实实去读。
+        """
+        base = self.upload_dir.resolve()
+        p = (base / stored_path).resolve()
+        if p != base and base not in p.parents:
+            raise ValueError(f"上传路径越界：{stored_path!r}")
+        return p
+
 
 @lru_cache
 def get_settings() -> Settings:

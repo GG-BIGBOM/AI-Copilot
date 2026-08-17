@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
+  FileText,
   LogOut,
   MessageSquare,
   MessageSquarePlus,
@@ -150,6 +152,16 @@ export function Sidebar({
               <X className="size-4" />
             </Button>
           </div>
+
+          {/* 我的文档。放在新建对话下面、会话列表之上——它是入口，不是历史记录 */}
+          <Link
+            href="/documents"
+            onClick={onClose}
+            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            <FileText className="size-3.5 opacity-60" />
+            <span>我的文档</span>
+          </Link>
 
           {/* 搜索框 */}
           {conversations.length > 2 && (

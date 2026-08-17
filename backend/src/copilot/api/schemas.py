@@ -122,3 +122,35 @@ class MessageOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DocumentOut(BaseModel):
+    """「我的文档」列表里的一行。
+
+    ⚠️ **不含 `stored_path`。** 那是服务器上的落盘路径，对用户毫无用处，
+    却会把目录结构和 uuid 命名规则透出去。用户要看的是自己传上来时那个文件名。
+    """
+
+    id: uuid.UUID
+    title: str
+    original_filename: str | None = None
+    size_bytes: int | None = None
+    status: str  # pending | running | done | failed
+    error: str | None = None
+    chunk_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UploadResult(BaseModel):
+    """上传的回执。
+
+    `duplicate` 为真表示这份文件之前就传过了，服务端沿用了原来那一篇——
+    前端据此提示「这份文件已经在库里」，而不是让用户对着列表里数不出的
+    第二条同名记录发愣。
+    """
+
+    document: DocumentOut
+    duplicate: bool = False

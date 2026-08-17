@@ -35,6 +35,29 @@ export type ConversationSummary = {
   created_at: string;
 };
 
+/** 「我的文档」列表里的一行。字段名跟后端 `DocumentOut` 对齐。 */
+export type DocumentSummary = {
+  id: string;
+  title: string;
+  original_filename: string | null;
+  size_bytes: number | null;
+  /** pending 排队中 · running 解析中 · done 已完成 · failed 失败 */
+  status: "pending" | "running" | "done" | "failed";
+  error: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UploadResult = {
+  document: DocumentSummary;
+  /** 这份文件之前就传过了，服务端沿用了原来那一篇 */
+  duplicate: boolean;
+};
+
+/** 解析还没结束的状态。有这类文档在，列表就要继续轮询。 */
+export const DOC_IN_PROGRESS: DocumentSummary["status"][] = ["pending", "running"];
+
 export type StoredMessage = {
   id: string;
   role: "user" | "assistant" | "tool";
@@ -96,6 +119,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * 上传文件。**不能走 `request()`**——它给每个请求都写死了
+ * `Content-Type: application/json`，而 multipart 的 Content-Type 里含一个随机
+ * boundary，必须让浏览器自己生成。手写这个头的话，后端会因为找不到 boundary
+ * 直接 422，而错误信息完全指不到这里。
+ */
+async function upload(path: string, file: File): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", body: form });
+  } catch {
+    throw new ApiError("连不上服务器，请确认后端已启动。", 0);
+  }
+
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* 413 之类可能根本不是 JSON（nginx 自己挡下的） */
+    }
+    throw new ApiError(
+      readDetail(body, res.status === 413 ? "文件太大了。" : `上传失败（HTTP ${res.status}）`),
+      res.status,
+    );
+  }
+  return (await res.json()) as UploadResult;
+}
+
 export const api = {
   register: (body: { email: string; password: string; inviteCode: string }) =>
     request<User>("/api/auth/register", { method: "POST", body: JSON.stringify(body) }),
@@ -110,4 +165,10 @@ export const api = {
   conversations: () => request<ConversationSummary[]>("/api/conversations"),
 
   messages: (id: string) => request<StoredMessage[]>(`/api/conversations/${id}/messages`),
+
+  documents: () => request<DocumentSummary[]>("/api/documents"),
+
+  uploadDocument: (file: File) => upload("/api/documents", file),
+
+  deleteDocument: (id: string) => request<void>(`/api/documents/${id}`, { method: "DELETE" }),
 };

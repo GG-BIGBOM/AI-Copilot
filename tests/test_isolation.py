@@ -13,7 +13,7 @@ import uuid
 import pytest
 from sqlalchemy import delete, select
 
-from copilot.db.models import Chunk, Document, User
+from copilot.db.models import Chunk, Document, InviteCode, User
 from copilot.providers.base import RerankResult
 from copilot.retrieve import _visibility_filter, search
 
@@ -201,6 +201,119 @@ async def test_public_document_visible_to_everyone(two_users_with_docs):
             )
             titles = [c.citation.title for c in result.chunks]
             assert any("公共手册" in t for t in titles), f"user_id={uid} 看不到公共文档"
+
+
+# ---------- 端到端：真上传 → 真 worker → 真检索 ----------
+
+
+@pytest.fixture
+async def alice_uploaded(api_client, maker):
+    """走完整链路造一篇私有文档：HTTP 上传 → jobs 队列 → worker 解析 → 入库。
+
+    上面那些用例是直接往库里插 chunk 造出来的，验的是 `_visibility_filter`。
+    这个验的是**另一件事**：`owner_id` 能不能从 cookie 里的登录用户，
+    一路正确地传到 `chunks.owner_id`——中间要穿过上传接口、队列 payload、
+    worker、`write_chunks` 四段代码。任何一段漏了，隔离就形同虚设，
+    而且不会有任何报错。
+
+    这是 M6 验收里「换账号登录搜不到那份文档」的自动化版本。
+    """
+    import shutil
+
+    from copilot.auth.invites import create_invite_codes
+    from copilot.config import get_settings
+    from copilot.db.models import Job
+    from copilot.jobs.worker import run_once
+
+    tag = uuid.uuid4().hex[:8]
+    secret = f"爱丽丝的客户报价是每单三十元-{tag}"
+
+    async with maker() as s:
+        (code,) = await create_invite_codes(s, 1)
+    r = await api_client.post(
+        "/api/auth/register",
+        json={
+            "email": f"iso-{tag}@test.local",
+            "password": "test-password-2026",
+            "inviteCode": code,
+        },
+    )
+    assert r.status_code == 201, r.text
+    alice_id = uuid.UUID(r.json()["id"])
+
+    # 正文**不加 Markdown 标题**：切分器会把章节路径拼到块正文开头，
+    # 而 FakeEmbedder 的桶下标带字符位置（`ord(ch)*7 + i`），前面多几个字
+    # 就会把整个向量错开，拿原文去搜反而搜不到自己。真实 embedder 没这个毛病，
+    # 但测试要的是「隔离对不对」，不该被假向量的位置敏感性干扰。
+    r = await api_client.post(
+        "/api/documents",
+        files={"file": (f"报价单-{tag}.md", secret.encode(), "text/markdown")},
+    )
+    assert r.status_code == 201, r.text
+    doc_id = uuid.UUID(r.json()["document"]["id"])
+
+    # 真 worker 把队列跑空（embedder 是假的，不打网络）。
+    # 不写成「跑一轮」：队列是全库共享的，别的用例可能留下一条任务，
+    # 那样这一轮取到的就不是刚才这篇——测试会以一种极难查的方式随机失败
+    emb = FakeEmbedder()
+    while await run_once(emb, maker) != "idle":
+        pass
+    async with maker() as s:
+        assert (await s.get(Document, doc_id)).status == "done"
+
+    async with maker() as s:
+        bob = User(email=f"iso-bob-{tag}@t.local", password_hash="x")
+        s.add(bob)
+        await s.commit()
+        bob_id = bob.id
+
+    yield alice_id, bob_id, secret, doc_id
+
+    async with maker() as s:
+        await s.execute(delete(Job).where(Job.payload["document_id"].astext == str(doc_id)))
+        await s.execute(delete(Chunk).where(Chunk.document_id == doc_id))
+        await s.execute(delete(Document).where(Document.id == doc_id))
+        await s.execute(delete(InviteCode).where(InviteCode.code == code))
+        await s.execute(delete(User).where(User.id.in_([alice_id, bob_id])))
+        await s.commit()
+    shutil.rmtree(get_settings().upload_dir / str(alice_id), ignore_errors=True)
+
+
+async def test_uploaded_document_never_reaches_another_user(alice_uploaded, maker):
+    """⭐ 本里程碑最不能红的一条。用 A 的原文去搜，是最严苛的情形。"""
+    alice_id, bob_id, secret, _ = alice_uploaded
+    async with maker() as s:
+        result = await search(
+            s, secret, FakeEmbedder(), PassThroughReranker(), user_id=bob_id, top_k=20, rerank_k=20
+        )
+    hits = [c.content for c in result.chunks]
+    assert not any(secret in h for h in hits), f"泄漏了！鲍勃搜到了爱丽丝上传的内容：{hits}"
+
+
+async def test_uploaded_document_is_findable_by_its_owner(alice_uploaded, maker):
+    """隔离不能矫枉过正——自己传的东西自己得搜得到，否则上传功能等于没有。"""
+    alice_id, _, secret, _ = alice_uploaded
+    async with maker() as s:
+        result = await search(
+            s,
+            secret,
+            FakeEmbedder(),
+            PassThroughReranker(),
+            user_id=alice_id,
+            top_k=20,
+            rerank_k=20,
+        )
+    assert any(secret in c.content for c in result.chunks), "自己上传的文档反而搜不到"
+
+
+async def test_anonymous_never_reaches_uploaded_documents(alice_uploaded, maker):
+    alice_uploaded_ids = alice_uploaded
+    _, _, secret, _ = alice_uploaded_ids
+    async with maker() as s:
+        result = await search(
+            s, secret, FakeEmbedder(), PassThroughReranker(), user_id=None, top_k=20, rerank_k=20
+        )
+    assert not any(secret in c.content for c in result.chunks)
 
 
 async def test_every_chunk_owner_matches_its_document(engine):
