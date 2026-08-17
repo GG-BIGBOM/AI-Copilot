@@ -1,0 +1,37 @@
+[Unit]
+Description=Copilot 知识库 API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User=copilot
+Group=copilot
+WorkingDirectory=/opt/copilot
+
+# 直接调 venv 里的 uvicorn，不经过 `uv run`：
+# uv run 会在每次启动时校验/同步依赖，服务重启就多一次网络往返，
+# 断网时甚至起不来。
+#
+# ⭐ workers 恒为 1。1.6GB 内存放不下第二个 worker，
+# 所以任何阻塞事件循环的调用都必须丢线程池——见 retrieve.py 与 api/routes/chat.py。
+ExecStart=/opt/copilot/.venv/bin/uvicorn copilot.api.app:app \
+    --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
+
+# 只监听 127.0.0.1，公网入口一律走 nginx
+Restart=always
+RestartSec=3
+
+# 收敛权限：这是个公网可注册的服务，别用 root 跑
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 只有数据目录可写（上传的文件、镜像下来的语雀配图）
+ReadWritePaths=/opt/copilot/data
+
+# 内存兜底：真跑飞了宁可重启，也别让 OOM killer 去挑 postgres 下手
+MemoryMax=600M
+
+[Install]
+WantedBy=multi-user.target

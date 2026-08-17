@@ -6,6 +6,28 @@ import remarkGfm from "remark-gfm";
 import { Check, Copy, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { API_BASE } from "@/lib/api";
+import type { AnswerImage } from "@/lib/chat-types";
+
+// 模型在步骤末尾写的配图引用，如「1. 进入【设置】[图1]」。
+// 容忍中间多打一个空格——模型偶尔会写成 [图 1]，漏掉的话用户就看见一个裸标记。
+const IMAGE_REF_RE = /\[图\s*(\d{1,2})\]/g;
+
+/**
+ * 把答案里的 `[图1]` 换成 Markdown 图片语法，交给 react-markdown 正常渲染。
+ *
+ * **图号对不上的一律删掉。** 模型偶尔会引用一个材料里不存在的编号
+ * （本轮只有 3 张图却写了 [图5]）。留着它，用户看到的是一个意义不明的
+ * 方括号；换成图，就是配了一张错的截图。两者都比直接抹掉差。
+ */
+function inlineImages(content: string, images: AnswerImage[]): string {
+  if (images.length === 0) return content.replace(IMAGE_REF_RE, "");
+  const byNumber = new Map(images.map((img) => [img.n, img.url]));
+  return content.replace(IMAGE_REF_RE, (_, n: string) => {
+    const url = byNumber.get(Number(n));
+    return url ? `![图${n}](${url})` : "";
+  });
+}
 
 function CodeBlock({
   language,
@@ -61,9 +83,11 @@ function CodeBlock({
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
+  images = [],
   isStreaming = false,
 }: {
   content: string;
+  images?: AnswerImage[];
   isStreaming?: boolean;
 }) {
   return (
@@ -71,6 +95,29 @@ export const MarkdownContent = memo(function MarkdownContent({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          img({ src, alt }) {
+            if (typeof src !== "string" || !src) return null;
+            // 地址是根相对路径 /images/…：开发时要拼上后端的 8000，
+            // 线上同源留空，由 nginx 直接发
+            const href = src.startsWith("/") ? `${API_BASE}${src}` : src;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="点击查看大图"
+                className="mt-2 mb-3 block w-fit max-w-full no-underline"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={href}
+                  alt={alt || "操作截图"}
+                  loading="lazy"
+                  className="max-h-96 max-w-full rounded-xl border border-border/80 object-contain shadow-2xs transition-opacity hover:opacity-90"
+                />
+              </a>
+            );
+          },
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
             const isInline = !match && !String(children).includes("\n");
@@ -111,7 +158,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           },
         }}
       >
-        {content}
+        {inlineImages(content, images)}
       </ReactMarkdown>
       {isStreaming && <span className="chat-cursor" />}
     </div>

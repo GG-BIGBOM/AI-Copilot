@@ -118,6 +118,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     citations: list | None = None
+    images: list | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

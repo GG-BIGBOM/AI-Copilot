@@ -113,7 +113,7 @@ async def _chat_stream(
             # 前端据此知道这轮落在哪条会话上（服务端可能没沿用它传来的 id）
             yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
 
-            text_stream, citations = await ask_stream(
+            streamed = await ask_stream(
                 session,
                 question,
                 providers.get_embedder(),
@@ -121,6 +121,16 @@ async def _chat_stream(
                 providers.get_llm(),
                 user_id=user_id,
             )
+
+            # 配图**在正文之前**发，和引用相反。因为前端要边流边把 [图1] 换成
+            # 真图，拿不到对照表就只能干等。这不违反第 1 条：图片不构成"答案有
+            # 依据"的暗示——模型说「暂无此内容」时正文里根本没有 [图N]，
+            # 什么都不会渲染。
+            if streamed.images:
+                yield stream.data_part("images", {"images": streamed.images})
+
+            text_stream = streamed.stream
+            citations = streamed.citations
 
             yield stream.text_start(text_id)
             text_open = True
@@ -143,6 +153,8 @@ async def _chat_stream(
                     role="assistant",
                     content=answer,
                     citations=shown or None,
+                    # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记
+                    images=(streamed.images or None) if shown else None,
                 )
             )
             await session.commit()

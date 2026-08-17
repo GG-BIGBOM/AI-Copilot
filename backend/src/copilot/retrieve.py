@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
+import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 
 import anyio.to_thread
@@ -26,6 +27,9 @@ from sqlalchemy.sql.elements import ColumnElement
 from copilot.config import get_settings
 from copilot.db.models import Chunk
 from copilot.providers.base import Embedder, Reranker
+
+# 与 ingest/chunker.py 的标记格式一致：正文里存 `[图:a3f9]`
+_IMG_MARK_RE = re.compile(r"\[图:([0-9a-f]{4})\]")
 
 
 @dataclass(slots=True)
@@ -56,6 +60,19 @@ class Citation:
 class RetrievedChunk:
     content: str
     citation: Citation
+    images: list[dict] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ContextBundle:
+    """喂给 LLM 的上下文，以及答案里 `[图N]` 该指向哪张图。
+
+    两者必须一起产出——分成两个方法算的话，迟早会出现编号和图片对不上的情形，
+    而那种错误的表现是「答案配了错误的截图」，没有任何报错。
+    """
+
+    text: str
+    images: list[dict] = field(default_factory=list)  # [{"n":1,"url":...}, ...]
 
 
 @dataclass(slots=True)
@@ -71,11 +88,38 @@ class RetrievalResult:
     def citations(self) -> list[Citation]:
         return [c.citation for c in self.chunks]
 
+    def build_context(self) -> ContextBundle:
+        """拼上下文，同时把配图标记重新编号。
+
+        块正文里存的是 `[图:a3f9]`（id 随图走，与顺序无关）。这里按在上下文里
+        第一次出现的先后，统一换成 `[图1]`、`[图2]`……模型只看得到这些编号，
+        因此**只能引用真实存在的图**——它编不出一个 URL 来。
+        """
+        numbering: dict[str, int] = {}
+        images: list[dict] = []
+        parts: list[str] = []
+
+        for rc in self.chunks:
+            by_id = {img["id"]: img for img in rc.images if img.get("id")}
+
+            def renumber(m: re.Match[str], by_id=by_id) -> str:
+                ident = m.group(1)
+                img = by_id.get(ident)
+                if img is None:
+                    return ""  # 块里没这张图的地址，标记留着只会误导模型
+                if ident not in numbering:
+                    numbering[ident] = len(numbering) + 1
+                    images.append({"n": numbering[ident], "url": img["url"]})
+                return f"[图{numbering[ident]}]"
+
+            body = _IMG_MARK_RE.sub(renumber, rc.content)
+            parts.append(f"[{rc.citation.n}] 来源：{rc.citation.label}\n{body}")
+
+        return ContextBundle(text="\n\n".join(parts), images=images)
+
     def to_context(self) -> str:
-        """拼成喂给 LLM 的上下文，每段带编号，模型才能标 [n]。"""
-        return "\n\n".join(
-            f"[{c.citation.n}] 来源：{c.citation.label}\n{c.content}" for c in self.chunks
-        )
+        """只要文本的旧入口。"""
+        return self.build_context().text
 
 
 def _visibility_filter(user_id: uuid.UUID | None) -> ColumnElement[bool]:
@@ -151,6 +195,7 @@ async def search(
         chunks=[
             RetrievedChunk(
                 content=chunk.content,
+                images=list(chunk.images or []),
                 citation=Citation(
                     n=i,
                     title=chunk.title,

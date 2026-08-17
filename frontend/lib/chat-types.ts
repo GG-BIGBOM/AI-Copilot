@@ -12,7 +12,11 @@ import type { Citation } from "@/lib/api";
 export type CopilotDataParts = {
   conversation: { id: string; title: string };
   citations: { citations: Citation[] };
+  images: { images: AnswerImage[] };
 };
+
+/** 答案正文里 `[图1]` 的编号 → 图片地址。地址是根相对路径，用时拼 API_BASE。 */
+export type AnswerImage = { n: number; url: string };
 
 export type CopilotUIMessage = UIMessage<unknown, CopilotDataParts>;
 
@@ -30,6 +34,20 @@ export function messageText(message: CopilotUIMessage): string {
 export function messageCitations(message: CopilotUIMessage): Citation[] {
   for (const part of message.parts) {
     if (part.type === "data-citations") return part.data.citations;
+  }
+  return [];
+}
+
+/**
+ * 取这条消息的配图对照表。
+ *
+ * 和引用不同，这个片段在正文**之前**就到了——前端要边流边把 `[图1]` 换成真图，
+ * 拿不到对照表就只能干等。这不违反「说不知道就不挂来源」：模型答
+ * 「知识库暂无此内容」时正文里根本不会出现 [图N]，什么都不会渲染。
+ */
+export function messageImages(message: CopilotUIMessage): AnswerImage[] {
+  for (const part of message.parts) {
+    if (part.type === "data-images") return part.data.images;
   }
   return [];
 }

@@ -1,17 +1,51 @@
 """全局配置。所有密钥只从 .env 读，绝不硬编码。"""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录（Copilot/），data/ 与 .env 都挂在这里
-ROOT_DIR = Path(__file__).resolve().parents[3]
+
+def _resolve_root() -> Path:
+    """定位项目根目录（`data/` 与 `.env` 都挂在这里）。
+
+    ⚠️ **不能只靠数目录层数。** 开发时是
+    `Copilot/backend/src/copilot/config.py`，往上四层正好是项目根；
+    但部署到服务器时目录常被拍平成 `/opt/copilot/src/copilot/config.py`，
+    层数少一层，根就算成了 `/opt`。
+
+    这个错误的可怕之处在于**它不报错**：pydantic-settings 读不到 .env
+    就静默使用字段默认值，于是应用拿着默认的 `kb:kb` 去连数据库，
+    最后报出来的是「password authentication failed」——排查方向被带偏到
+    密码和 pg_hba 上，真正的原因在三层目录之外。
+
+    所以按可靠性排序：显式环境变量 → 向上找标志文件 → 才轮到数层数。
+    """
+    if explicit := os.getenv("COPILOT_ROOT"):
+        return Path(explicit).resolve()
+
+    here = Path(__file__).resolve()
+    # `.env.example` 一定在仓库里，是比 `.env` 更可靠的路标（后者被 gitignore）。
+    # **两趟分开找，顺序不能反**：开发布局里 `backend/` 自己也含 `.env.example`，
+    # 混在一趟里会先命中它，把根算成 `backend/`，于是 data/ 指到 backend/data。
+    for parent in here.parents:  # 开发布局：<根>/backend/.env.example
+        if (parent / "backend" / ".env.example").exists():
+            return parent
+    for parent in here.parents:  # 部署拍平：<根>/.env.example
+        if (parent / ".env.example").exists():
+            return parent
+    return here.parents[3]
+
+
+ROOT_DIR = _resolve_root()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=ROOT_DIR / "backend" / ".env",
+        # 两种布局都认：开发时在 backend/ 下，部署拍平后在根下。
+        # 靠后的优先级更高，所以开发布局能盖住部署布局
+        env_file=(ROOT_DIR / ".env", ROOT_DIR / "backend" / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -73,6 +107,23 @@ class Settings(BaseSettings):
     # ===== 语雀抓取 =====
     yuque_rate_limit_per_sec: float = 1.5  # 保守限速，别把自己封了
     yuque_max_retries: int = 3
+
+    # ===== 语雀配图镜像 =====
+    # ⚠️ 语雀 CDN 有防盗链：带 Referer 取图直接 403（实测）。
+    # 所以图片必须落到本地自己发，不能在页面上直接外链 cdn.nlark.com。
+    mirror_images: bool = True
+    # 图片是静态资源，不走语雀的 API，可以比抓正文快一些。786 篇约 3000 张图
+    image_rate_limit_per_sec: float = 6.0
+    image_max_retries: int = 3
+    image_max_bytes: int = 10 * 1024 * 1024  # 单张上限，超了跳过
+    image_allowed_suffixes: tuple[str, ...] = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+    )
     yuque_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -91,6 +142,11 @@ class Settings(BaseSettings):
     @property
     def upload_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def image_dir(self) -> Path:
+        """镜像下来的语雀配图。线上由 nginx 直接发，不经过 Python。"""
+        return self.data_dir / "images"
 
 
 @lru_cache

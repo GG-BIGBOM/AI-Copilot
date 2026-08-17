@@ -40,6 +40,8 @@ export type StoredMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
   citations: Citation[] | null;
+  /** 正文里 [图1] 的对照表。没有它，历史消息里的图号就成了裸标记 */
+  images: { n: number; url: string }[] | null;
   created_at: string;
 };
 

@@ -341,7 +341,7 @@ Copilot/
 | | M2 语雀入库 | 2–3 d | 8 d | M1 | ✅ |
 | **上线期** | M3 认证 + 聊天 API | 2 d | 10 d | M1 | ✅ |
 | | M4 Next.js 前端 | 2–3 d | 13 d | M3 | ✅ |
-| | **M5 上线** ⭐ | 1–2 d | 15 d | M2, M4 | ⬜ |
+| | **M5 上线** ⭐ | 1–2 d | 15 d | M2, M4 | 🟢 站点已上线 |
 | **增强期** | M6 上传 + 私有库 | 2–3 d | 18 d | M5 | ⬜ |
 | | M7 Agent 化 | 2–3 d | 21 d | M5 | ⬜ |
 | | M8 评测 + 优化 | 2–3 d | 24 d | M7 | ⬜ |
@@ -691,19 +691,139 @@ npm run build                               # 必须产出 out/
 ```
 > **`npm run build` 这步不过，M5 就上不了线**——服务器跑不了 build。
 
-### M5 — 上线 ⭐ **第一个交付点**（1–2 天）　⬅️ **下一步，暂缓**
+### M4.5 — 答案带操作截图　✅ **已完成 2026-08-17**
 
-> **开工前唯一的阻塞项：SSH 访问方式**（见第九节第 6 项）。
-> 两条路，选一条：
-> - **给 SSH** → 我直接把服务器初始化、nginx、certbot、systemd、首次灌数据全做完
-> - **不给** → 我把 `deploy/` 下的脚本和 nginx 配置全写好并自测，你 ssh 上去逐条执行
->
-> 其余前置条件都齐了：M3 的 API、M4 的 `out/` 静态产物、语雀 786 篇语料
-> 都已在本机验证通过。**M5 不依赖任何还没做的东西。**
->
-> 上线前记得改 `backend/.env` 两个值：
-> `COOKIE_SECURE=true`（HTTPS 下 cookie 才存得住，同时关掉 `/api/docs`）、
-> `CORS_ORIGINS=`（线上同源，留空）。
+> 计划外插入的一项。ERP 文档「点哪个按钮」全靠截图说清楚，纯文字答案差口气。
+> 用户决定：**上线时就带图**、**行内插图**（不是只堆在来源区）、**图片下载到本地**。
+
+**起因：图片一直都在，是被我自己扔掉的。**
+语雀的配图不是 `<img>` 而是 `<card name="image" value="data:...">`，
+而 `lake_to_markdown()` 里一句 `soup.select("card, ...")` 把所有卡片都
+`decompose()` 了——附件和脑图该删，图片是误伤。786 篇 Markdown 里只剩 3 篇有图。
+抽样 12 篇实测**平均 3.9 张/篇**，外推全库约 3000 张。
+
+**必须镜像到本地，不能外链**（实测）：
+
+```
+curl <语雀图片>                                 → HTTP 200
+curl -H 'Referer: https://liushun666.cn/' <同一张> → HTTP 403
+```
+
+浏览器加载 `<img>` 默认带 Referer，直接外链就是**满屏裂图**。
+`referrerpolicy="no-referrer"` 眼下能绕过，但那是把整站的图押在
+「语雀不收紧策略」上，且收紧后是静默故障——图裂了没有任何报错。
+
+- [x] `sources/yuque.py`：删卡片**之前**先把图片卡片换成 `<img>`
+- [x] `sources/images.py`：内容寻址下载器（按 URL 的 sha256 命名、两级目录、
+      限速 6 req/s、重试、10MB 上限、临时文件改名落盘）
+- [x] `sources/sync.py`：同步时顺带镜像，正文里的地址改写成 `/images/...`
+- [x] `ingest/chunker.py`：图片抽成 `[图:a3f9]` 标记，随块走
+- [x] `db/models.py`：`chunks.images` + `messages.images`（迁移 `108c3b17f470`）
+- [x] `retrieve.py`：`build_context()` 把块内标记重编成全局 `[图1][图2]`
+- [x] `qa.py`：prompt 教模型在步骤末尾引用图号，且**只准用材料里出现过的编号**
+- [x] `api/routes/chat.py`：`data-images` 片段（**在正文之前**发，见下）
+- [x] 前端：`[图N]` 渲染成可点开的截图，编号对不上的静默丢掉
+- [x] `tests/test_images.py` 25 条
+- [x] 全量重新同步（786 篇 / 6048 张图 1.1G）+ 重新入库（5268 块，55% 带图）
+- [x] 线上端到端验收
+
+**⭐ 实测：模型到底会不会引用 `[图N]`**
+
+这是整件事唯一无法靠代码保证的环节，实测了两轮：
+
+| | 6 题中带图 | 图引用数 | **无效图号** |
+|---|---|---|---|
+| 初版 prompt | 3 / 6 | 14 | **0** |
+| 调整后 | **6 / 6** | **34** | **0** |
+
+初版把配图规则放在「写法要求」末尾，还加了一句「图不是必须的，不要为了凑数硬塞」——
+这个 hedge 把模型压住了。改成**铁律第 5 条**、正面表述在前，覆盖率从 50% 提到 100%。
+
+**两轮都是 0 个无效图号**，这是最危险的失败模式（配一张错的截图比没有图更糟），
+没有发生。前端另有一层：编号对不上的静默丢掉，不会显示成裂图或错图。
+
+防幻觉闸门回归验证：3 道知识库没有的题，全部「暂无此内容」+ 零来源 + 零图号。
+
+> **一个差点被我判成 bug 的细节**：第一次测「京东电子面单模板怎么设置」，
+> 模型一个图号都没写，看着像功能没生效。查下来是**模型对的**——
+> 召回的材料讲的是得物/京邦达，确实没有京东的截图。
+> 单题结论不可信，必须成批测。
+
+**两个关键设计**
+
+1. **标记自带 id，不靠"数第几张图"。**
+   如果按顺序计数，只要有一段被 `min_chars` 滤掉，后面所有图就整体偏移一张——
+   「第 3 步」配上「第 2 步」的截图，而且**不会有任何报错**。
+   `[图:a3f9]` 里的 id 由图片地址哈希而来，每块自己就能算出带哪些图，与顺序无关。
+
+2. **配图在正文之前发，引用在正文之后发。**
+   看着矛盾，其实是同一条原则的两面：
+   - 引用晚发，是因为模型可能答「知识库暂无此内容」，那时挂来源会让用户
+     误以为答案有依据（M1 坑 #2）
+   - 配图早发，是因为前端要边流边把 `[图1]` 换成真图；而它不构成"有依据"的
+     暗示——模型说不知道时正文里根本不会出现 `[图N]`，什么都不会渲染
+
+### M5 — 上线 ⭐ **第一个交付点**　🟢 **站点已上线 2026-08-17，数据灌注中**
+
+> **SSH 不用另给**——`~/.ssh/erp_vps`（上个 erp-copilot 项目留下的密钥）
+> 对 `root@8.136.116.9` 仍然有效，免密可登。
+
+**已完成**
+
+- [x] 备份 nginx 全量配置 + `/var/www` → `/root/backup-20260817-163500`（186M）
+- [x] 80/443 早已放行（Aura Note 一直在跑），无需改安全组
+- [x] PostgreSQL 16.14 + pgvector 0.6.0（Ubuntu 官方源就有，不必加 PGDG）
+- [x] `shared_buffers=128MB` / `max_connections=20`，七张表迁移到位
+- [x] 数据库密码**在服务器上生成**，写进 `/root/.kb-db-password`(600)，全程不过对话
+- [x] uv + 依赖（92 个包）
+- [x] `copilot-api.service`：非 root 的 `copilot` 账号、`MemoryMax=600M`、
+      `ProtectSystem=strict`。实测常驻 **81MB**
+- [x] nginx 切换：`/` → 前端，`/api` → 8000，`/images/` → 配图
+- [x] **Aura Note 下线**（2026-08-17，用户决定只保留知识库助手）。
+      留了两份：`/var/www/myprogram.retired-20260817` 和
+      `/root/backup-20260817-163500/var-www/myprogram`（186M / 10 个文件，已核对一致）。
+      恢复办法写在 `deploy/nginx.conf` 的注释里
+- [x] HTTPS 沿用既有证书（有效期至 2026-10-15），HTTP 强制跳转
+- [x] `deploy/`：`setup-server.sh` / `deploy.sh` / `nginx.conf` / `copilot-api.service`
+- [ ] 灌数据（服务器自己在跑 `sync-yuque`，约 1–2 小时）
+- [ ] `copilot ingest` + 发邀请码 + 端到端验收
+
+**上线验收（公网实测）**
+```
+/                200   /login/     200   /register/  200   /chat/  200
+/api/health      200
+/api/chat 无 cookie   401     /api/docs   404 ← 线上已关闭
+http://  → 301 https://
+free -h 可用 1.1Gi ← 健康线 200MB 以上
+```
+> ⚠️ 验证公网可达**必须用 `curl --resolve`**：本机 VPN 做 fake-IP DNS 劫持，
+> 直接 curl 域名会全部失败，看起来像上线没成功（见坑 #5）。
+
+**一处改动**：图片不从本机上传。语雀配图约 6000 张 1GB，
+服务器在阿里云机房、从语雀 CDN 拉比家用宽带上传快得多；
+而图片路径是按 URL 哈希算的，两边跑出来完全一致。
+
+**踩到的坑**
+
+1. **⭐ `config.py` 靠数目录层数定位项目根，部署时必然错。**
+   开发是 `Copilot/backend/src/copilot/config.py`（往上四层是根），
+   部署时目录被拍平成 `/opt/copilot/src/copilot/config.py`，根就算成了 `/opt`。
+   可怕的是**它不报错**：pydantic-settings 读不到 `.env` 就静默用字段默认值，
+   应用拿着默认的 `kb:kb` 去连库，最后报的是「password authentication failed」——
+   排查方向被带到密码和 pg_hba 上，真正的原因在三层目录之外。
+   已改成「显式 `COPILOT_ROOT` → 向上找 `.env.example` → 才轮到数层数」。
+2. **向上找路标要分两趟。** 第一版把「找 `<x>/backend/.env.example`」和
+   「找 `<x>/.env.example`」写在同一个循环里，结果在 `backend/` 就命中了第二个条件，
+   根被算成 `backend/`，`data/` 跟着指到 `backend/data`。开发布局必须先判。
+3. **`pkill -f "uv sync"` 会把自己杀掉。** `-f` 匹配整条命令行，
+   而我那条 ssh 命令的命令行里正好含 "uv sync"。表现是命令毫无输出、
+   什么也没发生。
+4. **阿里云到 PyPI 慢到装不完**：默认源几分钟才装 2 个包，
+   换清华源后 **20 秒装完 92 个**。这不是优化，是能不能装完的问题。
+5. **本机 `curl https://liushun666.cn` 全部失败，但站点是好的。**
+   本机装了 VPN/代理做 fake-IP DNS 劫持，域名解析到了 `198.18.1.213`
+   （保留段）。验证公网可达要用 `curl --resolve` 绕开本机 DNS，
+   否则会得出「上线失败」的错误结论。
 
 **裸装，不用 Docker**（1.6GB 上 Docker 本身的开销不划算）。
 
@@ -715,14 +835,20 @@ npm run build                               # 必须产出 out/
   - 建库建用户，跑 alembic 迁移
   - Python 3.12 + uv（**别碰系统 Python**）
 - [ ] `deploy/nginx.conf`：
-  - `location /` → `out/` 静态文件
+  - `location /` → `out/` 静态文件（配 `try_files $uri $uri/ /index.html;`，
+    因为前端是 `trailingSlash: true` 的静态导出）
   - `location /api` → `127.0.0.1:8000`
+  - ⭐ `location /images/ { alias <项目>/data/images/; expires 30d; }`
+    —— 语雀配图，**必须由 nginx 直接发**。FastAPI 里那个 `app.mount("/images")`
+    只是本地开发用的；1.6GB 的机器上让 Python 发几千张图纯属浪费
   - `location /aura` → Aura Note 静态目录（**保留**；确定下线时删这个 block 即可）
   - ⭐ **SSE 必须配**：`proxy_buffering off;` `proxy_read_timeout 300s;`
   - ⭐ `client_max_body_size 20m;`（默认 1m 会让上传直接 413）
 - [ ] certbot 签 HTTPS + 自动续期
 - [ ] `kb-api.service` + `kb-worker.service` systemd 常驻 + 开机自启
 - [ ] `deploy.sh`：本机 `npm run build` → `rsync out/` → `systemctl restart`
+  - ⭐ **`data/images/` 也要 rsync 上去**（约 3000 张图）。服务器上重跑
+    `sync-yuque` 也能拿到，但那要再向语雀发几千次请求，不如直接传
 - [ ] 首次线上 `kb sync-yuque` 灌数据 + `kb invite` 发码
 
 **验收**：**别人在自己手机上打开 `https://liushun666.cn`，用你发的邀请码注册，问出带引用的答案。** 到这一步项目就活了。同时确认 `/aura` 仍能打开，且 `free -h` 剩余内存 > 200MB。

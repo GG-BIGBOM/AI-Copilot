@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from copilot.api import providers
 from copilot.api.routes import auth as auth_routes
@@ -59,6 +60,13 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_routes.router)
     app.include_router(chat_routes.router)
+
+    # 镜像下来的语雀配图。
+    # ⚠️ 线上由 **nginx** 直接发（`location /images/ { alias .../data/images/; }`），
+    # 根本到不了这里；挂在这儿是给本地开发用的——前端在 3000、后端在 8000，
+    # 图片地址拼上 API_BASE 就能取到。1.6GB 的机器上让 Python 发静态文件是浪费。
+    s.image_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/images", StaticFiles(directory=s.image_dir), name="images")
 
     @app.get("/api/health", tags=["ops"])
     async def health() -> dict[str, str]:

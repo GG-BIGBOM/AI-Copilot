@@ -19,7 +19,12 @@ import {
 import { Citations } from "@/components/chat/citations";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { Button } from "@/components/ui/button";
-import { messageCitations, messageText, type CopilotUIMessage } from "@/lib/chat-types";
+import {
+  messageCitations,
+  messageImages,
+  messageText,
+  type CopilotUIMessage,
+} from "@/lib/chat-types";
 
 const SUGGESTIONS = [
   {
@@ -252,6 +257,7 @@ function Bubble({
   const isUser = message.role === "user";
   const text = messageText(message);
   const citations = messageCitations(message);
+  const images = messageImages(message);
 
   if (isUser) {
     return (
@@ -274,7 +280,7 @@ function Bubble({
 
       <div className="flex flex-col gap-2 min-w-0 flex-1 max-w-[92%] sm:max-w-[88%]">
         <div className="rounded-3xl rounded-tl-md border border-border/80 bg-muted/40 px-4.5 py-3.5 text-foreground leading-relaxed shadow-2xs">
-          <MarkdownContent content={text} isStreaming={isStreaming} />
+          <MarkdownContent content={text} images={images} isStreaming={isStreaming} />
           <Citations citations={citations} />
         </div>
 

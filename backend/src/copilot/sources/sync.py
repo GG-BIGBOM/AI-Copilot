@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Protocol
 
 from copilot.config import get_settings
+from copilot.sources.images import ImageMirror, MirrorStats, rewrite_markdown
 from copilot.sources.yuque import (
     Book,
     Doc,
@@ -48,6 +49,7 @@ class SyncStats:
     failed: int = 0
     errors: list[str] = field(default_factory=list)
     restricted_titles: list[str] = field(default_factory=list)
+    images: MirrorStats = field(default_factory=MirrorStats)
 
     @property
     def changed(self) -> int:
@@ -124,21 +126,29 @@ def sync_yuque(
     stats = SyncStats()
     login = parse_login(url_or_login)
 
-    with YuqueClient() as client:
-        group_id, group_name = client.fetch_group_id(login)
-        say(f"空间：{group_name}（login={login}, id={group_id}）")
+    settings = get_settings()
+    mirror = ImageMirror() if settings.mirror_images else None
 
-        books = client.list_books(group_id)
-        if only_books:
-            wanted = set(only_books)
-            books = [b for b in books if b.slug in wanted]
-        stats.books = len(books)
-        stats.total_docs = sum(b.items_count for b in books)
-        say(f"公开知识库 {len(books)} 个，共约 {stats.total_docs} 篇\n")
+    try:
+        with YuqueClient() as client:
+            group_id, group_name = client.fetch_group_id(login)
+            say(f"空间：{group_name}（login={login}, id={group_id}）")
 
-        for book in books:
-            _sync_book(client, login, book, root, manifest, stats, limit, say)
-            save_manifest(root, manifest)  # 每个库存一次，中途挂了也不用重头来
+            books = client.list_books(group_id)
+            if only_books:
+                wanted = set(only_books)
+                books = [b for b in books if b.slug in wanted]
+            stats.books = len(books)
+            stats.total_docs = sum(b.items_count for b in books)
+            say(f"公开知识库 {len(books)} 个，共约 {stats.total_docs} 篇")
+            say("配图会一并镜像到本地（语雀 CDN 防盗链，外链会裂图）\n" if mirror else "")
+
+            for book in books:
+                _sync_book(client, login, book, root, manifest, stats, limit, say, mirror)
+                save_manifest(root, manifest)  # 每个库存一次，中途挂了也不用重头来
+    finally:
+        if mirror:
+            mirror.close()
 
     save_manifest(root, manifest)
     return stats
@@ -153,6 +163,7 @@ def _sync_book(
     stats: SyncStats,
     limit: int | None,
     say: Reporter,
+    mirror: ImageMirror | None,
 ) -> None:
     try:
         nodes = client.fetch_toc(book.id)
@@ -195,6 +206,11 @@ def _sync_book(
         elif prev and prev.get("content_updated_at") == doc.content_updated_at:
             skipped += 1
             continue
+
+        # 把配图下到本地，正文里的 cdn.nlark.com 地址换成 /images/...
+        # 放在写盘之前：落到磁盘的 Markdown 里就该是最终地址，
+        # 否则 ingest 还得再判断一次图在哪，两处逻辑迟早不一致
+        doc.markdown = rewrite_markdown(doc.markdown, mirror, stats.images)
 
         path = book_dir / f"{_safe_name(node.slug)}.md"
         path.write_text(_doc_to_markdown(doc, crumbs.get(node.uuid, [])), encoding="utf-8")

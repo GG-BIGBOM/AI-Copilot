@@ -108,16 +108,20 @@ async def _ask(question: str, show_chunks: bool) -> None:
                     )
                     typer.secho(f"    {rc.content[:180]}…\n", fg=typer.colors.BRIGHT_BLACK)
 
-            stream, citations = await ask_stream(session, question, embedder, reranker, llm)
+            answer = await ask_stream(session, question, embedder, reranker, llm)
             buf: list[str] = []
-            for piece in stream:
+            for piece in answer.stream:
                 typer.echo(piece, nl=False)
                 buf.append(piece)
             typer.echo("\n")
 
             # 答案是「暂无此内容」时不能挂来源——否则看着像有依据
-            if is_no_answer("".join(buf)):
-                citations = []
+            citations = [] if is_no_answer("".join(buf)) else answer.citations
+
+            if answer.images and citations:
+                typer.secho("配图：", fg=typer.colors.CYAN)
+                for img in answer.images:
+                    typer.secho(f"  [图{img['n']}] {img['url']}", fg=typer.colors.CYAN)
 
             if citations:
                 typer.secho("来源：", fg=typer.colors.CYAN)

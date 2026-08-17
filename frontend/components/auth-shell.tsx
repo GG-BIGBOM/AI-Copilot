@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, Sparkles } from "lucide-react";
+import { Bot } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 

@@ -108,18 +108,51 @@ def parse_login(url_or_login: str) -> str:
     return s
 
 
+def image_card_src(tag) -> str | None:
+    """从图片卡片里取出图片地址。
+
+    语雀的图片不是 `<img>`，而是
+        <card type="inline" name="image" value="data:%7B%22src%22%3A%22https...">
+    `value` 去掉 `data:` 前缀后是 URL 编码的 JSON，里面有 src/width/height。
+    """
+    raw = tag.get("value") or ""
+    if raw.startswith("data:"):
+        raw = raw[5:]
+    if not raw:
+        return None
+    try:
+        payload = json.loads(unquote(raw))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    src = payload.get("src")
+    return src if isinstance(src, str) and src.startswith("http") else None
+
+
 def lake_to_markdown(lake_html: str) -> str:
     """语雀 Lake HTML → Markdown。
 
     Lake 是语雀自家的富文本格式，本质是带一堆 data-lake-* 属性的 HTML。
     直接转 Markdown 能保住标题层级，切分时才有 heading 可用作溯源信息。
+
+    ⚠️ **图片必须在删卡片之前先救出来。** 语雀的配图也是 card
+    （`name="image"`），早先一句 `select("card, ...")` 全删，导致 786 篇文档里
+    约 3000 张操作截图凭空消失——而 ERP 文档「点哪个按钮」全靠这些图说清楚。
+    附件、脑图那些卡片确实转不出文本，照删。
     """
     if not lake_html:
         return ""
 
     soup = BeautifulSoup(lake_html, "html.parser")
 
-    # 卡片（附件、脑图、第三方嵌入）转不出有意义的文本，去掉免得留一堆噪声
+    # 先把图片卡片换成正经的 <img>，markdownify 才会转成 ![](src)
+    for card in soup.select('card[name="image"], [data-card-name="image"]'):
+        src = image_card_src(card)
+        if src:
+            card.replace_with(soup.new_tag("img", src=src))
+        else:
+            card.decompose()
+
+    # 剩下的卡片（附件、脑图、第三方嵌入）转不出有意义的文本，去掉免得留一堆噪声
     for tag in soup.select("card, [data-card-name], script, style"):
         tag.decompose()
 

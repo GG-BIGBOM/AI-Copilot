@@ -1,13 +1,12 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import {
   LogOut,
   MessageSquare,
   MessageSquarePlus,
   Moon,
   PanelLeftClose,
-  PanelLeftOpen,
   Search,
   Sparkles,
   Sun,
@@ -17,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useDarkMode } from "@/lib/theme";
 import type { ConversationSummary, User } from "@/lib/api";
 
 type DateGroup = "今天" | "昨天" | "前 7 天" | "更早";
@@ -74,26 +74,8 @@ export function Sidebar({
   onLogout: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const shouldBeDark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    if (shouldBeDark) {
-      document.documentElement.classList.add("dark");
-      setIsDark(true);
-    } else {
-      document.documentElement.classList.remove("dark");
-      setIsDark(false);
-    }
-  }, []);
-
-  function toggleTheme() {
-    const isDarkNow = document.documentElement.classList.toggle("dark");
-    setIsDark(isDarkNow);
-    localStorage.setItem("theme", isDarkNow ? "dark" : "light");
-  }
+  // 主题的应用时机在 layout 的内联脚本里（首帧之前），这里只跟着它显示图标
+  const [isDark, toggleTheme] = useDarkMode();
 
   const filteredConversations = useMemo(() => {
     if (!search.trim()) return conversations;

@@ -16,6 +16,7 @@ import { Sidebar } from "@/components/chat/sidebar";
 import { Button } from "@/components/ui/button";
 import { api, type ConversationSummary, type StoredMessage } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth-guard";
+import { usePersistedFlag } from "@/lib/persisted-flag";
 import type { CopilotUIMessage } from "@/lib/chat-types";
 
 /** 数据库里的历史消息还原成 UIMessage，让 useChat 接着往下续。 */
@@ -23,6 +24,9 @@ function toUIMessage(m: StoredMessage): CopilotUIMessage {
   const parts: CopilotUIMessage["parts"] = [{ type: "text", text: m.content, state: "done" }];
   if (m.citations?.length) {
     parts.push({ type: "data-citations", data: { citations: m.citations } });
+  }
+  if (m.images?.length) {
+    parts.push({ type: "data-images", data: { images: m.images } });
   }
   return { id: m.id, role: m.role === "assistant" ? "assistant" : "user", parts };
 }
@@ -35,21 +39,13 @@ export default function ChatPage() {
   const [initialMessages, setInitialMessages] = useState<CopilotUIMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("sidebar-collapsed");
-    if (saved === "true") {
-      setSidebarCollapsed(true);
-    }
-  }, []);
+  // 折叠状态存在 localStorage 里。用 useSyncExternalStore 而不是
+  // useEffect+setState：后者首帧一定是错的值、随后闪一下，且 React 19 的
+  // set-state-in-effect 规则会直接报错
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistedFlag("sidebar-collapsed");
 
   function toggleSidebarCollapse() {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem("sidebar-collapsed", String(next));
-      return next;
-    });
+    setSidebarCollapsed((prev) => !prev);
   }
 
   const refreshConversations = useCallback(() => {

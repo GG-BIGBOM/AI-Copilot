@@ -189,6 +189,7 @@ async def _ingest_one(
                 title=src.title,
                 heading=c.heading,
                 source_url=src.source_url,
+                images=c.images or None,
             )
             for c, vec in zip(chunks, vectors, strict=True)
         ]

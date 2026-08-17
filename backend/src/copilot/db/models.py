@@ -131,6 +131,11 @@ class Chunk(Base):
     heading: Mapped[str | None] = mapped_column(String(512), nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
+    # 本块正文里出现的配图：[{"id": "a3f9", "url": "/images/a3/....png"}, ...]
+    # `id` 对应正文里的 `[图:a3f9]` 标记。检索时会把这些标记重新编号成
+    # `[图1][图2]` 再给模型——它只能引用真实存在的编号，编不出不存在的图。
+    images: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     document: Mapped[Document] = relationship(back_populates="chunks")
@@ -181,6 +186,10 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     # 引用来源：[{"n":1,"title":...,"url":...,"heading":...}, ...]
     citations: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # 正文里 [图1][图2] 的对照表：[{"n":1,"url":"/images/..."}, ...]
+    # 必须跟着消息一起存——否则刷新页面重新载入历史时，编号还在、图没了，
+    # 用户看到的是一串意义不明的 [图1]
+    images: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

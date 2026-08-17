@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from copilot.sources.images import marker_id
+
 # Markdown ATX 标题：# 到 ######
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$", re.M)
 # 中文句子结束符。切分时优先在这些位置断开，别把句子劈两半
@@ -24,12 +26,59 @@ _SENTENCE_END = re.compile(r"(?<=[。！？；\n])")
 _EMPHASIS_RE = re.compile(r"[*_`~]+")
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
+# 正文里的配图占位符，如 `[图:a3f9]`。
+#
+# **为什么标记自带 id，而不是靠"数第几张图"来对应：**
+# 靠计数的话，只要有一段被 min_chars 滤掉（比如整段只有一张图和两个字），
+# 后面所有图片就整体错位一张——而且不会报错，只会让答案配上错误的截图。
+# id 写在标记里，每块自己就能算出带哪些图，与顺序无关。
+_IMG_MARK_RE = re.compile(r"\[图:([0-9a-f]{4})\]")
+# markdownify 产出的图片语法
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(\s*(\S+?)(?:\s+\"[^\"]*\")?\s*\)")
+
 
 def clean_heading(text: str) -> str:
     """把 Markdown 标题洗成可直接展示的纯文本。"""
+    text = _IMG_MARK_RE.sub("", text)  # 标题里混进图片标记，显示出来是噪声
     text = _MD_LINK_RE.sub(r"\1", text)
     text = _EMPHASIS_RE.sub("", text)
     return re.sub(r"\s+", " ", text).strip(" 　:：-")
+
+
+def extract_images(markdown: str) -> tuple[str, dict[str, str]]:
+    """把 `![](/images/xx.png)` 换成 `[图:a3f9]`，并返回 id → 地址 的对照表。
+
+    换成短标记有两个原因：
+      1. 块正文是要送去做 embedding 的，一长串图片路径纯属噪声；
+      2. 模型看到的是 `[图:a3f9]`，检索出来重新编号成 `[图1]` 再给它，
+         它只能引用真实存在的编号，编不出不存在的图。
+    """
+    mapping: dict[str, str] = {}
+
+    def replace(m: re.Match[str]) -> str:
+        # 这里的地址已经是镜像后的本地路径 `/images/ab/xxx.png`（见 sources/images.py），
+        # 不是 http 的 CDN 地址——所以不能用只认 http 的 find_image_urls
+        url = m.group(2).strip()
+        if not url:
+            return ""
+        ident = marker_id(url)
+        mapping[ident] = url
+        return f"[图:{ident}]"
+
+    return _MD_IMAGE_RE.sub(replace, markdown), mapping
+
+
+def images_in(text: str, mapping: dict[str, str]) -> list[dict]:
+    """列出一段文本里出现的图片，按出现顺序、去重。"""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for m in _IMG_MARK_RE.finditer(text):
+        ident = m.group(1)
+        if ident in seen or ident not in mapping:
+            continue
+        seen.add(ident)
+        out.append({"id": ident, "url": mapping[ident]})
+    return out
 
 
 @dataclass(slots=True)
@@ -39,6 +88,7 @@ class Chunk:
     ordinal: int
     content: str
     heading: str | None  # 章节路径，如「一、营销管理 › 1、营销步骤」
+    images: list[dict] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -89,6 +139,24 @@ def split_sections(markdown: str) -> list[Section]:
     return sections
 
 
+def _overlap_tail(text: str, overlap: int) -> str:
+    """取上一块的尾部作为下一块的重叠开头。
+
+    两处修正，都是为了别把图片标记搞坏：
+      1. 切点若正好落在 `[图:a3f9]` 中间，会留下 `图:a3` 这种残字；
+         把切点前移到该标记的开头。
+      2. 重叠里的完整标记直接去掉——同一张图不必在相邻两块里各挂一次。
+    """
+    if overlap <= 0:
+        return ""
+    start = max(0, len(text) - overlap)
+    for m in _IMG_MARK_RE.finditer(text):
+        if m.start() < start < m.end():
+            start = m.start()
+            break
+    return _IMG_MARK_RE.sub("", text[start:])
+
+
 def _split_long_text(text: str, size: int, overlap: int) -> list[str]:
     """把过长的段落按句子边界切开，带重叠。
 
@@ -122,8 +190,7 @@ def _split_long_text(text: str, size: int, overlap: int) -> list[str]:
         else:
             chunks.append(buf.strip())
             # 用上一块的尾部作为重叠开头
-            tail = buf[-overlap:] if overlap else ""
-            buf = tail + piece
+            buf = _overlap_tail(buf, overlap) + piece
 
     if buf.strip():
         chunks.append(buf.strip())
@@ -153,6 +220,10 @@ def chunk_markdown(
             短段大多是「（操作路径：【app】-【店铺销售统计】）」这类操作指引，
             正是用户最想要的答案。默认 5 只滤掉零宽空格之类的空壳。
     """
+    # 先把图片换成 `[图:xxxx]` 短标记，再切。放在最前面是因为一张图的 Markdown
+    # 地址有五六十个字符，参与长度计算会把切分点带偏
+    markdown, image_map = extract_images(markdown)
+
     sections = [s for s in split_sections(markdown) if len(s.body.strip()) >= min_chars]
     if not sections:
         # 有些文档的内容**全在标题里**，一个正文段落都没有
@@ -170,12 +241,24 @@ def chunk_markdown(
     def emit(text: str, heading: str | None) -> None:
         nonlocal ordinal
         text = text.strip()
-        if len(text) < min_chars:
-            return
         # 把章节路径拼进正文开头：检索时这些词本身就是有效信号
         # （用户问「营销管理怎么用」，命中的块正文里可能根本没有这四个字）
         content = f"{heading}\n\n{text}" if heading else text
-        chunks.append(Chunk(ordinal=ordinal, content=content, heading=heading))
+        # 长度判定要**去掉图片标记之后**再算：只有一张图的小节正文是 `[图:a3f9]`，
+        # 8 个字符会骗过 min_chars，留下一个没有任何文字、永远检索不到的空块。
+        # 但判定的对象是拼上标题之后的 content——「拼多多面单模板设置」这种
+        # 只有标题加一张截图的小节，靠标题仍然搜得到，图也就跟着能显示出来。
+        # 这和 M1 坑 #5「正文全在标题里的文档整篇消失」是同一类问题。
+        if len(_IMG_MARK_RE.sub("", content).strip()) < min_chars:
+            return
+        chunks.append(
+            Chunk(
+                ordinal=ordinal,
+                content=content,
+                heading=heading,
+                images=images_in(content, image_map),
+            )
+        )
         ordinal += 1
 
     buf: list[Section] = []
