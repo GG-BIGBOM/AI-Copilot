@@ -32,6 +32,15 @@ from copilot.config import get_settings
 
 EMBEDDING_DIM = get_settings().embedding_dim
 
+# ⚠️ 可空的 JSONB 一律用这个，别直接用 JSONB。
+#
+# SQLAlchemy 默认把 Python 的 None 存成 **JSON 的 null**，而不是 SQL 的 NULL。
+# 读回来都是 None，功能上看不出区别——但 SQL 侧就分裂成了两种"空"：
+#     WHERE images IS NOT NULL   会把 JSON null 也算进来
+#     jsonb_array_length(images) 撞上 JSON null 直接报错
+# 排查数据时被这个绊过两次，索引和统计也会因此不准。
+NullableJSONB = JSONB(none_as_null=True)
+
 
 class Base(DeclarativeBase):
     pass
@@ -134,7 +143,7 @@ class Chunk(Base):
     # 本块正文里出现的配图：[{"id": "a3f9", "url": "/images/a3/....png"}, ...]
     # `id` 对应正文里的 `[图:a3f9]` 标记。检索时会把这些标记重新编号成
     # `[图1][图2]` 再给模型——它只能引用真实存在的编号，编不出不存在的图。
-    images: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    images: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -185,11 +194,11 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16))  # user | assistant | tool
     content: Mapped[str] = mapped_column(Text)
     # 引用来源：[{"n":1,"title":...,"url":...,"heading":...}, ...]
-    citations: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    citations: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
     # 正文里 [图1][图2] 的对照表：[{"n":1,"url":"/images/..."}, ...]
     # 必须跟着消息一起存——否则刷新页面重新载入历史时，编号还在、图没了，
     # 用户看到的是一串意义不明的 [图1]
-    images: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    images: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
