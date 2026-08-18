@@ -1,18 +1,21 @@
-"""主 Agent：带工具的多轮问答 + 需求收集 + 出方案。
+"""主 Agent：路由 + 多轮状态 + 编排。
 
-和 M1 那条「检索 → 回答」的直路比，Agent 多出来的能力只有两样：
-**主动追问**和**多步动作**（检索完能接着生成、导出）。代价是每轮多一次
-模型往返、以及一整套「工具跑飞了怎么办」的问题。所以：
+⭐ **M10 之后它不再是「带检索工具的问答机器人」。** ERP 答案由终结工具
+`answer_kb` 产出并直接流给用户，Agent 看不到原始材料，也就写不出编造的配置。
+它剩下的活是三样，每一样直路都做不了：
 
-- **它默认是关的**（`agent_enabled`）。M8 的评测证明直路已经 100%（41 题），
-  把所有问答改成 Agent 循环，是拿一个已量化的系统去换一个没量化的。
-  开之前要用 `eval/run.py --agent` 证明不退化。
-- **硬闸门必须有**：`UsageLimits` 限住模型请求数和工具调用数。
-  没有它，一个开始循环调工具的模型能把额度和时间一起烧光，
-  而用户那边只看到一个一直转的圈。
+    路由      这句话该查知识库、看时间、还是开始收集需求
+    多轮状态  需求档案一点一点填起来（profile 落库）
+    编排      收齐 → generate_plan → export_excel
 
-防幻觉的两道闸门和直路是同一套，写法上略有不同：检索不到时工具会明确回
-「知识库里没有检索到」，而 instructions 要求这时只说不知道。
+M7 让它拿着原始材料自己写答案，41 题上准确率 87.8% / 幻觉率 12.5%，
+而同一份题直路是 100% / 0%。**M10 不是把它调得更听话，是把那支笔拿走。**
+四条成因（检索词漂移 / 材料串味 / 拒答闸门变软 / 换了 prompt）见 tools.py 文件头。
+
+**硬闸门必须有**：`UsageLimits` 限住模型请求数和工具调用数。没有它，
+一个开始循环调工具的模型能把额度和时间一起烧光，而用户那边只看到一个转圈。
+限额按路径分：普通问答给得很紧（决策 → 工具 → 收尾就够），
+出方案那条要留出多轮收集的余量。
 """
 
 from __future__ import annotations
@@ -22,36 +25,45 @@ from pydantic_ai import Agent, UsageLimits
 from copilot.agent.deps import AgentDeps
 from copilot.agent.model import build_model
 from copilot.agent.tools import (
+    answer_kb,
+    current_time,
     export_excel,
     generate_plan,
+    my_documents,
     save_requirement,
-    search_kb,
+    whoami,
 )
 from copilot.config import get_settings
-from copilot.qa import NO_ANSWER
 
-INSTRUCTIONS = f"""你是旺店通旗舰版 ERP 的实施顾问助手。你有一个知识库检索工具，
-以及一套帮客户整理实施需求、出配置方案的工具。
+INSTRUCTIONS = """你是旺店通旗舰版 ERP 的实施顾问助手。
 
-## 回答普通问题时
+⚠️ **你自己不掌握任何 ERP 知识。** 所有和旺店通、ERP、电商订单、仓库、物流、
+售后、财务、系统设置有关的问题，一律调用 `answer_kb`——它会查知识库并**直接
+回答用户**，你看不到它的答案，也不需要看到。
 
-1. **先用 `search_kb` 检索，再回答。** 不检索就回答等于凭记忆编，绝对不行。
-   一个问题涉及几件事时，分开检索几次，别把它们塞进一个查询。
-2. 只用检索到的材料作答，**不得用常识补全或推测**。
-3. 每一句结论后面标注来源编号，如 [1]、[2]。多个来源写 [1][3]。
-4. **先看材料里有没有能用的内容，再决定怎么答，顺序不能反**：
-   - 有能回答的内容——哪怕只回答了问题的一部分——就把那部分答出来，
-     再明确写一句哪一部分材料里没有。**绝不能因为答不全就整个不答。**
-     说「材料里没有」只针对问题问到的东西，而且要先通读全部材料再说。
-   - 检索了但材料里**完全没有**相关内容时：可以先用**一句话**说清你查到的是什么、
-     以及它和问题不符，然后**必须原样写上**这一句：{NO_ANSWER}
-     不要给建议、不要推荐去问谁、不要用相邻主题的材料凑一个答案。
-     （直路那边要求只回一句；你比它多知道"自己查了什么"，说一句有用的没问题，
-     但那句话必须在，页面靠它决定不挂来源。）
-5. 材料里写了具体的数字、上限、界面路径、字段名时，**照原文答**，
-   不要概括成「有一定限制」「在设置里」——问的人要的就是那个具体值。
-6. **材料里的 [图1]、[图2] 是操作截图，要带上**，照抄到对应步骤那一行末尾。
-   只能用材料里真实出现过的图号。
+## 怎么选
+
+1. **沾边就调 `answer_kb`，拿不准也调它。** 它没有参数，用的就是用户这一轮的原话。
+   调完这一轮就结束了：**不要复述、不要补充、不要总结、不要追加"希望对你有帮助"。**
+2. 用户问当前时间、今天几号、星期几 → `current_time`，然后用一句话回答。
+3. 用户问「你是谁」「你能做什么」「怎么用」→ `whoami`，然后本轮结束。
+4. 用户问「我传了哪些文档」「我的知识库里有什么」→ `my_documents`。
+5. 用户要「实施方案 / 配置方案 / 上线清单」→ 走下面那套需求收集。
+6. 打招呼、道谢 → 直接答一句，不要调工具。
+
+## 绝对禁止
+
+- **凭自己的知识回答任何 ERP 问题。** 你写出的每一个界面路径、字段名、参数值、
+  数字上限，都必须来自 `answer_kb`。ERP 里一条编出来的配置能让客户的订单卡住——
+  这不是修辞，是这个项目存在的理由。
+- **替用户做知识库之外的事。** 写代码、翻译、查天气、算数、写文案、聊时事——
+  这些都不做，也**不要**因为"这明显不是 ERP 问题"就自己答一句。
+  统一交给 `answer_kb`：查不到它自会说「知识库暂无此内容」，
+  那是这个助手唯一该有的边界感。
+  ⚠️ 你觉得"这题我会"的时候，正是最容易越线的时候——用户分不清哪句是查来的、
+  哪句是你编的，一次都不能开这个口子。
+- **在调用 `answer_kb` 之前说「我查一下」「稍等」之类的开场白。** 用户看不到它，
+  纯浪费一次生成。想调就直接调。
 
 ## 客户要「实施方案 / 配置方案 / 上线清单」时
 
@@ -65,21 +77,39 @@ INSTRUCTIONS = f"""你是旺店通旗舰版 ERP 的实施顾问助手。你有�
 5. 客户明确说「不知道」「先按常见的来」时，记下这个说法继续往下走，
    不要卡在同一个问题上反复问。
 
-## 写法
+## 写法（只管你自己写的那部分——追问、时间、闲聊）
 
-- 操作步骤按 1. 2. 3. 分条，界面路径原样保留（如「设置–策略设置–短信策略」）。
-- 保留材料里的注意事项和限制条件，那往往是最容易踩坑的地方。
+- 短。追问一次只问一到两个问题，一句话说完。
 - 直接说事，不要「根据参考材料」之类的开场白。
 - 不要自己拼下载链接，导出成功后页面上会有下载按钮。"""
 
+# 主 Agent 的工具。**`search_kb` 不在这里**——那是 M7 留下的「材料级」工具，
+# 一旦挂上去，模型就又有了拿原始材料自由发挥的路子，M10 等于白做。
+# 函数和它的隔离测试暂时留着，跟 `_chat_stream` 一起进 P3 的删除清单。
+TOOLS = [
+    answer_kb,
+    current_time,
+    whoami,
+    my_documents,
+    save_requirement,
+    generate_plan,
+    export_excel,
+]
 
-def build_agent() -> Agent[AgentDeps, str]:
+
+def build_agent(model=None) -> Agent[AgentDeps, str]:
+    """建主 Agent。
+
+    Args:
+        model: 只给测试用——传一个 `FunctionModel` 就能在不联网、不花钱的
+            情况下把「模型决定调哪个工具」这件事写死，从而测 runner 的翻译逻辑。
+    """
     return Agent(
-        build_model(),
+        model or build_model(),
         deps_type=AgentDeps,
         output_type=str,
         instructions=INSTRUCTIONS,
-        tools=[search_kb, save_requirement, generate_plan, export_excel],
+        tools=TOOLS,
         # 单个工具最多重试 1 次。工具本身已经把失败变成了「返回一句人话」
         # （见 tools.py 文件头第 2 条），重试主要是给参数填错留一次机会
         retries=1,
@@ -87,10 +117,23 @@ def build_agent() -> Agent[AgentDeps, str]:
     )
 
 
-def usage_limits() -> UsageLimits:
-    """跑飞时的硬闸门。"""
+def usage_limits(*, plan_flow: bool = False) -> UsageLimits:
+    """跑飞时的硬闸门。
+
+    ⭐ **按路径分开设。** 普通问答的正常形态是「决策 → answer_kb → 结束」，
+    两次模型请求封顶；给它 8 次，等于允许一个开始循环的模型多烧 6 次
+    才被拦住，而用户全程只看到一个转圈。出方案那条要多轮收集，才需要余量。
+
+    Args:
+        plan_flow: 这条会话已经在收集需求（`profile` 有内容）。
+    """
     s = get_settings()
+    if plan_flow:
+        return UsageLimits(
+            request_limit=s.agent_max_requests,
+            tool_calls_limit=s.agent_max_tool_calls,
+        )
     return UsageLimits(
-        request_limit=s.agent_max_requests,
-        tool_calls_limit=s.agent_max_tool_calls,
+        request_limit=s.agent_max_requests_qa,
+        tool_calls_limit=s.agent_max_tool_calls_qa,
     )

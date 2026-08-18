@@ -111,15 +111,24 @@ def small_talk_kind(question: str) -> str | None:
     return None
 
 
+def canned_reply(kind: str) -> str | None:
+    """按类别取那句固定回复。
+
+    和 `small_talk_reply` 的区别是方向：那个是「这句话属于哪类 → 回复」，
+    这个是「我就要这一类的回复」。Agent 的 `whoami` 工具用它——
+    **一份数据两个入口，别再抄一份自我介绍**：抄了之后加了个新能力，
+    改了一处忘了另一处，两个入口会给出不一样的自我介绍。
+    """
+    return next((reply for k, _, reply in _SMALL_TALK_TABLE if k == kind), None)
+
+
 def small_talk_reply(question: str) -> str | None:
     """招呼 / 道谢 / 告别 / 问能力 —— 命中就直接给一句固定回复，不检索也不调模型。
 
     返回 None 表示这是一个正经问题，照常走检索。
     """
     kind = small_talk_kind(question)
-    if kind is None:
-        return None
-    return next(reply for k, _, reply in _SMALL_TALK_TABLE if k == kind)
+    return None if kind is None else canned_reply(kind)
 
 
 _TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。

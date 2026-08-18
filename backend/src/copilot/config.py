@@ -174,10 +174,20 @@ class Settings(BaseSettings):
     # 把所有问答都改成 Agent 循环是拿一个**已量化**的系统去换一个没量化的。
     # 打开之前必须用 `eval/run.py --agent` 跑一遍，证明不退化。
     agent_enabled: bool = False
+    # 灰度比例（M10 P3）。0 = 全部走直路，1.0 = 全部走 Agent。
+    # ⚠️ **按用户分桶，不是按请求。** 同一个人在两条路之间跳，
+    # 多轮收集需求的状态就断了；而且线上出问题时也归不了因——
+    # 你不知道他这一句走的是哪条路。`agent_enabled` 仍是强制全开的总开关。
+    agent_rollout: float = 0.0
     # 最大模型请求数与工具调用数。Agent 跑飞时的硬闸门——
-    # 没有它，一个循环调用工具的模型能把额度和时间都烧光
+    # 没有它，一个循环调用工具的模型能把额度和时间都烧光。
+    # 这一组是**出方案**那条路的额度（多轮收集需求要留余量）
     agent_max_requests: int = 8
     agent_max_tool_calls: int = 10
+    # 普通问答（M10）。正常形态就是「决策 → answer_kb → 结束」，
+    # 留一次给工具失败后的重试。给多了等于允许它多烧几次才被拦住
+    agent_max_requests_qa: int = 3
+    agent_max_tool_calls_qa: int = 3
 
     # ===== 上传限制 =====
     upload_max_bytes: int = 20 * 1024 * 1024  # 20MB

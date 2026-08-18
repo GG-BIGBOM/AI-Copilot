@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -138,16 +139,26 @@ FULL_ANSWER = "第一步先进入设置，第二步绑定账号，第三步打�
 
 
 class SlowLLM:
-    """一个字一个字慢慢吐，好让测试在中途把请求取消掉。"""
+    """一个字一个字慢慢吐，好让测试在中途把请求取消掉。
 
-    def __init__(self, text: str, delay: float = 0.03) -> None:
+    ⭐ **`emitted_enough` 是为了不掐秒表。** 「睡 0.55 秒再取消」在本机单跑
+    没问题，全量跑起来（几十个用例抢 CPU）就会偶发地落在"一个字都还没吐"
+    或"已经吐完了"上——测试于是随机变红，而红的原因和被测代码无关。
+    改成「吐够 N 个字就置位」，取消点就由**被测系统的进度**决定，不由调度决定。
+    """
+
+    def __init__(self, text: str, delay: float = 0.03, emit_before_cancel: int = 5) -> None:
         self.text = text
         self.delay = delay
+        self.emit_before_cancel = emit_before_cancel
+        self.emitted_enough = threading.Event()
 
     def stream(self, messages: list[dict], temperature: float = 0.1) -> Iterator[str]:
         def gen():
-            for ch in self.text:
+            for i, ch in enumerate(self.text, 1):
                 time.sleep(self.delay)
+                if i >= self.emit_before_cancel:
+                    self.emitted_enough.set()
                 yield ch
 
         return gen()
@@ -159,14 +170,32 @@ class SlowLLM:
         pass
 
 
-async def _ask_then_cancel(api_client, question: str, conv_id: str, after: float) -> None:
-    """发起提问，`after` 秒后取消——等价于用户点了「停止生成」。
+async def _ask_then_cancel(
+    api_client,
+    question: str,
+    conv_id: str,
+    after: float = 0.0,
+    when: threading.Event | None = None,
+) -> None:
+    """发起提问，然后取消——等价于用户点了「停止生成」。
 
     取消的是**等待响应的那个任务**，这样 CancelledError 会被送进
     `_chat_stream` 当前挂起的那个 yield，走的是和真实断连一模一样的路径。
+
+    Args:
+        when: 等这个事件置位再取消（`SlowLLM.emitted_enough`）。**优先用它**，
+            它让取消点由被测系统的进度决定，而不是由调度器决定。
+        after: 没有 `when` 时，睡这么多秒再取消。只有「一个字都别吐出来」
+            那种场景才该用它——那种场景本来就没有进度可等。
     """
     task = asyncio.create_task(ask(api_client, question, conv_id=conv_id))
-    await asyncio.sleep(after)
+    if when is not None:
+        await asyncio.to_thread(when.wait, 10)
+        # 让刚吐出来的那几个字走完 SSE、落到库里。取消得太急的话，
+        # 断言的就不是"半截答案存下来了"而是"竞态谁先跑"
+        await asyncio.sleep(0.05)
+    else:
+        await asyncio.sleep(after)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -199,7 +228,7 @@ async def test_interrupted_answer_is_persisted_and_marked(
     slow = SlowLLM(FULL_ANSWER, delay=0.1)
     monkeypatch.setattr(providers, "get_llm", lambda: slow)
 
-    await _ask_then_cancel(api_client, body, conv_id, after=0.55)
+    await _ask_then_cancel(api_client, body, conv_id, when=slow.emitted_enough)
 
     rows = await _messages_of(maker, conv_id)
     assert [m.role for m in rows] == ["user", "assistant"], "被中断也要留下这轮问答"
@@ -335,3 +364,111 @@ def test_small_talk_kind_and_reply_agree():
 
     for text in ["你好", "你能做什么", "谢谢", "再见", "退货入库怎么操作", ""]:
         assert (small_talk_kind(text) is None) == (small_talk_reply(text) is None)
+
+
+# ---------- M10 P2：Agent 路径要有和直路一模一样的保障 ----------
+#
+# 「每加一个能力都只加在一条路上」是双路架构在收的税。上面那两件事
+# （招呼语、边流边落库）原来都只有直路有，Agent 路径点停止就只剩一个提问。
+# 这一节和上面的直路版本是对照着写的，两边不一致就该有一条红的。
+
+
+def _tool(name: str) -> tuple[str, str]:
+    """脚本里的一次工具调用。**必须和纯文本区分开**——工具名本身也是 str，
+    直接传字符串的话它会被当成「Agent 说了 answer_kb 这四个字」。"""
+    return ("tool", name)
+
+
+def _scripted_agent_model(*turns):
+    """把模型行为写死：要么吐一段文本（str），要么调一次工具（`_tool(...)`）。"""
+    from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+
+    it = iter(turns)
+
+    async def script(messages, info):
+        turn = next(it)
+        if isinstance(turn, tuple):
+            name = turn[1]
+            yield {0: DeltaToolCall(name=name, json_args="{}", tool_call_id=f"c_{name}")}
+        else:
+            for ch in turn:
+                yield ch
+
+    return FunctionModel(stream_function=script)
+
+
+async def test_agent_path_also_persists_interrupted_answer(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch, maker
+):
+    """⭐ 和 `test_interrupted_answer_is_persisted_and_marked` 是同一条不变量。
+
+    Agent 路径原来没有边流边落库——用户点停止，刷新页面只剩一个提问。
+    终结工具的正文是流式直通的，所以这条路上「已经吐出去的」同样必须落库。
+    """
+    from copilot.agent import runner as runner_module
+    from copilot.agent.agent import build_agent
+    from copilot.api import providers
+    from copilot.api.routes import chat as chat_module
+
+    _title, body = public_chunk
+    monkeypatch.setattr(chat_module, "FLUSH_SECONDS", 0.0)
+    slow = SlowLLM(FULL_ANSWER, delay=0.1)
+    monkeypatch.setattr(providers, "get_llm_for", lambda mode: slow)
+
+    async def always_agent(*_a, **_kw):
+        return True
+
+    monkeypatch.setattr(chat_module, "_use_agent", always_agent)
+    model = _scripted_agent_model(_tool("answer_kb"), "完毕")
+    monkeypatch.setattr(runner_module, "build_agent", lambda m=None: build_agent(model))
+
+    conv_id = str(uuid.uuid4())
+    await _ask_then_cancel(api_client, body, conv_id, when=slow.emitted_enough)
+
+    rows = await _messages_of(maker, conv_id)
+    assert [m.role for m in rows] == ["user", "assistant"], "被中断也要留下这轮问答"
+
+    stored = rows[1].content.removesuffix(chat_module.INTERRUPTED_MARK)
+    assert stored, "半截答案的内容要真的存下来"
+    assert FULL_ANSWER.startswith(stored), "存下来的必须是已经吐出去的那部分的前缀"
+    assert stored != FULL_ANSWER, "这一轮应该是被截断的"
+    assert chat_module.INTERRUPTED_MARK in rows[1].content, "没写完的必须标出来"
+
+
+async def test_small_talk_does_not_hijack_an_agent_conversation(
+    api_client, logged_in, fake_providers, monkeypatch, maker
+):
+    """⭐ 寒暄短路的**顺序**：已经在多轮流程里的会话不许被它截走。
+
+    Agent 问完「要对接哪些平台？」，用户回一句「好的」——那两个字在寒暄表里。
+    短路掉就变成「不客气。还有别的问题随时问。」，收集需求的流程当场断掉。
+    """
+    from copilot.api.routes import chat as chat_module
+    from copilot.db.models import Conversation
+
+    conv_id = uuid.uuid4()
+    async with maker() as s:
+        # `profile is not None` = 这条会话正在走 Agent（第一轮往往是空字典）
+        s.add(Conversation(id=conv_id, user_id=logged_in, title="出方案", profile={}))
+        await s.commit()
+
+    async def stub(_user_id, _question, _client_id, _mode=None):
+        yield "data: {\"type\":\"text-delta\",\"id\":\"t\",\"delta\":\"AGENT\"}\n\n"
+
+    monkeypatch.setattr(chat_module, "_agent_stream", stub)
+
+    r = await ask(api_client, "好的", conv_id=str(conv_id))
+    assert r.status_code == 200
+    assert "AGENT" in r.text, "这一轮应该留在 Agent 里"
+    assert "不客气" not in r.text, "寒暄短路把多轮流程截走了"
+
+
+async def test_small_talk_still_short_circuits_a_fresh_conversation(
+    api_client, logged_in, fake_providers
+):
+    """反过来也要成立：普通会话里的「谢谢」仍然是 0 成本固定回复。"""
+    r = await ask(api_client, "谢谢")
+    assert r.status_code == 200
+    body = "".join(p["delta"] for p in parts(r.text) if p["type"] == "text-delta")
+    assert "不客气" in body
+    assert fake_providers.calls == [], "固定回复不该调模型"

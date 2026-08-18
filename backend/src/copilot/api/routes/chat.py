@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
@@ -49,7 +50,7 @@ from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
 from copilot.db.models import Conversation, Message
 from copilot.db.session import SessionLocal
-from copilot.qa import DEFAULT_MODE, HISTORY_TURNS, ask_stream, is_no_answer
+from copilot.qa import DEFAULT_MODE, HISTORY_TURNS, ask_stream, is_no_answer, small_talk_reply
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -130,6 +131,70 @@ async def _recent_turns(session: AsyncSession, conv_id: uuid.UUID) -> list[tuple
     return [(role, content) for role, content in reversed(rows)]
 
 
+class _AnswerWriter:
+    """把正在流的答案边流边写进库。**两条路共用一份**（M10 P2）。
+
+    ⭐ **不能等流结束再写。** 用户点「停止生成」时任务被取消，而 Python
+    **不会立刻**关掉那个异步生成器——它要等 GC 去 finalize，可能很久以后，
+    也可能进程重启就没了。所以写在循环之后的落库根本不保证执行：
+    线上表现是刷新页面只剩一个孤零零的提问。
+
+    没写完的内容**必须标出来**：一段写到一半的 ERP 操作步骤看上去和写完的
+    一模一样，用户照着做到第 3 步才发现没有第 4 步——那时候他已经在生产
+    环境里点下去了。
+
+    > 这套逻辑原来只有直路有（M9 加的），Agent 路径点停止就只剩一个提问。
+    > 「每加一个能力都只加在一条路上」正是 M10 要消灭的双路税，
+    > 所以这里先抽成一份，再给两边用。
+    """
+
+    def __init__(self, session: AsyncSession, conversation_id: uuid.UUID) -> None:
+        self.session = session
+        self.conversation_id = conversation_id
+        self.row: Message | None = None  # 第一次落盘时才建
+        self._last = time.monotonic()
+
+    @property
+    def due(self) -> bool:
+        """离上次落库够久了吗。用户点停止最多丢 `FLUSH_SECONDS` 秒的内容。"""
+        return time.monotonic() - self._last >= FLUSH_SECONDS
+
+    async def write(
+        self,
+        text: str,
+        *,
+        final: bool,
+        citations: list | None = None,
+        images: list | None = None,
+    ) -> None:
+        if not text.strip():
+            return  # 一个字都没吐出来，不留空消息
+        content = text if final else text + INTERRUPTED_MARK
+        if self.row is None:
+            self.row = Message(
+                conversation_id=self.conversation_id, role="assistant", content=content
+            )
+            self.session.add(self.row)
+        else:
+            self.row.content = content
+        if final:
+            self.row.citations = citations or None
+            # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记。
+            # 没有引用就没有图——那种情况下正文里根本不会出现 [图N]
+            self.row.images = (images or None) if citations else None
+        await self.session.commit()
+        self._last = time.monotonic()
+
+    async def interrupted(self, text: str) -> None:
+        """被取消时补最后一次。
+
+        `shield=True` 不能省：任务已经被取消，不挡一下的话里面的 await
+        会立刻再抛一次 CancelledError，等于没写。
+        """
+        with anyio.CancelScope(shield=True):
+            await self.write(text, final=False)
+
+
 async def _chat_stream(
     user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
 ) -> AsyncIterator[str]:
@@ -175,50 +240,17 @@ async def _chat_stream(
             yield stream.text_start(text_id)
             text_open = True
             buf: list[str] = []
-            row: Message | None = None  # 助手那条消息，第一次落盘时才建
+            writer = _AnswerWriter(session, conv.id)
 
-            async def flush(*, final: bool, shown: list | None = None) -> None:
-                """把已经吐出来的部分写进库。
-
-                ⭐ **不能等流结束再写。** 用户点「停止生成」时任务被取消，而
-                Python **不会立刻**关掉这个异步生成器——它要等 GC 去 finalize，
-                可能很久以后，也可能进程重启就没了。所以原来写在循环之后的落库
-                根本不保证执行：线上表现是刷新页面只剩一个孤零零的提问。
-
-                没写完的内容**必须标出来**：一段写到一半的 ERP 操作步骤看上去和
-                写完的一模一样，用户照着做到第 3 步才发现没有第 4 步——那时候
-                他已经在生产环境里点下去了。
-                """
-                nonlocal row
-                text = "".join(buf)
-                if not text.strip():
-                    return  # 一个字都没吐出来，不留空消息
-                content = text if final else text + INTERRUPTED_MARK
-                if row is None:
-                    row = Message(conversation_id=conv.id, role="assistant", content=content)
-                    session.add(row)
-                else:
-                    row.content = content
-                if final:
-                    row.citations = shown or None
-                    # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记
-                    row.images = (streamed.images or None) if shown else None
-                await session.commit()
-
-            last_flush = time.monotonic()
             try:
                 async for piece in iterate_in_threadpool(text_stream):
                     buf.append(piece)
                     yield stream.text_delta(text_id, piece)
-                    if time.monotonic() - last_flush >= FLUSH_SECONDS:
-                        await flush(final=False)
-                        last_flush = time.monotonic()
+                    if writer.due:
+                        await writer.write("".join(buf), final=False)
             except (asyncio.CancelledError, GeneratorExit):
-                # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0。
-                # `shield=True` 不能省：任务已经被取消，不挡一下的话下面的
-                # await 会立刻再抛一次 CancelledError，等于没写
-                with anyio.CancelScope(shield=True):
-                    await flush(final=False)
+                # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0
+                await writer.interrupted("".join(buf))
                 raise
             yield stream.text_end(text_id)
             text_open = False
@@ -229,7 +261,9 @@ async def _chat_stream(
             if shown:
                 yield stream.data_part("citations", {"citations": shown})
 
-            await flush(final=True, shown=shown)
+            await writer.write(
+                answer, final=True, citations=shown, images=streamed.images
+            )
 
             # 记账。算的是「送进去的 + 吐出来的」——**上下文才是大头**
             # （5 块材料约 2500 字，答案往往只有它的三成）
@@ -278,16 +312,10 @@ async def _agent_stream(
     try:
         async with SessionLocal() as session:
             conv = await _resolve_conversation(session, user_id, client_id, question)
-            history_rows = list(
-                (
-                    await session.execute(
-                        select(Message.role, Message.content)
-                        .where(Message.conversation_id == conv.id)
-                        .order_by(Message.created_at, Message.id)
-                        .limit(20)  # 只带最近的，上下文撑爆了对「接着聊」也没帮助
-                    )
-                ).all()
-            )
+            # 和直路用同一个函数取历史。**这里原来是 `order_by(created_at).limit(20)`，
+            # 取的是最老的 20 条**——会话一长，带进上下文的就永远是开头那几轮，
+            # 而「接着聊」要的恰恰是最近几轮。顺带也统一了截断口径（HISTORY_TURNS）。
+            history = await _recent_turns(session, conv.id)
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -299,19 +327,35 @@ async def _agent_stream(
                 conversation_id=conv.id,
                 embedder=providers.get_embedder(),
                 reranker=providers.get_reranker(),
+                # ⭐ M10：这三样是 `answer_kb` 跑直路要用的。缺了 llm 它直接
+                # 不可用；缺了 history / mode 它就退化成「单轮 + 简答档」，
+                # 而消灭这种双路差异正是 M10 的目的
+                llm=providers.get_llm_for(mode),
+                history=history,
+                mode=mode,
                 profile=Requirement(**(conv.profile or {})),
                 checklist=Checklist(**conv.checklist) if conv.checklist else None,
             )
 
-            async for part, so_far in run_agent_stream(
-                question, deps, to_message_history([(r, c) for r, c in history_rows])
-            ):
-                answer = so_far
-                yield part
+            writer = _AnswerWriter(session, conv.id)
+            try:
+                async for part, so_far in run_agent_stream(
+                    question, deps, to_message_history(history)
+                ):
+                    answer = so_far
+                    yield part
+                    # 和直路同一套边流边落库（M10 P2）。Agent 路径原来没有，
+                    # 点停止刷新页面就只剩一个提问
+                    if writer.due:
+                        await writer.write(answer, final=False)
+            except (asyncio.CancelledError, GeneratorExit):
+                await writer.interrupted(answer)
+                raise
 
-            # 配图在正文之后发（和直路相反）：Agent 边跑边检索，
-            # 开始流的时候还不知道会用到哪些图
-            if deps.images:
+            # 配图兜底。`answer_kb` 走的是终结工具，它在正文**之前**就把图发了
+            # （和直路一致，前端要边流边把 [图1] 换成真图）；这里只兜住普通工具
+            # 那条路——它边跑边检索，开始流的时候还不知道会用到哪些图
+            if deps.images and not deps.images_sent:
                 yield stream.data_part("images", {"images": deps.images})
 
             # ⚠️ 同直路：说了"不知道"就不能挂来源
@@ -332,15 +376,10 @@ async def _agent_stream(
                 conv.checklist = deps.checklist.model_dump()
             if deps.download_url:
                 conv.export_path = f"{user_id}/{conv.id}.xlsx"
-            session.add(
-                Message(
-                    conversation_id=conv.id,
-                    role="assistant",
-                    content=answer,
-                    citations=shown or None,
-                    images=(deps.images or None) if shown else None,
-                )
-            )
+            await writer.write(answer, final=True, citations=shown, images=deps.images)
+            # ⚠️ 再提交一次。`writer.write` 在正文为空时会直接返回**不提交**，
+            # 而上面那几行对 `conv` 的改动一个都不能丢——尤其是 `profile`：
+            # 它是「这条会话在走 Agent」的标记，丢了下一轮就掉回直路，对话散掉。
             await session.commit()
 
             # ⚠️ 要把检索到的材料算进去。只算问题和答案会漏掉八成——
@@ -353,6 +392,51 @@ async def _agent_stream(
 
     except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("Agent 流出错：user=%s question=%r", user_id, question[:80])
+        yield stream.error(GENERIC_ERROR)
+
+    yield stream.finish_step()
+    yield stream.finish()
+    yield stream.DONE
+
+
+async def _canned_stream(
+    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
+) -> AsyncIterator[str]:
+    """招呼 / 道谢 / 告别 / 问能力——固定回复，**一次模型调用都不花**（M10 P2）。
+
+    ⭐ **它是 Agent 之前的一层短路，不是第三条路由分叉。** 定位相当于缓存：
+    命中就 0 成本、0 幻觉地返回；不命中就当它不存在。全 Agent 化之后
+    （P3）这一层仍然留着——「你好」值不值得花一次模型调用，答案是不值得，
+    而且让模型自由回招呼语，就是在防幻觉的墙上开一个洞：它会开始"友好地"
+    补全 ERP 知识。这里回的每一句都是写死的常量。
+
+    `mode` 收下不用：固定回复没有简答/详解之分。
+    """
+    reply = small_talk_reply(question) or ""
+    message_id = stream.new_id("msg")
+    text_id = stream.new_id("txt")
+    yield stream.start(message_id)
+    yield stream.start_step()
+
+    try:
+        async with SessionLocal() as session:
+            conv = await _resolve_conversation(session, user_id, client_id, question)
+            session.add(Message(conversation_id=conv.id, role="user", content=question))
+            await session.commit()
+
+            yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
+            yield stream.text_start(text_id)
+            yield stream.text_delta(text_id, reply)
+            yield stream.text_end(text_id)
+
+            # 不挂引用：固定回复没有出处，挂了就是假的
+            await _AnswerWriter(session, conv.id).write(reply, final=True)
+            # tokens 记 0——一个字都没送进模型。但请求数要记，否则运维看到的
+            # 请求量会凭空少掉一截
+            await usage.record(session, user_id, 0)
+
+    except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
+        logger.exception("寒暄流出错：user=%s question=%r", user_id, question[:80])
         yield stream.error(GENERIC_ERROR)
 
     yield stream.finish_step()
@@ -376,33 +460,62 @@ AGENT_TRIGGERS = (
 )
 
 
+def in_agent_bucket(user_id: uuid.UUID) -> bool:
+    """这个用户在不在 Agent 灰度桶里（M10 P3）。
+
+    ⭐ **按 user_id 稳定分桶，不是按请求随机。** 同一个人的同一条会话在两条路
+    之间跳，多轮状态当场断掉；线上出问题时也归不了因——你不知道他刚才那一句
+    走的是哪条。哈希取前 4 字节映射到 [0,1)，同一个人每次都落在同一侧。
+
+    M10 P2 的评测（55 题，各跑两轮）：
+
+        路径    准确率            幻觉  检索命中  引用正确
+        直路    96.4 / 98.2%       0%     100%     100%
+        Agent   94.5 / 100.0%      0%     100%     100%
+
+    两条路的区间**完全重叠**——差异是模型在 temperature=0 下的抖动，不是架构。
+    （逐题比对过：52/55 题上下文完全一致，失败题的引用来源、顺序、上下文
+    与直路一模一样。）硬指标两轮全满，所以敢灰度；但正因为单轮判不出 2 个点
+    的差距，**只能灰度，不能一把切**。
+    """
+    s = get_settings()
+    if s.agent_enabled:
+        return True  # 总开关：评测和本机验证用
+    if s.agent_rollout <= 0:
+        return False
+    if s.agent_rollout >= 1:
+        return True
+    digest = hashlib.sha256(str(user_id).encode()).digest()
+    return int.from_bytes(digest[:4], "big") / 2**32 < s.agent_rollout
+
+
 async def _use_agent(session: AsyncSession, user, question: str, client_id: str | None) -> bool:
     """这一轮走 Agent 还是走直路。
 
-    ⭐ **依据是数字，不是偏好。** M8 的 41 题评测上（`eval/results/`）：
+    三个入口，第一个是 M10 加的：
 
-        指标        直路      Agent
-        准确率      100%      87.8%
-        幻觉率        0%      12.5%
-        检索命中率   100%      93.9%
-
-    Agent 自己决定检索词，命中率反而更低，还会把相邻主题的材料凑进答案
-    （典型：拿「得物」的面单步骤回答「京东」的问题）。所以**普通问答一律走直路**，
-    Agent 只接它独有的那件事：多轮收集需求 + 出方案 + 导出 xlsx。
-
-    两个入口：
+      0. **这个用户在灰度桶里** —— 那就一律走 Agent，普通问答也走。
+         这是 M10 的目标形态：路由交给模型，而不是关键词表。
       1. 问题里出现意图词（「帮我出个实施方案」）
       2. **这条会话已经在走 Agent 了**（`profile is not None`）。这条不能少——
          少了它，用户答完第一个追问，第二轮就被路由回直路，
          Agent 那边的状态就断了。
 
+    ⚠️ 1 和 2 是**灰度桶之外**那半边人的路由，M7 定的规矩原样留着。
+    等灰度到 100% 且线上稳定，这两条连同 `AGENT_TRIGGERS`、`_chat_stream`
+    一起删——**删掉那一堆才是 M10 的收益**，只加不删的话双路的税照收。
+
     ⚠️ 判据是 `profile is not None`，**不是「profile 有内容」**。
     第一轮 Agent 往往只是提个问题、一个字段都没记，此时 profile 是 `{}`。
     按「有内容」判的话第二轮就掉回直路——线上实测踩到过：
     用户答「淘宝和抖音两个平台」，回来的是一句「根据参考材料，无法回答」。
+
+    > `AGENT_TRIGGERS` 是子串匹配，会误伤：「实施方案模板在哪里下载」问的是
+    > 知识库里有没有这份文档，却被送进需求收集流程（路由评测 `routing-before`
+    > 里那 2 道错题）。灰度桶里的用户不受这个影响——模型分得清。
     """
-    if get_settings().agent_enabled:
-        return True  # 总开关：留给评测和将来验证用
+    if in_agent_bucket(user.id):
+        return True
     if any(kw in question for kw in AGENT_TRIGGERS):
         return True
     if not client_id:
@@ -434,7 +547,14 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
             f"今天的用量已达上限（{used}/{quota} tokens），明天再来或联系管理员调整。",
         )
 
-    producer = _agent_stream if await _use_agent(session, user, question, body.id) else _chat_stream
+    use_agent = await _use_agent(session, user, question, body.id)
+    # ⭐ 寒暄短路（M10 P2）。**顺序不能反**：已经在多轮流程里的会话不走这条。
+    # Agent 问完「要对接哪些平台？」，用户回一句「好的」——那个「好的」在
+    # 寒暄表里，短路掉就变成「不客气，还有别的问题随时问」，流程当场断掉。
+    if not use_agent and small_talk_reply(question) is not None:
+        producer = _canned_stream
+    else:
+        producer = _agent_stream if use_agent else _chat_stream
     return StreamingResponse(
         producer(user.id, question, body.id, body.mode),
         media_type="text/event-stream",

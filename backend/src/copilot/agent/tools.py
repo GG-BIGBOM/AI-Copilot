@@ -1,10 +1,22 @@
 """Agent 的工具。
 
-四个工具，对应 plan.md M7 的清单：
+**终结工具**（M10）——返回的就是给用户的最终答案，Agent 不复述、不加工：
+    answer_kb          回答 ERP 问题。内部 = 直路整条，正文流式直通前端
+    whoami             自我介绍。和寒暄短路共用同一份文本，不许各写一份
+
+**普通工具**——返回的是给 Agent 看的材料，由它组织成话：
+    current_time       当前日期时间（北京时间）
+    my_documents       用户自己上传了哪些文档（**只列自己的**）
     search_kb          检索知识库（**自动带当前用户的 owner 过滤**）
+                       ⚠️ M10 起**不再挂在主 Agent 上**，见 agent.py 的 TOOLS
     save_requirement   记一条需求，并告诉模型还缺什么
     generate_plan      用 Pydantic 约束的结构化输出生成配置清单
     export_excel       落成 xlsx 供下载
+
+⭐ **这个二分是 M10 的全部要点。** M7 的 Agent 只有普通工具，于是 ERP 答案是
+Agent 拿着原始材料自己写的——41 题上准确率 87.8%、幻觉率 12.5%，四条成因
+（检索词漂移 / 材料串味 / 拒答闸门变软 / 换了 prompt）全都源于「它有那支笔」。
+M10 不是把 Agent 调得更听话，是**把笔拿走**。
 
 三条贯穿的规矩：
 
@@ -22,7 +34,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 from pydantic_ai import RunContext
 
@@ -35,6 +47,132 @@ logger = logging.getLogger(__name__)
 
 # 正文里的图片标记 `[图3]`——build_context() 已经重编过号
 _IMG_RE = re.compile(r"\[图(\d+)\]")
+
+
+async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
+    """回答用户关于旺店通旗舰版 ERP 的问题：操作步骤、参数配置、异常排查、
+    功能限制、界面路径——**只要沾边就调它**。答案会直接呈现给用户，
+    你不需要、也不允许再复述或补充。
+
+    这个工具没有参数：它用的就是用户这一轮的原话。
+    """
+    deps = ctx.deps
+
+    # ⚠️ 一轮只允许一次终结答案。第二次调用会毁掉第一次的引用编号——
+    # 那批 [1][2] 已经连着正文流给用户了，而 `citations` 只有一份
+    if deps.final_answer is not None:
+        return "这一轮已经回答过用户了。不要再调用，直接结束。"
+    if deps.llm is None:  # 只可能是接线漏了，不是用户输入能导致的
+        logger.error("answer_kb 没拿到 llm，deps 接线漏了")
+        return "回答功能暂时不可用。"
+
+    from starlette.concurrency import iterate_in_threadpool
+
+    from copilot.qa import ask_stream
+
+    buf: list[str] = []
+    try:
+        streamed = await ask_stream(
+            deps.session,
+            deps.question,
+            deps.embedder,
+            deps.reranker,
+            deps.llm,
+            # ⚠️ 隔离红线：同 search_kb，owner 过滤只能来自 deps
+            user_id=deps.user_id,
+            history=deps.history,
+            mode=deps.mode,
+        )
+        # 配图在正文之前发，理由见 deps.emit_images()
+        deps.images = list(streamed.images)
+        await deps.emit_images()
+
+        async for piece in iterate_in_threadpool(streamed.stream):
+            buf.append(piece)
+            await deps.emit_text(piece)
+    except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
+        logger.warning("answer_kb 失败：%s", e, exc_info=True)
+        if not buf:
+            return "查知识库的时候出错了（外部服务异常）。可以让我再试一次。"
+        # 已经吐出去一半了，收不回来。把它定成本轮答案，别让 Agent 再写一段
+        deps.final_answer = "".join(buf)
+        return "回答到一半出错了，已生成的部分用户已经看到。告诉他可以重试。"
+
+    deps.final_answer = "".join(buf)
+    # ⚠️ **覆盖而不是合并。** 用户看到的 [1][2] 来自直路自己的编号；
+    # `deps.citations` 里原有的是普通工具留下的（那些材料用户根本没看到），
+    # 合并会让编号和正文对不上——点开 [1] 看到的是另一篇文档。
+    deps.citations = [c.to_dict() for c in streamed.citations]
+    deps.retrieved.append(streamed.context_text)
+    return "已经把答案直接给用户了。不要复述、不要补充、不要总结，本轮到此结束。"
+
+
+async def whoami(ctx: RunContext[AgentDeps]) -> str:
+    """介绍你自己：你是什么、能做什么、不能做什么。
+    用户问「你是谁」「你能干什么」「怎么用」时调它。
+
+    这段介绍会直接呈现给用户，你不需要、也不允许再复述或补充。
+    """
+    from copilot.qa import canned_reply
+
+    deps = ctx.deps
+    if deps.final_answer is not None:
+        return "这一轮已经回答过用户了。不要再调用，直接结束。"
+
+    # ⚠️ **不要自己写这段介绍。** 它和寒暄短路那条路必须是同一份文本
+    # （见 qa.canned_reply）——两处各写一份，加了新能力就会有一处漏改，
+    # 而用户看到的是「同一个助手对自己的两种说法」
+    text = canned_reply("capability") or ""
+    await deps.emit_text(text)
+    deps.final_answer = text
+    return "已经把介绍直接给用户了。不要复述、不要补充，本轮到此结束。"
+
+
+async def my_documents(ctx: RunContext[AgentDeps]) -> str:
+    """列出用户自己上传到私有知识库的文档。
+    用户问「我传了哪些文档」「我的知识库里有什么」时调它。
+    """
+    from sqlalchemy import desc, select
+
+    from copilot.db.models import Document
+
+    deps = ctx.deps
+    stmt = (
+        select(Document.title, Document.status)
+        # ⚠️ 隔离红线：同 answer_kb，owner 只能来自 deps。
+        # 这里是**严格等于**当前用户，公共库那 746 篇（owner_id IS NULL）
+        # 不属于任何人，不该出现在「我的文档」里
+        .where(Document.owner_id == deps.user_id)
+        .order_by(desc(Document.created_at))
+        .limit(20)
+    )
+    try:
+        rows = list((await deps.session.execute(stmt)).all())
+    except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
+        logger.warning("my_documents 失败：%s", e, exc_info=True)
+        return "查文档列表时出错了。可以让我再试一次。"
+
+    if not rows:
+        return "这个用户的私有知识库是空的，还没有上传过文档。"
+    lines = [
+        f"- {title}" + ("" if status == "done" else f"（{status}，还不能被检索到）")
+        for title, status in rows
+    ]
+    more = "（只列最近 20 份）" if len(rows) == 20 else ""
+    return f"用户自己上传了 {len(rows)} 份文档{more}：\n" + "\n".join(lines)
+
+
+# 北京时间。用固定 +8 而不是 ZoneInfo("Asia/Shanghai")：中国 1991 年起
+# 全境单一时区、无夏令时，固定偏移是准确的；而 ZoneInfo 在 Windows 上要额外
+# 装 tzdata，为了一个不会变的偏移量多一个依赖不值得。
+_CST = timezone(timedelta(hours=8))
+_WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
+
+
+def current_time() -> str:
+    """当前的日期和时间（北京时间）。用户问「现在几点」「今天几号」「星期几」时调它。"""
+    now = datetime.now(_CST)
+    return f"{now:%Y年%m月%d日 %H:%M}，星期{_WEEKDAYS[now.weekday()]}（北京时间）"
 
 
 async def search_kb(ctx: RunContext[AgentDeps], query: str) -> str:

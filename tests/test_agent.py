@@ -132,8 +132,56 @@ def _deps(session, user_id, **kw) -> AgentDeps:
 # ---------- ⭐ 隔离红线 ----------
 
 
+async def test_answer_kb_never_crosses_users(maker, two_users):
+    """⭐ 最不能红的一条。M10 之后 `answer_kb` 是**活的**检索路径，
+    这条红线跟着它走：用 B 的原文当问题、以 A 的身份提问，最严苛的情形。
+    """
+    from chat_helpers import FakeLLM
+
+    from copilot.agent.tools import answer_kb
+
+    (alice_id, bob_id), secrets, _ = two_users
+    async with maker() as s:
+        # 问题从 deps 来，不是工具入参——见下一条
+        deps = _deps(s, alice_id, llm=FakeLLM("知识库暂无此内容。"), question=secrets[bob_id])
+        await answer_kb(ctx(deps))
+    assert secrets[bob_id] not in deps.context_text, "泄漏了！爱丽丝检索到了鲍勃的材料"
+
+
+async def test_answer_kb_finds_own_document(maker, two_users):
+    """隔离不能矫枉过正——自己的东西自己得搜到。
+
+    没有这一条，上面那条用「什么都检索不到」也能过。
+    """
+    from chat_helpers import FakeLLM
+
+    from copilot.agent.tools import answer_kb
+
+    (alice_id, _), secrets, _ = two_users
+    async with maker() as s:
+        deps = _deps(s, alice_id, llm=FakeLLM("好的[1]。"), question=secrets[alice_id])
+        await answer_kb(ctx(deps))
+    assert secrets[alice_id] in deps.context_text
+
+
+def test_answer_kb_takes_no_question_argument():
+    """⭐ 结构性防线，两层：
+
+    1. 没有 user_id 入参——同 `search_kb`，否则一句 prompt injection 就能读别人的库。
+    2. **连问题都不是入参。** 检索用的是 `deps.question`（用户原话）。
+       让模型自己写检索词，就是 M7 准确率掉 12 个点的第一条成因：
+       它把「京东电子面单怎么配」改写成「电子面单 模板 设置」，召回了得物那篇。
+    """
+    import inspect
+
+    from copilot.agent.tools import answer_kb
+
+    params = list(inspect.signature(answer_kb).parameters)
+    assert params == ["ctx"], f"answer_kb 多了入参：{params}"
+
+
 async def test_search_kb_never_crosses_users(maker, two_users):
-    """⭐ 本里程碑最不能红的一条。
+    """⭐ 同一条红线在 M7 那个工具上的版本。
 
     用 B 的原文当查询、以 A 的身份检索——最严苛的情形。
     """
@@ -429,3 +477,126 @@ def test_citations_are_renumbered_across_searches(maker):
     assert [c["n"] for c in first] == [1]
     assert [c["n"] for c in second] == [2, 1]  # 乙拿到新号 2；甲复用已有的 1
     assert len(deps.citations) == 2, "同一篇不该占两个号"
+
+
+# ---------- M10 P3：灰度分桶 ----------
+
+
+def _settings(monkeypatch, **kw):
+    """改配置单例上的字段，用完自动还原。"""
+    s = get_settings()
+    for k, v in kw.items():
+        monkeypatch.setattr(s, k, v)
+    return s
+
+
+def test_rollout_zero_and_one_are_absolute(monkeypatch):
+    from copilot.api.routes.chat import in_agent_bucket
+
+    users = [uuid.uuid4() for _ in range(200)]
+    _settings(monkeypatch, agent_enabled=False, agent_rollout=0.0)
+    assert not any(in_agent_bucket(u) for u in users)
+    _settings(monkeypatch, agent_rollout=1.0)
+    assert all(in_agent_bucket(u) for u in users)
+
+
+def test_rollout_bucket_is_stable_for_the_same_user(monkeypatch):
+    """⭐ 分桶必须按用户，不能按请求。
+
+    同一个人在两条路之间跳，多轮收集需求的状态当场断掉；线上出问题时
+    也归不了因——你不知道他刚才那一句走的是哪条路。
+    """
+    from copilot.api.routes.chat import in_agent_bucket
+
+    _settings(monkeypatch, agent_enabled=False, agent_rollout=0.5)
+    user = uuid.uuid4()
+    assert len({in_agent_bucket(user) for _ in range(50)}) == 1
+
+
+def test_rollout_ratio_is_roughly_right(monkeypatch):
+    """10% 的桶不该装进 30% 的人。范围放宽是因为 2000 个样本本来就有波动。"""
+    from copilot.api.routes.chat import in_agent_bucket
+
+    _settings(monkeypatch, agent_enabled=False, agent_rollout=0.1)
+    users = [uuid.uuid4() for _ in range(2000)]
+    hit = sum(in_agent_bucket(u) for u in users)
+    assert 120 < hit < 280, f"10% 的桶命中了 {hit}/2000"
+
+
+def test_agent_enabled_overrides_rollout(monkeypatch):
+    """总开关是给评测和本机验证用的，它要压过灰度比例。"""
+    from copilot.api.routes.chat import in_agent_bucket
+
+    _settings(monkeypatch, agent_enabled=True, agent_rollout=0.0)
+    assert in_agent_bucket(uuid.uuid4())
+
+
+async def test_bucketed_user_takes_the_agent_for_a_plain_question(maker, two_users, monkeypatch):
+    """桶里的人，普通问答也走 Agent——这才是「全 Agent 化」。
+
+    桶外的人不变：普通问答仍然走直路（M7 那套关键词路由）。
+    """
+    from copilot.api.routes.chat import _use_agent
+
+    (alice_id, _), _, _ = two_users
+    user = SimpleNamespace(id=alice_id)
+    async with maker() as s:
+        _settings(monkeypatch, agent_enabled=False, agent_rollout=1.0)
+        assert await _use_agent(s, user, "电子面单怎么设置", None) is True
+        _settings(monkeypatch, agent_rollout=0.0)
+        assert await _use_agent(s, user, "电子面单怎么设置", None) is False
+
+
+# ---------- M10 P4：whoami / my_documents ----------
+
+
+async def test_whoami_reuses_the_one_capability_text(maker, two_users):
+    """⭐ 自我介绍只能有一份。
+
+    寒暄短路那条路（`_canned_stream`）和这个工具必须给出同一段话——
+    各写一份的话，加了个新能力改了一处忘了另一处，用户会看到
+    「同一个助手对自己的两种说法」，而且没有任何报错。
+    """
+    from copilot.agent.tools import whoami
+    from copilot.qa import canned_reply, small_talk_reply
+
+    (alice_id, _), _, _ = two_users
+    said: list[str] = []
+    async with maker() as s:
+        deps = _deps(s, alice_id)
+
+        async def emit(kind, payload):
+            if kind == "text":
+                said.append(str(payload))
+
+        deps.emit = emit
+        back = await whoami(ctx(deps))
+
+    assert "".join(said) == canned_reply("capability") == small_talk_reply("你能做什么")
+    # 终结工具：正文已经直通给用户了，Agent 不该再复述
+    assert deps.final_answer == "".join(said)
+    assert "不要复述" in back
+
+
+async def test_my_documents_only_lists_my_own(maker, two_users):
+    """⭐ 隔离红线的第三处。公共库那 746 篇不属于任何人，也不该出现在这里。"""
+    from copilot.agent.tools import my_documents
+
+    (alice_id, bob_id), _, tag = two_users
+    async with maker() as s:
+        alice_sees = await my_documents(ctx(_deps(s, alice_id)))
+        bob_sees = await my_documents(ctx(_deps(s, bob_id)))
+
+    assert alice_id.hex[:6] in alice_sees
+    assert bob_id.hex[:6] not in alice_sees, f"泄漏了！爱丽丝看到了鲍勃的文档：{alice_sees}"
+    assert bob_id.hex[:6] in bob_sees
+    assert alice_id.hex[:6] not in bob_sees
+
+
+async def test_my_documents_says_so_when_empty(maker, two_users):
+    """空的时候要明说「是空的」，别返回空串——空串会让模型以为工具坏了。"""
+    from copilot.agent.tools import my_documents
+
+    async with maker() as s:
+        text = await my_documents(ctx(_deps(s, uuid.uuid4())))
+    assert "空" in text
