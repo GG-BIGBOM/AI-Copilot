@@ -177,6 +177,14 @@ class CaseResult:
 # ---------- 载入 ----------
 
 
+# 答案 / 材料里的配图标记。和 qa.py 里模型被要求写的格式一致
+_PIC_RE = re.compile(r"\[图\s*\d{1,2}\]")
+
+
+def _count_pics(text: str) -> int:
+    return len(_PIC_RE.findall(text or ""))
+
+
 def load_cases(only: str | None = None, scope: str = "public") -> tuple[dict, list[dict]]:
     import yaml
 
@@ -373,6 +381,7 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
     from copilot.agent.runner import run_agent_stream
     from copilot.db.models import Chunk
     from copilot.db.session import SessionLocal
+    from copilot.providers.llm import ChatLLM
     from copilot.providers.siliconflow import (
         SiliconFlowClient,
         SiliconFlowEmbedder,
@@ -383,6 +392,10 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
     async def main() -> list[CaseResult]:
         client = SiliconFlowClient()
         emb, rr = SiliconFlowEmbedder(client=client), SiliconFlowReranker(client=client)
+        # ⚠️ M10 起 `answer_kb` 要用它跑直路。不接的话工具直接返回
+        # 「回答功能暂时不可用」，整份报告会是一堆空答案——**而且不报错**。
+        # `forced_temperature=0`：同直路评测的理由，可复现比"和线上完全一致"更值
+        answer_llm = ChatLLM(forced_temperature=0.0)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
             CORPUS_STATS["chunk_count"] = await session.scalar(
@@ -397,6 +410,7 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
                     conversation_id=uuid.uuid4(),
                     embedder=emb,
                     reranker=rr,
+                    llm=answer_llm,
                 )
                 answer = ""
                 try:
@@ -422,6 +436,7 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
                 flag = "" if cr.source_hit is None else ("命中" if cr.source_hit else "未命中")
                 print(f"  [{i:2}/{len(cases)}] {case['id']:34} {flag}")
         client.close()
+        answer_llm.close()
         return out
 
     return asyncio.run(main())
@@ -574,6 +589,28 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
             len([r for r in results if not r.said_no_answer]),
         ),
     }
+
+    # ⭐ 配图带出率：**该带截图的题**，答案真的把 [图N] 带出来了吗。
+    #
+    # 加这条是因为线上反馈「回答没有图片了」。查下来图片链路整条都是好的，
+    # 真正发生的是：检索选中了正确文档里**没有截图的那一块**，
+    # 而模型（正确地）不肯去借它没引用的那一块的图。
+    # 没有这个数字的话，这类退化在所有现有指标上都是隐形的——
+    # 准确率、命中率、幻觉率全都不会动一下。
+    #
+    # ⚠️ **分母是标了 `procedural` 的题，不是"材料里有图的题"。**
+    # 第一版就是按后者算的，结果算出来 15.6%——因为 55 题里绝大多数是事实查询
+    # （「极兔的平台编码是什么」这种），一句话答完，配图本来就不合适，
+    # 模型不写图是对的。拿它们当分母，这个数纯粹是噪声。
+    # 分母必须由出题人显式标注，不能靠问题里的关键词去猜：猜出来的分母
+    # 会随着有人换个问法而变，指标就没法跨轮比了。
+    procedural_ids = {c["id"] for c in cases if c.get("procedural")}
+    procedural = [r for r in results if r.id in procedural_ids and not r.said_no_answer]
+    if procedural:
+        m["配图带出率"] = pct(
+            sum(_count_pics(r.answer) > 0 for r in procedural), len(procedural)
+        )
+        m["操作类题数"] = len(procedural)
     # ⭐ 难题单独一条。总准确率会被 41 道已经饱和的老题稀释——
     # 14 道新题全错，总数也才掉 25 个点，看着像「小幅波动」
     hard_ids = {c["id"] for c in cases if c.get("hard")}
@@ -601,6 +638,9 @@ METRIC_HELP = {
     "幻觉率": "该说「暂无此内容」却给了实质答案的比例。**这个数字要压到 0**",
     "假阴性率": "材料里有答案、却答「暂无此内容」的比例。它和幻觉率是一对："
     "prompt 闸门收紧一分，幻觉降一点、假阴性涨一点",
+    "配图带出率": "标了 procedural 的题中，答案真的写出了 [图N] 的比例。"
+    "低不一定是模型的错——更常见的是检索选中了同一篇文档里没有截图的那一块。"
+    "**分母只算操作类题**：事实查询本来就不该配图",
     "难题准确率": "标了 hard 的题（多跳/跨文档/否定/条件）的判对比例。"
     "**改动的效果先看这个数**——老题在 v3 上已经饱和，看总准确率会被稀释成噪声",
     "无据陈述率": "答了的题里，判分器发现「有材料不支持的具体说法」的比例。"
@@ -650,7 +690,16 @@ def print_report(
     print("=" * 78)
     print(f"  {tag}    判分模型 {judge}    {cfg_line}")
     print("=" * 78)
-    for k in ("题数", "准确率", "检索命中率", "引用正确率", "幻觉率", "假阴性率", "无据陈述率"):
+    for k in (
+        "题数",
+        "准确率",
+        "检索命中率",
+        "引用正确率",
+        "幻觉率",
+        "假阴性率",
+        "无据陈述率",
+        "配图带出率",
+    ):
         v = metrics[k]
         unit = "" if k == "题数" else "%"
         print(f"  {k:<12} {v}{unit}")

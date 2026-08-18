@@ -1,0 +1,100 @@
+{
+  "tag": "run-0818-2305",
+  "ran_at": "2026-08-18T15:06:06+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "agent",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "91595204",
+    "chunk_count": 4568
+  },
+  "judge_model": "gemini-2.5-pro",
+  "metrics": {
+    "题数": 1,
+    "准确率": 100.0,
+    "检索命中率": 100.0,
+    "引用正确率": 100.0,
+    "幻觉率": 0.0,
+    "假阴性率": 0.0,
+    "无据陈述率": 0.0,
+    "分类准确率": {
+      "fact": 100.0,
+      "probe": 0.0,
+      "partial": 0.0,
+      "no_answer": 0.0
+    }
+  },
+  "cases": [
+    {
+      "id": "fact-logistics-code-jtsd",
+      "kind": "fact",
+      "q": "微信视频号的发货设置里，极兔快递对应的平台物流编码是什么？",
+      "answer": "微信视频号发货设置中，极兔快递对应的平台物流编码是 **JTSD**，系统物流类别为 **极兔速递**。[1]\n\n操作位置：【设置】【基本设置】【店铺】-物流公司。[1]\n\n注意：快运编码与物流映射一定不要维护错误，否则会导致发货后店铺后台信息没有物流流转信息。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "四、发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.8743
+        },
+        {
+          "n": 2,
+          "title": "设置 · 唯品会MP面单模板设置步骤",
+          "heading": "三.发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/som424",
+          "score": 0.3089
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+          "heading": "一、设置 › 1.物流设置 › 1）第三方物流授权和模板设置的常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ghydd246hc90gbse",
+          "score": 0.2355
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "92、Q： 微信视频号物流失败，平台msg: 订单状态错误，不允许执行此操作 rid: 63f1d908-6c785a3d-40d8bb73",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.1498
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "75、Q：好食期平台订单使用菜鸟极兔物流，物流同步失败提示：物流推送失败",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.1475
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "设置 · 唯品会MP面单模板设置步骤",
+        "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "📒常见问题库 · 物流同步常见报错及解决方案"
+      ],
+      "top_score": 0.8743,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从参考材料[1]中找到了微信视频号发货设置里极兔快递对应的平台物流编码，并提供了相关的操作路径和注意事项，所有信息均有依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1815
+    }
+  ]
+}

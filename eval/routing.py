@@ -1,6 +1,7 @@
 """路由评测（M10 P0）：这句话被送去了哪里。
 
-    uv run python ../eval/routing.py                  # 跑全量，出报表
+    uv run python ../eval/routing.py                  # 跑全量，出报表（确定性路由）
+    uv run python ../eval/routing.py --live           # 让真模型决定（M10 P3 的生效路径）
     uv run python ../eval/routing.py --only 时间      # 只跑某一类
     uv run python ../eval/routing.py --tag before     # 存一份，改完架构再比
     uv run python ../eval/routing.py --compare before after
@@ -26,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +40,8 @@ sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
 
 # 期望路由的合法取值。写错一个字（比如 smalltalks）应该当场报错，
 # 而不是安静地算成一道永远不过的题
+# `direct` 只会出现在 **实测**结果里（模型一个工具都没调、自己答了），
+# 不是合法的**期望**值——期望「它自己答」的题都归在 smalltalk / capability
 ROUTES = ("smalltalk", "capability", "kb", "agent", "time")
 
 
@@ -109,6 +113,128 @@ def bypassed_tool(answer: str, *, used_kb: bool) -> bool:
     return any(mark in answer for mark in _ERP_MARKS)
 
 
+# ---------- 模型路由（M10 P3）----------
+#
+# ⚠️ **灰度之后，上面那个 `route_of` 测的是一条正在退休的分叉。**
+# 灰度桶里的用户，路由由模型决定：它看着工具列表挑一个调。关键词表那套
+# 只对桶外的人生效。不补这个模式的话，这份题集会安静地一直报 100%——
+# 它量的东西已经不在生效路径上了，而报表上完全看不出来。
+#
+# 怎么做到「只量决策、不花答案的钱」：`FunctionToolCallEvent` 在工具**执行之前**
+# 就发出来了。收到第一个就跳出循环，工具根本不会跑。所以一道题只花一次
+# 很短的模型请求（几十个 token），58 题跑一遍比一次 `run.py` 便宜得多。
+
+# 工具名 → 期望路由。**这张表是这个模式的全部语义**：
+# 「模型调了 answer_kb」= 「它把这句话路由到了知识库」
+_TOOL_ROUTE = {
+    "answer_kb": "kb",
+    "current_time": "time",
+    "save_requirement": "agent",
+    "generate_plan": "agent",
+    "export_excel": "agent",
+    "search_kb": "kb",  # M10 起没挂在主 Agent 上，留着是防它哪天被加回去
+}
+
+
+async def _live_probe(question: str, history: list, agent) -> tuple[str | None, str]:
+    """跑一轮 Agent，返回 `(第一个调用的工具名, 它自己写的正文)`。
+
+    两样都要，缺一样就分不清下面这两种「一个工具都没调」：
+
+        「帮我出一份实施方案」→ 反问「要对接哪些平台？」   ← **正确**，需求收集
+        「帮我写段 Python」   → 真的写了一段 Python        ← 越过工具直答
+
+    ⚠️ **工具还是会被执行一次。** `FunctionToolCallEvent` 发出来的时候
+    pydantic-ai 已经把这次调用排上了，跳出循环只能取消**后续**的轮次。
+    但下面那个 deps 是空的，所有工具都会立刻返回一句人话（见 tools.py 第 2 条），
+    一个外部接口都不打——所以这个模式仍然只花「一次决策」的钱。
+    """
+    from pydantic_ai import FunctionToolCallEvent, PartDeltaEvent, PartStartEvent
+    from pydantic_ai.messages import TextPart, TextPartDelta
+
+    from copilot.agent.deps import AgentDeps
+    from copilot.agent.runner import to_message_history
+
+    # 工具一个都不会执行（收到调用事件就跳出），所以 deps 里那些外部依赖
+    # 可以是空的。**别在这里接真的 session/embedder**——接了就等于每道题
+    # 都真去检索一次，这个模式就不便宜了
+    deps = AgentDeps(
+        session=None,  # type: ignore[arg-type]
+        user_id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        embedder=None,  # type: ignore[arg-type]
+        question=question,
+    )
+    msgs = to_message_history([(role, text) for role, text in history]) if history else None
+    said: list[str] = []
+    async with agent.run_stream_events(question, deps=deps, message_history=msgs) as events:
+        async for event in events:
+            if isinstance(event, FunctionToolCallEvent):
+                return event.part.tool_name, "".join(said)
+            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                said.append(event.part.content or "")
+            elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                said.append(event.delta.content_delta or "")
+    return None, "".join(said)
+
+
+def _is_a_question(text: str) -> bool:
+    """这段话是在反问吗。
+
+    **是个启发式，不是判定**：靠问号。需求收集的第一轮长这样——
+    「您要对接哪些电商平台？（如淘宝、拼多多、抖音）」。
+    真要严格判，得让它多跑一轮看会不会调 `save_requirement`，
+    那要多花一次生成，而这个模式的全部价值就是便宜。
+    """
+    return "？" in text or "?" in text
+
+
+def run_live(cases: list[dict]) -> list[CaseResult]:
+    """让模型自己决定每一道题该去哪。串行——并发对一次决策没意义。"""
+    import asyncio
+    import logging
+
+    from copilot.agent.agent import build_agent
+    from copilot.qa import small_talk_kind
+
+    agent = build_agent()
+    # 工具会被执行一次并抱怨「deps 接线漏了」（见 `_live_first_tool`）。
+    # 那句 ERROR 在生产里是有用的，在这里是噪声——而噪声看多了，
+    # 真正的接线 bug 也会被当成噪声划过去
+    logging.disable(logging.ERROR)
+
+    async def main() -> list[CaseResult]:
+        out: list[CaseResult] = []
+        for i, c in enumerate(cases, 1):
+            r = CaseResult(id=c["id"], kind=c["kind"], q=c["q"], expected=c["route"])
+            # 寒暄短路仍在 Agent **之前**（M10 P2 的定位：缓存层，不是分叉）
+            kind = small_talk_kind(c["q"])
+            if kind is not None:
+                r.actual = "capability" if kind == "capability" else "smalltalk"
+            else:
+                try:
+                    tool, said = await _live_probe(c["q"], c.get("history") or [], agent)
+                except Exception as e:  # noqa: BLE001 - 单题失败不该毁掉整轮
+                    r.actual = f"__ERROR__{type(e).__name__}"
+                else:
+                    if tool:
+                        r.actual = _TOOL_ROUTE.get(tool, "direct")
+                    elif _is_a_question(said):
+                        # 反问 = 开始收集需求。出方案那条路的第一轮本来就
+                        # **不该**调工具（M7 验收原话：「没调工具，先问」）
+                        r.actual = "agent"
+                    else:
+                        # ⭐ 一个工具都没调，还给出了陈述句 = 它自己写了答案。
+                        # 这就是「越过工具直答」，M10 要盯的那个硬指标
+                        r.actual = "direct"
+                        r.bypassed = c["route"] in ("kb", "agent")
+            out.append(r)
+            print(f"  [{i:2}/{len(cases)}] {c['id']:34} → {r.actual}")
+        return out
+
+    return asyncio.run(main())
+
+
 # ---------- 跑 ----------
 
 
@@ -176,7 +302,7 @@ def report(results: list[CaseResult], m: Metrics, tag: str) -> None:
     print("=" * 78)
     print(f"  题数           {m.total}")
     print(f"  路由准确率      {m.route_accuracy}%")
-    print(f"  越过工具直答率   {m.bypass_rate}%（双路架构下结构上恒为 0，M10 P1 后才有意义）")
+    print(f"  越过工具直答率   {m.bypass_rate}%（确定性路由下结构上恒为 0，只有 --live 才有意义）")
     print()
     print("  分类准确率：", end="")
     for kind, slot in m.by_kind.items():
@@ -250,6 +376,11 @@ def main() -> None:
     ap.add_argument("--tag", default="", help="这轮的名字，结果存 results/routing-<tag>.json")
     ap.add_argument("--only", default="", help="只跑指定 id 或 kind，逗号分隔")
     ap.add_argument("--compare", nargs="+", metavar="TAG", help="对比若干轮结果")
+    ap.add_argument(
+        "--live",
+        action="store_true",
+        help="让真模型决定路由（M10 P3 之后的生效路径）。要花钱，但只花决策那一次",
+    )
     args = ap.parse_args()
 
     if args.compare:
@@ -257,10 +388,10 @@ def main() -> None:
         return
 
     meta, cases = load_cases(args.only or None)
-    results = run(cases)
+    results = run_live(cases) if args.live else run(cases)
     m = measure(results)
     tag = args.tag or datetime.now().strftime("run-%m%d-%H%M")
-    report(results, m, tag)
+    report(results, m, f"{tag}（{'模型路由' if args.live else '确定性路由'}）")
     if args.tag:
         print(f"\n结果存在 {save(results, m, meta, tag)}")
 

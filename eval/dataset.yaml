@@ -549,3 +549,69 @@ cases:
     must_include: ['20']
     why: 口语化问法（"飘红"是原文用词，但"低到多少"不是），
       且答案是个很小的数字，容易和文档里其他数字（8 号、3 号）混淆。
+
+  # ======================= procedural：多步操作，答案该带截图 =======================
+  #
+  # ⚠️ **这批题是补一个盲区，不是锦上添花。**
+  # 原来 55 题里只有 1 道是「怎么操作」类的——其余全是事实查询
+  # （「极兔的平台编码是什么」这种，一句话答完，配图本来就不合适）。
+  # 于是「答案该带截图却没带」这类退化，在全部现有指标上都是隐形的。
+  # 线上反馈的「回答没有图片了」就是这么漏过去的。
+  #
+  # `procedural: true` 是「配图带出率」这个指标的分母。别拿问题里的关键词去猜——
+  # 猜出来的分母会随着有人换个问法而变，指标就没法跨轮比了。
+  #
+  # 每条事实都用 SQL 在 chunks 里核实过原文（2026-08-18）。
+
+  - id: proc-stocktake-flow
+    kind: fact
+    procedural: true
+    q: 盘点的完整操作流程是怎样的？
+    source: 盘点流程
+    must_include: ['盘点开单', '盘点录入']
+    why: 一条跨块的完整流程。**流程图和各步骤的截图分散在不同块里**，
+      正是「命中了正确文档、却命中了没有截图的那一块」的典型。
+
+  - id: proc-stocktake-schemes
+    kind: fact
+    procedural: true
+    q: 盘点开单的时候可以选哪几种盘点方案？
+    source: 盘点流程
+    must_include: ['明细', '货位', '单品']
+    why: 三个维度写在同一句里，但这一块的截图在它后面。
+      答对不难，难的是把那一步对应的截图一起带出来。
+
+  - id: proc-purchase-return-flow
+    kind: fact
+    procedural: true
+    q: 采购退货的操作流程是什么？
+    source: 采购退货流程
+    must_include: ['采购退货开单', '采购退货结算']
+    why: 三段式流程（开单→出库→结算）横跨好几块，每块各带自己的截图。
+      这题同时在测「跨块流程答不答得全」和「截图跟不跟得上」。
+
+  - id: proc-purchase-return-outbound
+    kind: fact
+    procedural: true
+    q: 采购退货出库有哪两种方法？
+    source: 采购退货流程
+    must_include: ['快速出库']
+    why: 「分步」和「快速」两种方法分别写在相邻的两块里——
+      只命中一块就只能答出一半。
+
+  - id: proc-print-delivery-note
+    kind: fact
+    procedural: true
+    q: 发货单怎么打印？在哪个界面操作？
+    source: 系统打印模板设置及打印位置
+    must_include: ['仓储-销售出库-单据处理']
+    why: 界面路径要原样答出来。这篇每一块都很短且每块带一张图，
+      是检验「短块 + 图」这种形态的好例子。
+
+  - id: proc-print-picking-wave
+    kind: fact
+    procedural: true
+    q: 打印分拣波次在哪里操作？
+    source: 系统打印模板设置及打印位置
+    must_include: ['仓储-销售出库-单据处理']
+    why: 和上一题同一篇的邻块。两题都问出来，说明相邻块没有互相盖掉。

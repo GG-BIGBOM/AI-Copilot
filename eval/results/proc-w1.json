@@ -1,0 +1,415 @@
+{
+  "tag": "proc-w1",
+  "ran_at": "2026-08-18T15:25:10+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "top_k": 20,
+    "rerank_k": 5,
+    "neighbor_window": 1,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "91595204",
+    "chunk_count": 4568
+  },
+  "judge_model": "gemini-2.5-pro",
+  "metrics": {
+    "题数": 6,
+    "准确率": 66.7,
+    "检索命中率": 100.0,
+    "引用正确率": 100.0,
+    "幻觉率": 0.0,
+    "假阴性率": 0.0,
+    "无据陈述率": 0.0,
+    "配图带出率": 66.7,
+    "操作类题数": 6,
+    "分类准确率": {
+      "fact": 66.7,
+      "probe": 0.0,
+      "partial": 0.0,
+      "no_answer": 0.0
+    }
+  },
+  "cases": [
+    {
+      "id": "proc-stocktake-flow",
+      "kind": "fact",
+      "q": "盘点的完整操作流程是怎样的？",
+      "answer": "1. **盘点开单**：选择仓库、盘点方案、正残品，添加、导入货品信息，点击提交提交盘点单后【盘点单管理】生成“待盘点”的盘点单。盘点方案支持明细、货位、单品三个维度。[2]\n\n2. **PDA端领取盘点单**：PDA端可以看到待盘点的单子，或者是输入扫描盘点单号进行领取盘点单。[3]\n\n3. **按盘点类型进行盘点录入**：\n   - **货位盘点**：扫提示货位-填写实际库存量-点下一货位，盘点单有其它货位的任务，进入下一个货位，没有则PDA端盘点完成。[3]\n   - **明细盘点**：显示目前系统内货位及库存信息-扫货位-扫货品或者长按该货品-进行填写盘点数量-提交盘点。如仓库中出现系统提示中没有的货位可以在这添加新货位进行盘点。[3]\n   - **PDA单品（包含强SN）盘点**（1.5.0.7版本新增）：进入盘点页面之后扫描货品条码/SN码盘点（数量计算）。[3]\n     - 非SN货品：扫描条码之后对应货品高亮蓝色且盘点数为1，继续扫描可累加盘点数，常摁可弹窗修改数量。当库存数=盘点数，该货品高亮绿色；如果库存数>盘点数且中途退出再进入，对应货品高亮红色，表示该货品未盘点完。[4]\n     - SN货品：盘点录入时，支持扫描序列号实现序列号盘点，支持状态为：已入库、已出库的序列号进行盘点，盘点单生效后，盘点录入的序列号状态置为已入库，未录入的序列号状态置为已出库；首次录入、二次录入、已占用的不参与盘点，所以建议在盘点前把执行中单据审核完毕。第一次扫描货品条码，对应货品高亮蓝色提示且盘点数为0，点击【SN】弹窗扫描SN进行数量修改（增/删），扫描完之后点击【确定】关闭弹窗；点击【提交盘点】根据已经扫描的sn码修改货品的盘点数量；SN货品不可常摁修改数量。当库存数=盘点数，该货品高亮绿色；如果库存数>盘点数且中途退出再进入，对应货品高亮红色，表示该货品未盘点完。[4]\n\n4. **PC端执行盘点单完成**：提交盘点后，PC端盘点单变为盘点中状态-进行右键盘点单计算盈亏完成盘点单。[3] PDA只做货品录入，在PC端执行盘点单完成。如果盘点单中涉及sn货品的增加或扣减，则根据盘盈或盘亏的量自动生成盘盈入库与盘亏出库单，若其中涉及到sn货品的盘点则根据提交的sn货品数量及sn码对系统序列号管理中该仓库下的sn进行自动出库与入库，sn码的状态为盘盈录入或盘亏出库，并在下方的序列号出库单中记录盘亏出库单或盘盈入库单。[4]\n\n**注意事项**：\n- 单品盘点：针对一种单品直接盘点，无法选择货位、货品批次号等，直接将单品盘点为一个库存（单品盘盈的库存会被存放在其他未上架的货位上）。[2]\n- 货位单品盘点：盘点开单时可以针对一货多位进行操作，选择货品其中一个货位进行盘点，盘点录入时同一货位按照SKU维度进行盘点录入即可。[2]\n- 货位明细盘点：盘点开单时可以针对一货多位进行操作，选择货品其中一个货位进行盘点，盘点录入时盘点货位这个货品的批次有效期以及库存量数据。[2]\n- 明细盘点：针对货品的每一条明细库存进行盘点，例如批次号、有效期等信息进行盘点，开单后在盘点录入的时候会区分显示。[2]\n- PC端创建盘点单支持领取货位盘点、明细盘点这两种类型的盘点单。[3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "仓储 · 库存清点",
+          "heading": "一、操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/wfynya",
+          "score": 0.7869
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 盘点流程",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.7268
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 库存盘点",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/zyf2rt",
+          "score": 0.7035
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 库存盘点",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/zyf2rt",
+          "score": 0.6971
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 清点处理",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/wh1dp5",
+          "score": 0.6283
+        }
+      ],
+      "retrieved_titles": [
+        "仓储 · 库存清点",
+        "仓储 · 盘点流程",
+        "仓储 · 库存盘点",
+        "仓储 · 库存盘点",
+        "仓储 · 清点处理"
+      ],
+      "top_score": 0.7868688106536865,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确、完整地概括了参考材料中关于盘点操作的流程，从开单、PDA领取和录入，到PC端完成，并且对不同盘点类型进行了详细说明，所有信息均有材料依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2854
+    },
+    {
+      "id": "proc-stocktake-schemes",
+      "kind": "fact",
+      "q": "盘点开单的时候可以选哪几种盘点方案？",
+      "answer": "盘点开单时支持以下四种盘点方案 [1]：\n\n1. **单品盘点**：针对一种单品直接盘点，无法选择货位、货品批次号等，直接将单品盘点为一个库存（单品盘盈的库存会被存放在其他未上架的货位上）[1]。\n2. **货位单品盘点**：盘点开单时可以针对一货多位进行操作，选择货品其中一个货位进行盘点，盘点录入时同一货位按照SKU维度进行盘点录入即可 [1][2]。\n3. **货位明细盘点**：盘点开单时可以针对一货多位进行操作，选择货品其中一个货位进行盘点，盘点录入时盘点货位这个货品的批次有效期以及库存量数据 [1]。\n4. **明细盘点**：针对货品的每一条明细库存进行盘点，例如批次号、有效期等信息进行盘点，开单后在盘点录入的时候会区分显示 [1]。\n\n补充说明：在1.5.4.3版本升级中，原【货位盘点】方案被拆分为【货位明细盘点】（即原【货位盘点】）和【货位单品盘点】（新增的货位盘点模式）[2]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "仓储 · 盘点流程",
+          "heading": "1、【盘点开单】",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.9846
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 盘点流程",
+          "heading": "6、升级优化 › 6.3、盘点开单新增盘点方案：货位单品盘点",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.971
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 盘点流程",
+          "heading": "6、升级优化 › 6.1、支持强序列号货品盘点（1.4.8.1版本新增）",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.8097
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 库存盘点",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/zyf2rt",
+          "score": 0.5876
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 盘点流程",
+          "heading": "2、【盘点录入】",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.5207
+        }
+      ],
+      "retrieved_titles": [
+        "仓储 · 盘点流程",
+        "仓储 · 盘点流程",
+        "仓储 · 盘点流程",
+        "仓储 · 库存盘点",
+        "仓储 · 盘点流程"
+      ],
+      "top_score": 0.9846357107162476,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确、完整地列出了参考材料中提到的四种盘点方案，并对每种方案进行了与材料一致的解释。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 3330
+    },
+    {
+      "id": "proc-purchase-return-flow",
+      "kind": "fact",
+      "q": "采购退货的操作流程是什么？",
+      "answer": "采购退货的整体操作流程如下：\n\n**1. 创建并审核采购退货单**\n- 操作位置：采购-采购退货开单/采购退货单管理 [1]\n- 在【采购退货开单】中可直接开单或引用采购单，选择供应商、出库仓库、添加货品、填写退货数量，其余字段（联系人、地址、邮费等）按实际情况填写 [1]。\n- 信息填写完整后点击提交（待审核状态）或保存（编辑中状态，可修改）；待审核状态才可审核采购退货单 [1]。\n- 在【采购退货单管理】中对采购退货单进行审核，审核后变为“已审核”，可进行采购入库 [1][图2]。\n\n**2. 采购退货出库**\n有两种方法：\n\n- **分步采购退货出库**：操作位置为仓储-出库管理-采购退货出库开单/采购退货出库管理。在【采购退货出库开单】中双击引用审核后的采购出库单，填写出库数量、选择出库货位后提交；在【采购退货出库单管理】中审核，审核后出库单状态变为“已完成”，货品库存减少 [1][图3]。\n- **采购退货快速出库**：操作位置为仓储-出库管理-采购退货快速出库。选择供应商和出库仓库，添加退货货品及出库数量，填写联系人等信息后提交并审核（货品出库成功同时自动生成采购退货单），或提交后在采购出库管理界面审核 [2][图4]。\n\n**3. 采购退货结算**\n- **未开启自动结算**：操作位置为账款-单据结算-采购退货结算。新建并引用采购单，核实数量金额后保存（编辑中状态），提交后为待审核状态，审核后单据已结算 [2][图5]。\n- **开启自动结算**：每晚系统执行定时任务对订单进行结算，操作位置为设置-系统设置-账款设置-自动结算 [2][图6]。\n\n**常见问题**\n- 采购退货开单选择货品时报错“开启采购权限控制，请选择供应商条件”，是因为在设置-系统设置-采购设置中开启了采购权限，需要在采购-采购权限管理界面给对应员工供应商权限 [2][图7][图8]。\n\n**其他相关操作**\n- **采购退货单的推送**：审核后系统自动将采购退货单推送至委外仓库，推送成功信息可在单据日志中查看；若推送失败，可修改后右键点击【向WMS推送】重新推送 [3][图10]。\n- **采购退货单的取消**：对委外待收货状态的单据进行【从WMS撤回】操作可撤销，单据日志中可查看撤回信息 [5][图17]。\n- **采购快退**：操作路径为库存-采购快退，选择供应商、标记、填写物流信息、是否为残次品等后确定，扫描货品并添加备注，点击右上角√完成退货出库 [4][图11][图16]。出库货位选择“采购未上架”、“其他未上架”、“按货位出库”时，出库数量不可大于所选货位库存数量 [4]。\n\n关于采购单停止等待（如部分入库后终结采购单）的操作，材料中有提及 [3][图9]，但该操作属于采购单操作而非采购退货流程，故未纳入上述退货流程中。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "采购 · 采购退货流程",
+          "heading": "一、采购退货整体流程 › 1、创建并审核采购退货单",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/bke02r",
+          "score": 0.9971
+        },
+        {
+          "n": 2,
+          "title": "采购 · 采购退货流程",
+          "heading": "一、采购退货整体流程 › 2、采购退货出库 › 2）采购退货快速出库",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/bke02r",
+          "score": 0.9954
+        },
+        {
+          "n": 3,
+          "title": "设置 · 旺店通旗舰版奇门仓储操作手册",
+          "heading": "五、采购退货单的操作",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/vo3xe873wa2rc8m2",
+          "score": 0.984
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 采购快退",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/gr8tef",
+          "score": 0.9751
+        },
+        {
+          "n": 5,
+          "title": "设置 · 旺店通旗舰版奇门仓储操作手册",
+          "heading": "五、采购退货单的操作 › 5.2、采购退货单的取消",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/vo3xe873wa2rc8m2",
+          "score": 0.9187
+        }
+      ],
+      "retrieved_titles": [
+        "采购 · 采购退货流程",
+        "采购 · 采购退货流程",
+        "设置 · 旺店通旗舰版奇门仓储操作手册",
+        "仓储 · 采购快退",
+        "设置 · 旺店通旗舰版奇门仓储操作手册"
+      ],
+      "top_score": 0.9970768690109253,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确、全面地概括了参考材料中关于采购退货的多种操作流程，包括主要流程、快速流程、WMS相关操作及常见问题，且所有信息均有材料支持。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 3041
+    },
+    {
+      "id": "proc-purchase-return-outbound",
+      "kind": "fact",
+      "q": "采购退货出库有哪两种方法？",
+      "answer": "采购退货出库有两种方法：\n\n1. **分步采购退货出库**：操作位置为「仓储-出库管理-采购退货出库开单/采购退货出库管理」。在【采购退货出库开单】中双击引用审核后的采购出库单，按当前情况填写出库数量，选择出库货位后提交；在【采购退货出库单管理】中对出库单进行审核，审核后出库单状态变为“已完成”即为出库成功，对应货品库存减少。[1][图3]\n\n2. **采购退货快速出库**：操作位置为「仓储-出库管理-采购退货快速出库」。选择供应商和出库仓库，添加采购退货货品及出库数量，联系人等信息根据实际场景选择性填写。出库信息填写完整后点击提交并审核（货品出库成功同时自动生成对应货品的采购退货单）；点击提交后续需在采购出库管理界面审核。[4][图19]\n\n另外，材料中还提到「采购快退」功能（路径：库存-采购快退），可增加想要退货出库的货品，生成采购退货单和采购退货出库单两种单据，但未明确将其列为上述两种方法之一。[2][图4]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "采购 · 采购退货流程",
+          "heading": "一、采购退货整体流程 › 1、创建并审核采购退货单",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/bke02r",
+          "score": 0.9963
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 采购快退",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/gr8tef",
+          "score": 0.9863
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 按单出库",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/mhzks3",
+          "score": 0.974
+        },
+        {
+          "n": 4,
+          "title": "采购 · 采购退货流程",
+          "heading": "一、采购退货整体流程 › 2、采购退货出库 › 2）采购退货快速出库",
+          "url": "https://www.yuque.com/wdterpqjb/caigou/bke02r",
+          "score": 0.9712
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 采购快退",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/gr8tef",
+          "score": 0.9623
+        }
+      ],
+      "retrieved_titles": [
+        "采购 · 采购退货流程",
+        "仓储 · 采购快退",
+        "仓储 · 按单出库",
+        "采购 · 采购退货流程",
+        "仓储 · 采购快退"
+      ],
+      "top_score": 0.996259331703186,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地根据参考材料[1]和[4]指出了采购退货出库的两种方法，并对这两种方法进行了详细且有据可依的说明。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2660
+    },
+    {
+      "id": "proc-print-delivery-note",
+      "kind": "fact",
+      "q": "发货单怎么打印？在哪个界面操作？",
+      "answer": "1. 进入【设置】-【打印设置】进行模板设置 [1] [图1]。\n2. 在【仓储】-【销售出库】-【单据处理】界面，选中订单右键【打印发货单】，或点击上方的【发货单】按钮 [1] [图2]。\n\n关于打印物流单的操作，材料中另有说明：在【仓储】→【销售出库】→【单据处理】界面，右键-打印物流单，需下载慧策打印助手并安装平台组件 [2] [图4]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 系统打印模板设置及打印位置",
+          "heading": "1.打印【发货单】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nlmwnstk1x4ggaca",
+          "score": 0.9768
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 中台打印助手二期",
+          "heading": "1、 操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/pgwg79",
+          "score": 0.8961
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 图片验货",
+          "heading": "三、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/kdfg5nid9ebluogm",
+          "score": 0.8742
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 极速直发",
+          "heading": "四、功能说明 › 3、功能操作 › 打单发货",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/isvkgqqag51xty3x",
+          "score": 0.8664
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 以货找单",
+          "heading": "三、操作使用说明",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/vfsiclyv73qtn6uo",
+          "score": 0.8565
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 系统打印模板设置及打印位置",
+        "仓储 · 中台打印助手二期",
+        "仓储 · 图片验货",
+        "仓储 · 极速直发",
+        "仓储 · 以货找单"
+      ],
+      "top_score": 0.9767664670944214,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [
+        "仓储-销售出库-单据处理"
+      ],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地根据参考材料[1]说明了打印发货单的模板设置和具体操作步骤及界面，完整回答了问题。",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['仓储-销售出库-单据处理']",
+      "context_chars": 2334
+    },
+    {
+      "id": "proc-print-picking-wave",
+      "kind": "fact",
+      "q": "打印分拣波次在哪里操作？",
+      "answer": "打印分拣波次的操作位置在：仓储-销售出库-单据处理 [1]\n\n操作方式：选中订单右键【打印分拣波次】，或者点击上方的【打印分拣波次】按钮 [1][图2]。\n\n另外，在手动创建分拣波次时，也可以选择“创建并打印单据”来打印分拣波次 [2]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 系统打印模板设置及打印位置",
+          "heading": "2.打印【分拣波次】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nlmwnstk1x4ggaca",
+          "score": 0.9935
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 手动创建分拣波次",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/btydab4mpvtgrt40",
+          "score": 0.9776
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 重组波次",
+          "heading": "一、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/imqcnn5vmvsxinuz",
+          "score": 0.8943
+        },
+        {
+          "n": 4,
+          "title": "设置 · 货位分配模式-按货位库存（强分配）",
+          "heading": "二、功能说明 › 3、拣货相关操作 › 3.1、单据处理操作",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pyy5heui70le449n",
+          "score": 0.8738
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 爆款订单拣货方式和功能说明",
+          "heading": "2、爆款拣货",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/syqls6",
+          "score": 0.8543
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 系统打印模板设置及打印位置",
+        "仓储 · 手动创建分拣波次",
+        "仓储 · 重组波次",
+        "设置 · 货位分配模式-按货位库存（强分配）",
+        "仓储 · 爆款订单拣货方式和功能说明"
+      ],
+      "top_score": 0.9934885501861572,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "partial",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案只提到了在“单据处理”页面打印和创建时打印分拣波次，遗漏了参考材料[3]和[5]中提到的在“重组波次”和“爆款订单”页面也可以打印分拣波次单。",
+      "passed": false,
+      "fail_why": "判分：partial／答案只提到了在“单据处理”页面打印和创建时打印分拣波次，遗漏了参考材料[3]和[5]中提到的在“重组波次”和“爆款订单”页面也可以打印分拣波次单。",
+      "context_chars": 3574
+    }
+  ]
+}

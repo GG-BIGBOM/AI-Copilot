@@ -335,6 +335,24 @@ export function Sidebar({
           </div>
         )}
 
+        {/* ─── 列表表头 + 批量管理入口 ───
+            ⚠️ 这个入口原来只在左下角账号那行的 `⋯` 里。用户的原话是「加到账号
+            编辑里面」，我照做了，然后他**找不到**——那个 `⋯` 是 opacity-60 的，
+            整行看着就是个头像菜单，没人会想到批量删除在里面。
+            动作是作用在这份列表上的，入口就该长在列表上。账号菜单里那个保留着。 */}
+        {!collapsed && conversations.length > 0 && !managing && (
+          <div className="flex items-center px-2 pb-1 pt-1">
+            <span className="text-[11px] font-medium text-muted-foreground/60">历史对话</span>
+            <button
+              type="button"
+              onClick={() => setManaging(true)}
+              className="ml-auto rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground/70 transition-colors hover:bg-sidebar-hover hover:text-foreground"
+            >
+              管理
+            </button>
+          </div>
+        )}
+
         {/* ─── 会话列表 ─── */}
         <nav
           className={cn(
