@@ -1073,6 +1073,34 @@ Agent 自己决定检索词，命中率反而更低，还会把相邻主题的�
 6. **Agent 路径的 token 记账一开始漏了检索到的材料**（占八成）。
    直路是显式把 `context_text` 交出来的，Agent 这边材料在工具里产生，
    得专门累积一份（`deps.retrieved`）。少了它，配额形同虚设。
+7. **⭐ 装了 pydantic-ai 之后，命令行在服务器上整个跑不起来。**
+   以 `copilot` 账号从 `/root` 执行任何 CLI 命令都炸在一句毫不相干的错误上：
+
+       PermissionError: [Errno 13] Permission denied: 'pyproject.toml'
+
+   链路是：pydantic-ai 拖进来 logfire → logfire 在 `pydantic` 这个 entry point
+   组里注册了插件 → **第一次构建 pydantic 模型**时 pydantic 会枚举并 `load()`
+   它（= import logfire）→ logfire 初始化时读**当前工作目录**下的
+   `pyproject.toml`（`logfire/_internal/config_params.py`）→ 而 copilot
+   这个系统账号读不了 `/root`。
+
+   两处让它特别难查：
+   - pydantic 加载插件时**只捕获 ImportError 和 AttributeError**
+     （`pydantic/plugin/_loader.py`），PermissionError 直接穿出来，
+     连一句「插件加载失败，已跳过」都没有；
+   - 堆栈里全是 importlib 的帧，看不出跟 logfire 有关。
+     **我第一次就归错了因**——grep 到 `beartype` 里出现 `pyproject.toml` 就下了
+     结论，其实那只是它的注释。
+
+   修法是在 `copilot/__init__.py` 里 `os.environ.setdefault(
+   "PYDANTIC_DISABLE_PLUGINS", "logfire-plugin")`——本项目根本没用 logfire。
+   顺带的好处（都是实测，不是估算）：本机 CLI 路径的导入模块数
+   **1030 → 577**；服务器上 API 只跑普通问答时常驻 **67MB**
+   （修之前，只要有一个带 body 的请求触发 pydantic 建模型，logfire 就被拉进来）。
+   参照：M7 之前是 71MB，跑过一次 Agent 会话后是 180MB
+   （pydantic-ai 那一坨常驻，与本条无关）。
+   配了两条回归测试，其中一条用子进程跑（同进程里别的用例可能已经
+   import 过 agent，pydantic-ai 会直接 import logfire，那样断言就成了假阴性）。
 
 **没做的**
 
