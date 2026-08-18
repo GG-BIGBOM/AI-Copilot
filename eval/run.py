@@ -104,10 +104,16 @@ class Config:
     threshold: float = -1.0  # <0 = 用默认
     prompt: str = "current"  # current = 线上那版；其余取 eval/prompts.py 的存档
     agent: bool = False  # True = 评 M7 的 Agent 路径（检索由 Agent 自己决定）
+    # 回答档位：fast 简答（DeepSeek）/ deep 详解（Kimi）。
+    # 两档的**铁律完全一样**，差的是写法和模型——所以这才是一次干净的 A/B
+    mode: str = "fast"
 
     def system_prompt(self) -> str | None:
         if self.prompt == "current":
-            return None
+            from copilot.qa import DEFAULT_MODE, system_prompt_for
+
+            # 档位不是默认那档时，要用那一档的 prompt，否则 A/B 只换了模型没换写法
+            return None if self.mode == DEFAULT_MODE else system_prompt_for(self.mode)
         from prompts import ARCHIVE
 
         if self.prompt not in ARCHIVE:
@@ -132,7 +138,8 @@ class Config:
             "chunk_overlap": s.chunk_overlap,
             "embedding_model": s.embedding_model,
             "rerank_model": s.rerank_model,
-            "answer_model": s.llm_model,
+            "mode": self.mode,
+            "answer_model": s.llm_deep_model if self.mode == "deep" else s.llm_model,
             # ⭐ prompt 指纹。没有它，「改了 prompt 重跑」和「什么都没改重跑」
             # 存出来的 config 一模一样——半年后看对比表根本分不清哪轮是哪轮
             "prompt_sha": hashlib.sha256(prompt_text.encode()).hexdigest()[:8],
@@ -294,14 +301,29 @@ def answer_all(
     workers: int = 5,
     quiet: bool = False,
     system_prompt: str | None = None,
+    mode: str = "fast",
 ) -> None:
+    from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
     from copilot.qa import NO_ANSWER, SYSTEM_PROMPT, USER_TEMPLATE, is_no_answer
 
     # 允许换 prompt：A/B 时必须拿**同一份评测集**跑两个 prompt，
     # 否则指标的变化归不了因（见 eval/prompts.py 的说明）
     prompt = system_prompt or SYSTEM_PROMPT
-    llm = ChatLLM()  # httpx.Client 线程安全，一个实例够用
+
+    # httpx.Client 线程安全，一个实例够用
+    if mode == "deep":
+        s = get_settings()
+        llm = ChatLLM(
+            api_key=s.llm_deep_api_key or s.vision_api_key,
+            base_url=s.llm_deep_base_url,
+            model=s.llm_deep_model,
+            # ⚠️ kimi-k* 只认 temperature=1，下面那句 temperature=0.0 会被它顶掉。
+            # 也就是说详解档**没法压到 0**，两轮之间会有抖动——看对比表时要记着这点
+            forced_temperature=s.llm_deep_temperature,
+        )
+    else:
+        llm = ChatLLM()
 
     def one(cr: CaseResult) -> None:
         if not cr.citations:
@@ -758,6 +780,12 @@ def main() -> None:
     ap.add_argument(
         "--agent", action="store_true", help="评 M7 的 Agent 路径而不是直路"
     )
+    ap.add_argument(
+        "--mode",
+        default="fast",
+        choices=["fast", "deep"],
+        help="回答档位：fast 简答（DeepSeek）/ deep 详解（Kimi）",
+    )
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument(
         "--as-user",
@@ -783,6 +811,7 @@ def main() -> None:
         threshold=args.threshold,
         prompt=args.prompt,
         agent=args.agent,
+        mode=args.mode,
     )
 
     if args.check:
@@ -802,7 +831,9 @@ def main() -> None:
         print("── 检索（串行，受 SiliconFlow 限速）──")
         results = retrieve_all(cases, cfg, user_id=user_id)
         print("── 生成答案 ──")
-        answer_all(results, workers=args.workers, system_prompt=cfg.system_prompt())
+        answer_all(
+            results, workers=args.workers, system_prompt=cfg.system_prompt(), mode=cfg.mode
+        )
     print("── 判分 ──")
     judge = judge_all(results, cases, workers=args.workers)
 

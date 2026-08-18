@@ -64,10 +64,25 @@ class Settings(BaseSettings):
     embedding_rate_limit_per_sec: float = 3.0
     embedding_max_retries: int = 4
 
-    # ===== LLM：生成答案 =====
+    # ===== LLM：生成答案（简答档）=====
     llm_api_key: str = ""
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model: str = "deepseek-chat"
+
+    # ===== LLM：详解档 =====
+    # 同一个问题答得更细：前置条件、注意事项、常见错误都展开。
+    # **防幻觉的铁律两档完全一样**，不一样的只有写法要求（见 qa.py）。
+    #
+    # 留空 key 就复用 VISION_API_KEY——那本来就是同一家 Moonshot 的密钥，
+    # 让人为同一个账号在 .env 里填两遍是没必要的。两个都没配时，
+    # 详解档不可用，接口会回一句人话（而不是 500）。
+    llm_deep_api_key: str = ""
+    llm_deep_base_url: str = "https://api.moonshot.cn/v1"
+    llm_deep_model: str = "kimi-k2.6"
+    # ⚠️ **kimi-k2.5 / k2.6 / k3 只接受 temperature=1**，传别的直接 HTTP 400
+    # （`invalid temperature: only 1 is allowed for this model`）。
+    # 而我们全局默认 0.1。换成 `moonshot-v1-*` 系列时可以设回 0.1，它们不挑。
+    llm_deep_temperature: float = 1.0
 
     # ===== 视觉：读图转文字（图片上传 + 扫描件 PDF）=====
     # ⚠️ **不能复用 LLM_API_KEY**。答题走 DeepSeek，它没有视觉能力；

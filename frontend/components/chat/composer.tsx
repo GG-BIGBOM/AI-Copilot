@@ -6,14 +6,76 @@
  * 全应用最重要的一个控件，所以它的规矩最死：
  *   Enter 发送 · Shift + Enter 换行 · **中文输入法选词时的 Enter 永远不发送**。
  *
- * 不放任何还没有真实功能的按钮（上传 / 模型选择 / 模式切换）——
- * 摆一个点了没反应的图标，比少一个功能更伤信任。
+ * 底下那一排只有一个控件：回答档位。它是真接上后端的（换模型 + 换写法）。
+ * 上传、模式切换这些还没有真实功能的，一个都不放——摆一个点了没反应的图标，
+ * 比少一个功能更伤信任。
  */
 
 import { useEffect, useRef } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { Menu } from "@base-ui/react/menu";
+import { ArrowUp, Check, ChevronDown, Square } from "lucide-react";
 
+import { ANSWER_MODES, MODE_META, type AnswerMode } from "@/lib/answer-mode";
 import { cn } from "@/lib/utils";
+
+/**
+ * 回答档位选择器。
+ *
+ * 这是输入框下面**唯一**一个真有功能的控件（§11.7：没接上真实功能的按钮
+ * 一个都不放）。它切的是后端的模型和写法：简答走 DeepSeek，详解走 Kimi。
+ */
+function ModePicker({
+  mode,
+  onModeChange,
+}: {
+  mode: AnswerMode;
+  onModeChange: (next: AnswerMode) => void;
+}) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        className={cn(
+          "flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] transition-colors",
+          "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+          "data-popup-open:bg-surface-muted data-popup-open:text-foreground",
+        )}
+        aria-label={`回答详细程度：${MODE_META[mode].label}`}
+      >
+        {MODE_META[mode].label}
+        <ChevronDown className="size-3 opacity-60" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner className="outline-hidden" side="top" align="start" sideOffset={8}>
+          <Menu.Popup
+            className="w-60 origin-[var(--transform-origin)] rounded-xl border border-border bg-popover p-1 outline-hidden transition-[opacity,scale] duration-150 data-starting-style:scale-[0.98] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0"
+            style={{ boxShadow: "var(--shadow-floating)" }}
+          >
+            {ANSWER_MODES.map((m) => (
+              <Menu.Item
+                key={m}
+                className="flex cursor-default items-start gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-surface-muted"
+                onClick={() => onModeChange(m)}
+              >
+                <Check
+                  className={cn(
+                    "mt-0.5 size-3.5 shrink-0 text-bronze-strong",
+                    m !== mode && "opacity-0",
+                  )}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] text-foreground">{MODE_META[m].label}</span>
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                    {MODE_META[m].hint}
+                  </span>
+                </span>
+              </Menu.Item>
+            ))}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
 
 export function Composer({
   onSend,
@@ -21,6 +83,8 @@ export function Composer({
   busy,
   draft,
   onDraftChange,
+  mode,
+  onModeChange,
   placeholder = "问一个旺店通相关问题……",
   autoFocus = false,
 }: {
@@ -29,6 +93,8 @@ export function Composer({
   busy: boolean;
   draft: string;
   onDraftChange: (text: string) => void;
+  mode: AnswerMode;
+  onModeChange: (next: AnswerMode) => void;
   placeholder?: string;
   autoFocus?: boolean;
 }) {
@@ -78,9 +144,12 @@ export function Composer({
         />
 
         <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5 pt-1">
-          <span className="truncate pl-1 text-[11px] text-muted-foreground/60">
-            Enter 发送 · Shift + Enter 换行
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <ModePicker mode={mode} onModeChange={onModeChange} />
+            <span className="hidden truncate text-[11px] text-muted-foreground/60 sm:inline">
+              Enter 发送 · Shift + Enter 换行
+            </span>
+          </div>
 
           {busy ? (
             <button

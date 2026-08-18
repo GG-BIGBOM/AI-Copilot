@@ -69,3 +69,54 @@ export function usePersistedFlag(
 
   return [value, setValue] as const;
 }
+
+/**
+ * 一个记在 localStorage 里的多选一偏好（回答档位这类）。
+ *
+ * 和 `usePersistedFlag` 同一套机制，只是值域从布尔换成一组字符串。
+ * **不认识的值一律退回 fallback**：手改过 localStorage、或者以后删掉某个档位时，
+ * 不能让界面卡在一个已经不存在的选项上。
+ */
+export function usePersistedChoice<T extends string>(
+  key: string,
+  allowed: readonly T[],
+  fallback: T,
+): readonly [T, (next: T) => void] {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const set = listenersFor(key);
+      set.add(onChange);
+      window.addEventListener("storage", onChange);
+      return () => {
+        set.delete(onChange);
+        window.removeEventListener("storage", onChange);
+      };
+    },
+    [key],
+  );
+
+  const readChoice = useCallback((): T => {
+    try {
+      const raw = localStorage.getItem(key) as T | null;
+      return raw !== null && allowed.includes(raw) ? raw : fallback;
+    } catch {
+      return fallback; // 隐私模式
+    }
+  }, [key, allowed, fallback]);
+
+  const value = useSyncExternalStore(subscribe, readChoice, () => fallback);
+
+  const setValue = useCallback(
+    (next: T) => {
+      try {
+        localStorage.setItem(key, next);
+      } catch {
+        /* 存不了就只在本次会话生效 */
+      }
+      listenersFor(key).forEach((l) => l());
+    },
+    [key],
+  );
+
+  return [value, setValue] as const;
+}

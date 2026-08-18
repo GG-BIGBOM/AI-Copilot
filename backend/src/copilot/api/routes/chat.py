@@ -38,12 +38,18 @@ from starlette.responses import FileResponse, StreamingResponse
 
 from copilot import usage
 from copilot.api import providers, stream
-from copilot.api.schemas import ChatRequest, ConversationOut, MessageOut
+from copilot.api.schemas import (
+    BulkDeleteRequest,
+    BulkDeleteResult,
+    ChatRequest,
+    ConversationOut,
+    MessageOut,
+)
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
 from copilot.db.models import Conversation, Message
 from copilot.db.session import SessionLocal
-from copilot.qa import HISTORY_TURNS, ask_stream, is_no_answer
+from copilot.qa import DEFAULT_MODE, HISTORY_TURNS, ask_stream, is_no_answer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -125,7 +131,7 @@ async def _recent_turns(session: AsyncSession, conv_id: uuid.UUID) -> list[tuple
 
 
 async def _chat_stream(
-    user_id: uuid.UUID, question: str, client_id: str | None
+    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
 ) -> AsyncIterator[str]:
     message_id = stream.new_id("msg")
     text_id = stream.new_id("txt")
@@ -150,9 +156,10 @@ async def _chat_stream(
                 question,
                 providers.get_embedder(),
                 providers.get_reranker(),
-                providers.get_llm(),
+                providers.get_llm_for(mode),
                 user_id=user_id,
                 history=history,
+                mode=mode,
             )
 
             # 配图**在正文之前**发，和引用相反。因为前端要边流边把 [图1] 换成
@@ -244,7 +251,7 @@ async def _chat_stream(
 
 
 async def _agent_stream(
-    user_id: uuid.UUID, question: str, client_id: str | None
+    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
 ) -> AsyncIterator[str]:
     """M7 的 Agent 路径。默认不走这条（`agent_enabled`）。
 
@@ -254,6 +261,10 @@ async def _agent_stream(
 
     ⚠️ **多轮状态必须进出数据库。** `profile` / `checklist` 存在 conversations 上，
     进来读、出去写。放内存里的话，用户答完第二个问题，第一个答案就没了。
+
+    `mode` 收下但**暂时不用**：Agent 走的是 pydantic-ai 自己那套模型配置
+    （见 agent/model.py），换档要连工具调用一起验，不能顺手加。
+    参数留着是为了和 `_chat_stream` 同签名——路由那边是按同一个名字调的。
     """
     from copilot.agent.checklist import Checklist, Requirement
     from copilot.agent.deps import AgentDeps
@@ -425,7 +436,7 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
 
     producer = _agent_stream if await _use_agent(session, user, question, body.id) else _chat_stream
     return StreamingResponse(
-        producer(user.id, question, body.id),
+        producer(user.id, question, body.id, body.mode),
         media_type="text/event-stream",
         headers=stream.SSE_HEADERS,
     )
@@ -492,6 +503,45 @@ async def list_messages(
         .order_by(Message.created_at, Message.id)
     )
     return list((await session.execute(stmt)).scalars())
+
+
+@router.post("/conversations/bulk-delete", response_model=BulkDeleteResult)
+async def bulk_delete_conversations(
+    body: BulkDeleteRequest, user: CurrentUser, session: SessionDep
+) -> BulkDeleteResult:
+    """一次删掉多段会话。
+
+    ⭐ **路由必须写在 `/conversations/{conversation_id}` 前面。** 否则
+    `bulk-delete` 会先被那条路径匹配上，然后卡在 uuid 解析上返回 422——
+    而错误信息完全指不到这里。
+
+    别人的 id 混进来时**静默跳过**，不报错也不告诉你它存不存在：
+    报错等于给了一个「拿 uuid 探别人有没有这段会话」的探针，
+    和单条删除用 404 而不是 403 是同一个理由。所以返回的是
+    「真的删掉了几条」，而不是「你传的每一条分别怎么样」。
+    """
+    if not body.ids:
+        return BulkDeleteResult(deleted=0)
+
+    stmt = select(Conversation).where(
+        Conversation.id.in_(body.ids), Conversation.user_id == user.id
+    )
+    convs = list((await session.execute(stmt)).scalars())
+
+    # 先把导出文件的路径记下来：会话删掉之后就查不到了
+    export_paths = [c.export_path for c in convs if c.export_path]
+    for conv in convs:
+        await session.delete(conv)
+    await session.commit()
+
+    # 文件在提交之后才删，理由同单条删除
+    for rel in export_paths:
+        try:
+            get_settings().export_path(rel).unlink(missing_ok=True)
+        except (OSError, ValueError) as e:
+            logger.warning("批量删除时清理导出文件失败 %s：%s", rel, e)
+
+    return BulkDeleteResult(deleted=len(convs))
 
 
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

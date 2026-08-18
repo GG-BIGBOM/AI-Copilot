@@ -10,6 +10,7 @@ import { MessageList } from "@/components/chat/message-list";
 import { PromptStarters } from "@/components/chat/prompt-starters";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useAnswerMode } from "@/lib/answer-mode";
 import { API_BASE } from "@/lib/api";
 import type { CopilotUIMessage } from "@/lib/chat-types";
 
@@ -32,6 +33,8 @@ export function ChatView({
   onConversationTouched: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  // 档位记在 localStorage 里，不进会话——它是"我习惯要多详细"，不是这段对话的属性
+  const [mode, setMode] = useAnswerMode();
 
   // 每次 render 都 new 一个 transport 会让 useChat 反复重建内部状态
   const transport = useMemo(
@@ -54,13 +57,20 @@ export function ChatView({
 
   const busy = status === "submitted" || status === "streaming";
 
+  // ⭐ 档位要**每次发送时**带上，不能塞进 transport 的静态 body：
+  // transport 是 useMemo 出来的，档位变了它不会重建，用户切换后
+  // 下一句话还会按旧档位回答
+  const send = (text: string) => sendMessage({ text }, { body: { mode } });
+
   const composer = (
     <Composer
       draft={draft}
       onDraftChange={setDraft}
       busy={busy}
       onStop={stop}
-      onSend={(text) => sendMessage({ text })}
+      onSend={send}
+      mode={mode}
+      onModeChange={setMode}
       placeholder={messages.length === 0 ? "问一个旺店通相关问题……" : "继续提问……"}
     />
   );
@@ -83,7 +93,7 @@ export function ChatView({
           <PromptStarters
             onPick={(text) => {
               setDraft("");
-              sendMessage({ text });
+              send(text);
             }}
           />
         </div>
@@ -94,7 +104,7 @@ export function ChatView({
   /* ─── 进行中的会话：正文在上，输入框停靠在底部 ─── */
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList messages={messages} status={status} onRegenerate={() => regenerate()} />
+      <MessageList messages={messages} status={status} onRegenerate={() => regenerate({ body: { mode } })} />
 
       {/* pb 里带 safe-area：iPhone 上不加这个，输入框会被底部的横条压住 */}
       <div className="shrink-0 px-4 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
@@ -108,7 +118,7 @@ export function ChatView({
                     size="xs"
                     variant="outline"
                     className="shrink-0"
-                    onClick={() => regenerate()}
+                    onClick={() => regenerate({ body: { mode } })}
                   >
                     重试
                   </Button>

@@ -102,6 +102,22 @@ export default function ChatPage() {
     if (c.id === chatId) newConversation();
   }
 
+  async function bulkDeleteConversations(ids: string[]) {
+    // 和单条删除同一套乐观更新：先从列表里拿掉，失败再放回去
+    const before = conversations;
+    const gone = new Set(ids);
+    setConversations((list) => list.filter((c) => !gone.has(c.id)));
+    try {
+      await api.bulkDeleteConversations(ids);
+    } catch {
+      setConversations(before);
+      return;
+    }
+    // 删掉的里面有当前这段：必须换一个新会话 id，否则输入框还指着一个
+    // 已经不存在的 id，下一句话会把它重新建出来
+    if (chatId && gone.has(chatId)) newConversation();
+  }
+
   function newConversation() {
     setDrawerOpen(false);
     setInitialMessages([]);
@@ -142,6 +158,7 @@ export default function ChatPage() {
         onDelete={deleteConversation}
         onLogout={logout}
         onOpenSearch={() => setSearchOpen(true)}
+        onBulkDelete={bulkDeleteConversations}
       />
 
       <ConversationSearch

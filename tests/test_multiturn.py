@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from chat_helpers import ask, parts
+from chat_helpers import FakeLLM, ask, parts
 from sqlalchemy import select
 
 from copilot.db.models import Message
@@ -230,3 +230,82 @@ async def test_empty_interruption_leaves_no_message(
     # 那是客户端断连的固有结果，不是这里要测的东西
     rows = await _messages_of(maker, conv_id)
     assert all(m.role != "assistant" for m in rows), "一个字都没吐出来，不该留一条空的助手消息"
+
+
+# ---------- 回答档位 ----------
+
+
+def test_two_modes_share_the_same_hard_rules():
+    """⚠️ 详解档是「同一份事实说得更透」，不是「可以多说材料里没有的」。
+
+    防幻觉那段铁律两档必须一字不差——做成两份，迟早有一份会先松掉。
+    """
+    from copilot.qa import _TEMPLATE, system_prompt_for
+
+    rules = _TEMPLATE.split("写法要求：")[0]
+    for mode in ("fast", "deep"):
+        assert rules in system_prompt_for(mode)
+        assert "不得用你自己的常识补全或推测" in system_prompt_for(mode)
+        assert "知识库暂无此内容" in system_prompt_for(mode)
+
+
+def test_unknown_mode_falls_back_to_fast():
+    """认不出来的档位退回简答，别 500。"""
+    from copilot.qa import system_prompt_for
+
+    assert system_prompt_for("没听说过的档位") == system_prompt_for("fast")
+
+
+async def test_mode_selects_prompt_and_model(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch
+):
+    """前端传 deep 时：换模型、也换写法。"""
+    from copilot.api import providers
+
+    title, body = public_chunk
+    deep = FakeLLM("详细的答案[1]。")
+    monkeypatch.setattr(providers, "get_deep_llm", lambda: deep)
+
+    payload = {
+        "messages": [{"role": "user", "parts": [{"type": "text", "text": body}]}],
+        "mode": "deep",
+    }
+    r = await api_client.post("/api/chat", json=payload)
+    assert r.status_code == 200
+
+    assert deep.calls, "选了详解档就该用详解档的模型"
+    assert not fake_providers.calls, "不该再打到简答档的模型上"
+    system = deep.calls[0][0]["content"]
+    assert "每一步写清楚" in system, "system prompt 要换成详解档那套写法"
+
+
+async def test_missing_mode_defaults_to_fast(api_client, logged_in, public_chunk, fake_providers):
+    """老前端不带 mode 字段，不能 422，要按简答档走。"""
+    title, body = public_chunk
+    r = await ask(api_client, body)
+    assert r.status_code == 200
+    assert fake_providers.calls
+
+
+async def test_deep_falls_back_when_not_configured(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch
+):
+    """详解档没配 key 时静默退回简答档。
+
+    对用户来说，点一下选择器收到 500 不是「少了个高级功能」，是「这产品坏了」。
+    """
+    from copilot.api import providers
+
+    def boom():
+        raise RuntimeError("缺少 LLM_DEEP_API_KEY")
+
+    monkeypatch.setattr(providers, "get_deep_llm", boom)
+
+    title, body = public_chunk
+    payload = {
+        "messages": [{"role": "user", "parts": [{"type": "text", "text": body}]}],
+        "mode": "deep",
+    }
+    r = await api_client.post("/api/chat", json=payload)
+    assert r.status_code == 200
+    assert fake_providers.calls, "应该退回简答档，而不是把异常抛给用户"

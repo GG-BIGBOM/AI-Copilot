@@ -104,7 +104,8 @@ def small_talk_reply(question: str) -> str | None:
         return _BYE_REPLY
     return None
 
-SYSTEM_PROMPT = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
+
+_TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
 
 铁律：
 1. 只用参考材料里的信息作答，**不得用你自己的常识补全或推测**。
@@ -129,9 +130,47 @@ SYSTEM_PROMPT = """你是一名旺店通旗舰版 ERP 的实施顾问助手，�
    这一轮材料里没有就还是没有。
 
 写法要求：
+{style}"""
+
+# ─────────────────────────────────────────────────────────
+# 两档回答风格
+#
+# ⚠️ **上面那段铁律两档共用，一个字都不改。** 会变的只有写法：
+# 详解档是「同一份事实说得更透」，不是「可以多说一点材料里没有的」。
+# 把防幻觉规则也做成两份，迟早会有一份先松掉。
+# ─────────────────────────────────────────────────────────
+
+# ⚠️ **这三行是调出来的，别再"优化"它。**
+# 我把它改成过「能一句说清就不写三句 / 只保留真会踩坑的注意事项」，
+# 评测立刻从 98.2% 掉到 96.4%：模型开始省略材料里的内容，
+# hard-crossdoc-limit-100-both 那题直接把两个不同的上限混成了一个。
+# 简答档是**默认档**，默认档的准确率不能拿来换一个新选项。
+_STYLE_FAST = """
 - 操作步骤按 1. 2. 3. 分条列出，把界面路径原样保留（如「设置–策略设置–短信策略」）。
 - 保留材料中的注意事项和限制条件，那往往是最容易踩坑的地方。
-- 直接说事，不要"根据参考材料"之类的开场白。"""
+- 直接说事，不要"根据参考材料"之类的开场白。""".lstrip("\n")
+
+_STYLE_DEEP = """
+- 操作步骤按 1. 2. 3. 分条列出，把界面路径原样保留（如「设置–策略设置–短信策略」）。
+- 每一步写清楚**在哪个界面、点什么、填什么**，材料里有字段名和取值就照抄。
+- 材料里提到的前置条件（要先开通什么、要什么权限、依赖哪个设置）单独写在步骤前面。
+- 材料里提到的注意事项、限制、常见错误，逐条列出来，不要压缩成一句"注意相关限制"。
+- 涉及多个平台、多种单据类型时，把差异分开说，别混成一段。
+- 结尾可以补一句「材料里没有覆盖到的部分」，但只写问题真的问到、而材料确实没写的。
+- 说得细 ≠ 可以多说。**每一句仍然必须来自材料**，展开的是材料里已有的信息。
+- 不要"根据参考材料"之类的开场白。""".lstrip("\n")
+
+ANSWER_STYLES = {"fast": _STYLE_FAST, "deep": _STYLE_DEEP}
+DEFAULT_MODE = "fast"
+
+
+def system_prompt_for(mode: str = DEFAULT_MODE) -> str:
+    """按档位拼出 system prompt。认不出来的档位一律退回简答档。"""
+    return _TEMPLATE.format(style=ANSWER_STYLES.get(mode, _STYLE_FAST))
+
+
+# 简答档的完整 prompt。评测脚本 import 的是这个名字，别删
+SYSTEM_PROMPT = system_prompt_for(DEFAULT_MODE)
 
 USER_TEMPLATE = """参考材料：
 
@@ -270,12 +309,15 @@ async def ask_stream(
     *,
     user_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
+    mode: str = DEFAULT_MODE,
 ) -> StreamedAnswer:
     """检索并流式作答。
 
     Args:
         history: 这条会话之前的 (role, content)，**不含本轮提问**，从旧到新。
             有历史时会先把追问改写成独立问题再检索。
+        mode: 回答档位，`fast` 简答 / `deep` 详解。只影响写法，
+            防幻觉的铁律两档完全一样。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
@@ -299,7 +341,7 @@ async def ask_stream(
 
     context = result.build_context()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt_for(mode)},
         *_history_messages(history),
         {
             "role": "user",
@@ -323,9 +365,10 @@ async def ask(
     *,
     user_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
+    mode: str = DEFAULT_MODE,
 ) -> Answer:
     streamed = await ask_stream(
-        session, question, embedder, reranker, llm, user_id=user_id, history=history
+        session, question, embedder, reranker, llm, user_id=user_id, history=history, mode=mode
     )
     text = "".join(streamed.stream)
     answer = Answer(text=text, citations=streamed.citations, images=streamed.images)

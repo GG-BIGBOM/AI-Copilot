@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from copilot.providers.llm import ChatLLM
@@ -18,6 +19,8 @@ from copilot.providers.siliconflow import (
     SiliconFlowEmbedder,
     SiliconFlowReranker,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +41,41 @@ def get_reranker() -> SiliconFlowReranker:
 
 @lru_cache(maxsize=1)
 def get_llm() -> ChatLLM:
+    """简答档（DeepSeek）。默认走这条。"""
     return ChatLLM()
+
+
+@lru_cache(maxsize=1)
+def get_deep_llm() -> ChatLLM:
+    """详解档（Kimi）。
+
+    key 留空就复用 vision 那把——本来就是同一家 Moonshot 的密钥，
+    没必要让人在 .env 里为同一个账号填两遍。
+    """
+    from copilot.config import get_settings
+
+    s = get_settings()
+    return ChatLLM(
+        api_key=s.llm_deep_api_key or s.vision_api_key,
+        base_url=s.llm_deep_base_url,
+        model=s.llm_deep_model,
+        forced_temperature=s.llm_deep_temperature,
+    )
+
+
+def get_llm_for(mode: str) -> ChatLLM:
+    """按档位取模型。**详解档没配 key 时静默退回简答档**。
+
+    宁可答得简略一点，也不能让人点一下选择器就收到 500——
+    对用户来说那不是"少了个高级功能"，那是"这个产品坏了"。
+    """
+    if mode != "deep":
+        return get_llm()
+    try:
+        return get_deep_llm()
+    except Exception:  # noqa: BLE001 - 没配 key / 建不起来，退回简答档
+        logger.warning("详解档不可用（多半是没配 LLM_DEEP_API_KEY / VISION_API_KEY），已退回简答档")
+        return get_llm()
 
 
 def get_vision():
@@ -67,8 +104,15 @@ def _build_vision():
 
 def close_all() -> None:
     """lifespan 关闭时调用。没被创建过的就不去碰它，免得反而触发一次初始化。"""
-    for factory in (get_llm, get_siliconflow_client, _build_vision):
+    for factory in (get_llm, get_deep_llm, get_siliconflow_client, _build_vision):
         if factory.cache_info().currsize:
             factory().close()
-    for factory in (get_llm, get_embedder, get_reranker, get_siliconflow_client, _build_vision):
+    for factory in (
+        get_llm,
+        get_deep_llm,
+        get_embedder,
+        get_reranker,
+        get_siliconflow_client,
+        _build_vision,
+    ):
         factory.cache_clear()

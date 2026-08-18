@@ -10,10 +10,11 @@
  *      要切会话就展开，或者按 Ctrl/Cmd + K。
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  Check,
   FileText,
   LogOut,
   MoreHorizontal,
@@ -22,6 +23,7 @@ import {
   Plus,
   Search,
   SunMoon,
+  ListChecks,
   Trash2,
   X,
 } from "lucide-react";
@@ -116,6 +118,7 @@ export function Sidebar({
   onDelete,
   onLogout,
   onOpenSearch,
+  onBulkDelete,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
@@ -129,12 +132,48 @@ export function Sidebar({
   onDelete: (c: ConversationSummary) => void;
   onLogout: () => void;
   onOpenSearch: () => void;
+  /** 批量删除。返回真正删掉的条数，由调用方决定怎么提示 */
+  onBulkDelete: (ids: string[]) => Promise<void>;
 }) {
   // 主题的应用时机在 layout 的内联脚本里（首帧之前），这里只跟着它显示图标
   const [isDark, toggleTheme] = useDarkMode();
 
+  // 批量管理态。选中的 id 存在 Set 里——列表可能上百条，
+  // 用数组的话每次勾选都是一次 O(n) 扫描
+  const [managing, setManaging] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
   const grouped = useMemo(() => groupConversationsByDate(conversations), [conversations]);
   const initialLetter = user.email ? user.email.slice(0, 1).toUpperCase() : "U";
+
+  function exitManaging() {
+    setManaging(false);
+    setSelected(new Set());
+  }
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = conversations.length > 0 && selected.size === conversations.length;
+
+  async function removeSelected() {
+    if (selected.size === 0 || deleting) return;
+    if (!window.confirm(`删除选中的 ${selected.size} 段对话？消息记录无法恢复。`)) return;
+    setDeleting(true);
+    try {
+      await onBulkDelete([...selected]);
+      exitManaging();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <>
@@ -263,6 +302,39 @@ export function Sidebar({
           </Link>
         </div>
 
+        {/* ─── 批量管理条 ─── */}
+        {managing && !collapsed && (
+          <div className="mx-2 mb-2 flex items-center gap-1 rounded-md bg-sidebar-active px-2 py-1.5">
+            <span className="mr-auto text-[11px] text-muted-foreground">
+              已选 {selected.size} 项
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setSelected(allSelected ? new Set() : new Set(conversations.map((c) => c.id)))
+              }
+              className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground"
+            >
+              {allSelected ? "取消全选" : "全选"}
+            </button>
+            <button
+              type="button"
+              onClick={removeSelected}
+              disabled={selected.size === 0 || deleting}
+              className="rounded-sm px-1.5 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-40"
+            >
+              {deleting ? "删除中…" : "删除"}
+            </button>
+            <button
+              type="button"
+              onClick={exitManaging}
+              className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground"
+            >
+              完成
+            </button>
+          </div>
+        )}
+
         {/* ─── 会话列表 ─── */}
         <nav
           className={cn(
@@ -295,20 +367,36 @@ export function Sidebar({
                           <li key={c.id} className="group relative">
                             <button
                               type="button"
-                              onClick={() => onPick(c.id)}
+                              onClick={() => (managing ? toggle(c.id) : onPick(c.id))}
+                              aria-pressed={managing ? selected.has(c.id) : undefined}
                               className={cn(
-                                "flex h-8 w-full items-center rounded-md pl-2 pr-7 text-left text-sm transition-colors",
-                                isActive
+                                "flex h-8 w-full items-center gap-2 rounded-md pl-2 text-left text-sm transition-colors",
+                                managing ? "pr-2" : "pr-7",
+                                isActive && !managing
                                   ? "bg-sidebar-active font-medium text-foreground"
                                   : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground",
                               )}
                               title={c.title || "未命名对话"}
                             >
+                              {managing && (
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "flex size-3.5 shrink-0 items-center justify-center rounded-xs border",
+                                    selected.has(c.id)
+                                      ? "border-bronze bg-bronze text-white"
+                                      : "border-border",
+                                  )}
+                                >
+                                  {selected.has(c.id) && <Check className="size-2.5" />}
+                                </span>
+                              )}
                               <span className="truncate">{c.title || "未命名对话"}</span>
                             </button>
 
                             {/* 平时透明，hover / 键盘聚焦才现身。不能用 display:none——
                                 那样键盘用户永远够不到它 */}
+                            {!managing && (
                             <Menu.Root>
                               <Menu.Trigger
                                 className={cn(
@@ -341,6 +429,7 @@ export function Sidebar({
                                 </Menu.Positioner>
                               </Menu.Portal>
                             </Menu.Root>
+                            )}
                           </li>
                         );
                       })}
@@ -377,6 +466,14 @@ export function Sidebar({
                   <div className="px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground/70">
                     {user.email}
                   </div>
+                  <Menu.Item
+                    className={MENU_ITEM}
+                    onClick={() => setManaging(true)}
+                    disabled={conversations.length === 0}
+                  >
+                    <ListChecks className="size-3.5" />
+                    管理对话
+                  </Menu.Item>
                   <Menu.Item className={MENU_ITEM} onClick={toggleTheme}>
                     <SunMoon className="size-3.5" />
                     {isDark ? "切换为浅色" : "切换为深色"}

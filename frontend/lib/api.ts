@@ -169,6 +169,16 @@ export const api = {
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
 
+  /**
+   * 批量删除。返回**真的删掉了几条**——服务端对不属于你的 id 是静默跳过的，
+   * 所以 deleted 可能小于你传的数量，那不是错误。
+   */
+  bulkDeleteConversations: (ids: string[]) =>
+    request<{ deleted: number }>("/api/conversations/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+
   documents: () => request<DocumentSummary[]>("/api/documents"),
 
   uploadDocument: (file: File) => upload("/api/documents", file),

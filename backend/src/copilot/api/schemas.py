@@ -97,12 +97,31 @@ class ChatRequest(BaseModel):
 
     id: str | None = None
     messages: list[UIMessage] = Field(default_factory=list)
+    # 回答档位：fast 简答（DeepSeek）/ deep 详解（Kimi）。
+    # 认不出来的值一律当 fast——老前端不带这个字段，不能因此 422
+    mode: Literal["fast", "deep"] = "fast"
 
     def last_user_text(self) -> str:
         for msg in reversed(self.messages):
             if msg.role == "user" and (t := msg.text()):
                 return t
         return ""
+
+
+class BulkDeleteRequest(BaseModel):
+    """批量删除会话。
+
+    上限是防呆用的：正常界面一次最多勾几十条，几千个 id 一次打进来
+    多半是脚本写错了，与其让数据库吃一条巨大的 IN，不如直接拒掉。
+    """
+
+    ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+
+
+class BulkDeleteResult(BaseModel):
+    """真的删掉了几条。**不逐条汇报**——那会变成探测别人会话是否存在的接口。"""
+
+    deleted: int
 
 
 class ConversationOut(BaseModel):
