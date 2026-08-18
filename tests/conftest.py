@@ -5,11 +5,19 @@
 所以测试一律用 NullPool 的独立引擎，用完即弃。
 """
 
+import json
+import uuid
+from collections.abc import Iterator
+
 import pytest
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from copilot.auth.invites import create_invite_codes
 from copilot.config import get_settings
+from copilot.db.models import Chunk, Conversation, Document, InviteCode, Message, User
+from copilot.providers.base import RerankResult
 
 
 @pytest.fixture
@@ -50,3 +58,104 @@ async def api_client(engine, maker):
             yield client
     finally:
         app.dependency_overrides.clear()
+
+
+# ─────────────────────────────────────────────────────────
+# 聊天相关的夹具
+#
+# 放这里而不是某个测试文件里：test_api_chat 和 test_multiturn 都要用，
+# 而**夹具不能跨模块 import**（pytest 靠名字收集）。
+# 假 provider 那几个类在 chat_helpers.py，见那边的文件头。
+# ─────────────────────────────────────────────────────────
+
+from chat_helpers import PASSWORD, FakeEmbedder, FakeLLM, TopOneReranker  # noqa: E402
+
+
+@pytest.fixture
+async def public_chunk(maker):
+    """往公共库塞一篇文档，让检索有东西可召回。"""
+    tag = uuid.uuid4().hex[:8]
+    title = f"电子面单设置指南-{tag}"
+    body = f"打印电子面单前先在设置里绑定物流账号-{tag}"
+
+    async with maker() as s:
+        doc = Document(
+            owner_id=None,
+            source_type="yuque",
+            title=title,
+            source_url="https://www.yuque.com/wdterpqjb/test",
+            content_hash=uuid.uuid4().hex,
+            status="done",
+            chunk_count=1,
+        )
+        s.add(doc)
+        await s.flush()
+        s.add(
+            Chunk(
+                document_id=doc.id,
+                owner_id=None,
+                ordinal=0,
+                content=body,
+                embedding=FakeEmbedder().embed_query(body),
+                title=title,
+                heading="绑定物流账号",
+                source_url="https://www.yuque.com/wdterpqjb/test",
+            )
+        )
+        await s.commit()
+        doc_id = doc.id
+
+    yield title, body
+
+    async with maker() as s:
+        await s.execute(delete(Chunk).where(Chunk.document_id == doc_id))
+        await s.execute(delete(Document).where(Document.id == doc_id))
+        await s.commit()
+
+
+@pytest.fixture
+def fake_providers(monkeypatch, maker):
+    """把 provider 和会话工厂都换成测试用的。
+
+    chat 路由在流里自己开会话（StreamingResponse 的响应体在依赖退出之后才被消费），
+    所以这里得连 `SessionLocal` 一起换掉，否则流里那部分会打到真实连接池上。
+    """
+    from copilot.api import providers
+    from copilot.api.routes import chat as chat_module
+
+    llm = FakeLLM("先绑定物流账号[1]，再打印面单。")
+    monkeypatch.setattr(providers, "get_embedder", FakeEmbedder)
+    monkeypatch.setattr(providers, "get_reranker", TopOneReranker)
+    monkeypatch.setattr(providers, "get_llm", lambda: llm)
+    monkeypatch.setattr(chat_module, "SessionLocal", maker)
+    return llm
+
+
+@pytest.fixture
+async def logged_in(api_client, maker):
+    """注册一个用户并保持登录态；结束时把它连同会话记录一起删干净。"""
+    async with maker() as s:
+        (code,) = await create_invite_codes(s, 1)
+
+    email = f"chat-{uuid.uuid4().hex[:10]}@test.local"
+    r = await api_client.post(
+        "/api/auth/register",
+        json={"email": email, "password": PASSWORD, "inviteCode": code},
+    )
+    assert r.status_code == 201, r.text
+    user_id = uuid.UUID(r.json()["id"])
+
+    yield user_id
+
+    async with maker() as s:
+        convs = list(
+            (
+                await s.execute(select(Conversation.id).where(Conversation.user_id == user_id))
+            ).scalars()
+        )
+        if convs:
+            await s.execute(delete(Message).where(Message.conversation_id.in_(convs)))
+            await s.execute(delete(Conversation).where(Conversation.id.in_(convs)))
+        await s.execute(delete(InviteCode).where(InviteCode.code == code))
+        await s.execute(delete(User).where(User.id == user_id))
+        await s.commit()

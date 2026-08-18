@@ -233,7 +233,7 @@ export default function DocumentsPage() {
             <h1 className="text-lg font-semibold tracking-tight text-foreground">知识库</h1>
             <p className="mt-1 text-[13px] text-muted-foreground">
               {loaded && docs.length > 0
-                ? `${docs.length} 个文档 · ${chunkTotal} 个知识片段`
+                ? `${docs.length} 个文档 · ${chunkTotal} 个知识片段 · 拖文件到页面任意位置即可上传`
                 : "上传的文档只有你自己能检索到，公共知识库不受影响。"}
             </p>
           </div>
@@ -325,13 +325,25 @@ export default function DocumentsPage() {
           {!loaded ? (
             <p className="py-16 text-center text-[13px] text-muted-foreground">正在载入文档…</p>
           ) : docs.length === 0 ? (
-            <div className="flex flex-col items-center gap-1.5 py-20 text-center">
-              <FileText className="size-5 text-muted-foreground/50" />
-              <p className="text-sm font-medium text-foreground">还没有上传过文档</p>
-              <p className="text-[13px] text-muted-foreground">
+            /* 空状态本身就是投放区。整页都能接住拖进来的文件（handler 在最外层
+               的 main 上），但**得让人看出来**——原来只写「还没有上传过文档」，
+               虚线框要等你已经开始拖才出现，等于没有 */
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              className="flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-border py-20 text-center transition-colors hover:border-bronze-border hover:bg-surface-subtle"
+            >
+              <Upload className="size-5 text-muted-foreground/60" />
+              <span className="text-sm font-medium text-foreground">
+                把文件拖到这里，或点击选择
+              </span>
+              <span className="text-[13px] text-muted-foreground">
+                支持 md / txt / docx / pptx / pdf / 图片，单份不超过 20MB
+              </span>
+              <span className="mt-1 text-[13px] text-muted-foreground/70">
                 传一份操作手册上来，提问时就能引用到它
-              </p>
-            </div>
+              </span>
+            </button>
           ) : visible.length === 0 ? (
             <p className="py-16 text-center text-[13px] text-muted-foreground">没有符合条件的文档</p>
           ) : (

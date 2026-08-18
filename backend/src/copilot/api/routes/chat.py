@@ -23,10 +23,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 
+import anyio
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +43,7 @@ from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
 from copilot.db.models import Conversation, Message
 from copilot.db.session import SessionLocal
-from copilot.qa import ask_stream, is_no_answer
+from copilot.qa import HISTORY_TURNS, ask_stream, is_no_answer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -96,6 +99,31 @@ def _title_from(question: str) -> str:
     return q[:TITLE_MAX] if len(q) <= TITLE_MAX else q[: TITLE_MAX - 1] + "…"
 
 
+INTERRUPTED_MARK = "\n\n（生成已中断，内容可能不完整）"
+# 边流边落库的间隔。用户点停止最多丢这么多秒的内容
+FLUSH_SECONDS = 2.0
+
+
+async def _recent_turns(session: AsyncSession, conv_id: uuid.UUID) -> list[tuple[str, str]]:
+    """这条会话最近几轮对话，从旧到新。
+
+    ⭐ **必须在插入本轮提问之前调用**，否则历史里会混进用户刚问的那句，
+    改写时等于让模型拿问题去补全问题本身。
+
+    只取 user / assistant：tool 那类是 Agent 的内部记录，对直路没有意义。
+    排序和 `list_messages` 保持一致（created_at, id）——同一毫秒落库的两条
+    要有个稳定的先后，否则历史里的问答会偶发地颠倒。
+    """
+    stmt = (
+        select(Message.role, Message.content)
+        .where(Message.conversation_id == conv_id, Message.role.in_(("user", "assistant")))
+        .order_by(desc(Message.created_at), desc(Message.id))
+        .limit(HISTORY_TURNS)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(role, content) for role, content in reversed(rows)]
+
+
 async def _chat_stream(
     user_id: uuid.UUID, question: str, client_id: str | None
 ) -> AsyncIterator[str]:
@@ -109,6 +137,8 @@ async def _chat_stream(
     try:
         async with SessionLocal() as session:
             conv = await _resolve_conversation(session, user_id, client_id, question)
+            # 先读历史再落本轮提问，顺序不能反（见 _recent_turns）
+            history = await _recent_turns(session, conv.id)
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -122,6 +152,7 @@ async def _chat_stream(
                 providers.get_reranker(),
                 providers.get_llm(),
                 user_id=user_id,
+                history=history,
             )
 
             # 配图**在正文之前**发，和引用相反。因为前端要边流边把 [图1] 换成
@@ -137,9 +168,51 @@ async def _chat_stream(
             yield stream.text_start(text_id)
             text_open = True
             buf: list[str] = []
-            async for piece in iterate_in_threadpool(text_stream):
-                buf.append(piece)
-                yield stream.text_delta(text_id, piece)
+            row: Message | None = None  # 助手那条消息，第一次落盘时才建
+
+            async def flush(*, final: bool, shown: list | None = None) -> None:
+                """把已经吐出来的部分写进库。
+
+                ⭐ **不能等流结束再写。** 用户点「停止生成」时任务被取消，而
+                Python **不会立刻**关掉这个异步生成器——它要等 GC 去 finalize，
+                可能很久以后，也可能进程重启就没了。所以原来写在循环之后的落库
+                根本不保证执行：线上表现是刷新页面只剩一个孤零零的提问。
+
+                没写完的内容**必须标出来**：一段写到一半的 ERP 操作步骤看上去和
+                写完的一模一样，用户照着做到第 3 步才发现没有第 4 步——那时候
+                他已经在生产环境里点下去了。
+                """
+                nonlocal row
+                text = "".join(buf)
+                if not text.strip():
+                    return  # 一个字都没吐出来，不留空消息
+                content = text if final else text + INTERRUPTED_MARK
+                if row is None:
+                    row = Message(conversation_id=conv.id, role="assistant", content=content)
+                    session.add(row)
+                else:
+                    row.content = content
+                if final:
+                    row.citations = shown or None
+                    # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记
+                    row.images = (streamed.images or None) if shown else None
+                await session.commit()
+
+            last_flush = time.monotonic()
+            try:
+                async for piece in iterate_in_threadpool(text_stream):
+                    buf.append(piece)
+                    yield stream.text_delta(text_id, piece)
+                    if time.monotonic() - last_flush >= FLUSH_SECONDS:
+                        await flush(final=False)
+                        last_flush = time.monotonic()
+            except (asyncio.CancelledError, GeneratorExit):
+                # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0。
+                # `shield=True` 不能省：任务已经被取消，不挡一下的话下面的
+                # await 会立刻再抛一次 CancelledError，等于没写
+                with anyio.CancelScope(shield=True):
+                    await flush(final=False)
+                raise
             yield stream.text_end(text_id)
             text_open = False
 
@@ -149,17 +222,7 @@ async def _chat_stream(
             if shown:
                 yield stream.data_part("citations", {"citations": shown})
 
-            session.add(
-                Message(
-                    conversation_id=conv.id,
-                    role="assistant",
-                    content=answer,
-                    citations=shown or None,
-                    # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记
-                    images=(streamed.images or None) if shown else None,
-                )
-            )
-            await session.commit()
+            await flush(final=True, shown=shown)
 
             # 记账。算的是「送进去的 + 吐出来的」——**上下文才是大头**
             # （5 块材料约 2500 字，答案往往只有它的三成）

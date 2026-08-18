@@ -12,21 +12,97 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
 from copilot.retrieve import Citation, search
 
+logger = logging.getLogger(__name__)
+
 NO_ANSWER = "知识库暂无此内容。"
 
 # 答案里的引用标记 `[1]`、`[2]`。用来区分「拒答」和「答了一部分、并说明另一部分没有」
 _CITE_MARK_RE = re.compile(r"\[\d{1,2}\]")
+
+# ─────────────────────────────────────────────────────────
+# 招呼语 / 寒暄
+#
+# 「你好」检索不到任何东西，会撞上下面那道「一条都没召回」的闸门，
+# 于是用户得到一句「知识库暂无此内容」——一个连招呼都不会回的助手，
+# 谁也不会信任它后面的回答。
+#
+# ⚠️ **只认完全匹配，而且不调模型。** 用模型自由发挥就等于在防幻觉的墙上
+# 开一个洞：它会开始"友好地"补全 ERP 知识。这里回的每一句都是写死的常量。
+# 「你好，我想问下电子面单」不在这张表里 —— 它该走检索，也确实会走检索。
+# ─────────────────────────────────────────────────────────
+
+_GREETING = {
+    "你好", "您好", "你好呀", "你好啊", "哈喽", "哈啰", "嗨", "在吗", "在么", "在不在",
+    "早上好", "中午好", "下午好", "晚上好", "早安", "hi", "hello", "hey", "yo",
+}
+_THANKS = {
+    "谢谢", "谢谢你", "谢了", "多谢", "感谢", "好的", "收到", "明白了", "懂了", "知道了",
+    "thanks", "thank you", "thx",
+}
+_BYE = {"再见", "拜拜", "回见", "bye", "goodbye", "88"}
+_CAPABILITY = {
+    "你是谁", "你叫什么", "你是什么", "你能做什么", "你能干什么", "你能干嘛", "你会什么",
+    "你会做什么", "有什么功能", "怎么用", "如何使用", "使用说明", "帮助", "help",
+    "介绍一下你自己", "自我介绍",
+}
+
+_GREETING_REPLY = """你好，我是旺店通旗舰版 ERP 的知识库助手。
+
+系统操作、参数配置、异常排查这类问题都可以问我，答案会标明出处。比如：
+
+- 京东电子面单模板怎么设置？
+- 退货入库的操作流程是什么？
+- 对账单生成异常怎么排查？"""
+
+_CAPABILITY_REPLY = """我是旺店通旗舰版 ERP 的知识库助手，能做四件事：
+
+1. **回答操作与配置问题** —— 只依据知识库作答，每句结论都标出处；
+   材料里没有的会直说没有，不猜。
+2. **带上操作截图** —— 原文档里有配图的步骤，会把截图一起给你。
+3. **读你自己的文档** —— 在「知识库」页上传操作手册、FAQ、截图，
+   之后提问就能引用到它，而且只有你自己能检索到。
+4. **生成实施配置方案** —— 说一句「帮我出一份实施方案」，我会多轮问清楚需求，
+   最后给一份可下载的 Excel。
+
+我不知道的事情会直接说不知道 —— ERP 里一个编出来的配置步骤，可能让客户的订单卡住。"""
+
+_THANKS_REPLY = "不客气。还有别的问题随时问。"
+_BYE_REPLY = "再见，需要的时候再来找我。"
+
+# 去掉首尾空白和句末的标点再比对。「你好！」「你好~」都算招呼
+_TRAILING_PUNCT = "?？.。!！~～,，;；、 \t\n"
+
+
+def small_talk_reply(question: str) -> str | None:
+    """招呼 / 道谢 / 告别 / 问能力 —— 命中就直接给一句固定回复，不检索也不调模型。
+
+    返回 None 表示这是一个正经问题，照常走检索。
+    """
+    q = question.strip().strip(_TRAILING_PUNCT).lower()
+    if not q:
+        return None
+    if q in _GREETING:
+        return _GREETING_REPLY
+    if q in _CAPABILITY:
+        return _CAPABILITY_REPLY
+    if q in _THANKS:
+        return _THANKS_REPLY
+    if q in _BYE:
+        return _BYE_REPLY
+    return None
 
 SYSTEM_PROMPT = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
 
@@ -48,6 +124,9 @@ SYSTEM_PROMPT = """你是一名旺店通旗舰版 ERP 的实施顾问助手，�
    那段材料里出现的图号就照抄到对应步骤那一行的末尾，
    如「1. 进入【设置】-【打印设置】[图1]」。ERP 的操作步骤，一张截图顶三句话。
    唯一限制：**只能用材料里真实出现过的图号**，材料里没有 [图9] 就绝不能写 [图9]。
+6. 前面的对话记录**只用来理解这一轮在问什么**（比如「那不良品呢」指的是什么），
+   **不是可以引用的材料**。回答的依据只能是本轮的参考材料——上一轮答过的话，
+   这一轮材料里没有就还是没有。
 
 写法要求：
 - 操作步骤按 1. 2. 3. 分条列出，把界面路径原样保留（如「设置–策略设置–短信策略」）。
@@ -61,6 +140,70 @@ USER_TEMPLATE = """参考材料：
 ---
 
 问题：{question}"""
+
+# ─────────────────────────────────────────────────────────
+# 多轮改写
+#
+# 直路问答本来是**单轮**的：检索用最后一句话，送进模型的也只有最后一句话。
+# 于是「退货入库怎么操作」之后追一句「那不良品呢？」，系统是拿这五个字去
+# 检索——必然打偏，然后一本正经地答错，或者说知识库里没有。
+#
+# 标准解法：先把追问补全成一个独立问题，**只拿它去检索**；给模型的问题
+# 仍然是用户原话（否则答非所问），历史另外作为对话轮次带上。
+# ─────────────────────────────────────────────────────────
+
+REWRITE_PROMPT = """把用户最后这句话改写成一个不依赖上文也能看懂的独立问题。
+
+规则：
+- 只补全指代（「它」「那个」「那呢」到底指什么），不要增加原问题没有的限定条件
+- 本来就完整的问题，原样返回
+- 只输出改写后的那一个问题，不要解释、不要引号、不要换行"""
+
+# 改写结果的长度闸门。模型偶尔会不听话，返回一段解释而不是一个问题；
+# 与其拿这种东西去检索，不如退回用户原话
+_REWRITE_MAX_LEN = 120
+
+# 带进上下文的历史轮数（user + assistant 各算一条）
+HISTORY_TURNS = 6
+# 单条历史的截断长度。助手的回答动辄上千字，整段塞进去会把参考材料挤出窗口
+_HISTORY_CHAR_LIMIT = 600
+
+
+def rewrite_query(llm: ChatLLM, question: str, history: list[tuple[str, str]]) -> str:
+    """把追问补全成独立问题。任何异常都退回原问题——改写失败不该让提问失败。"""
+    if not history:
+        return question
+
+    convo = "\n".join(
+        f"{'用户' if role == 'user' else '助手'}：{content[:200]}"
+        for role, content in history[-4:]
+    )
+    try:
+        rewritten = llm.complete(
+            [
+                {"role": "system", "content": REWRITE_PROMPT},
+                {"role": "user", "content": f"对话记录：\n{convo}\n\n最后这句话：{question}"},
+            ],
+            temperature=0.0,
+        ).strip()
+    except Exception:  # noqa: BLE001 - 改写是锦上添花，挂了就用原问题
+        logger.warning("多轮改写失败，退回原问题：%r", question[:60], exc_info=True)
+        return question
+
+    if not rewritten or len(rewritten) > _REWRITE_MAX_LEN or "\n" in rewritten:
+        return question
+    return rewritten
+
+
+def _history_messages(history: list[tuple[str, str]] | None) -> list[dict]:
+    """历史轮次。只取最近几轮，且每条都截断。"""
+    if not history:
+        return []
+    return [
+        {"role": role, "content": content[:_HISTORY_CHAR_LIMIT]}
+        for role, content in history[-HISTORY_TURNS:]
+        if role in ("user", "assistant") and content.strip()
+    ]
 
 
 def is_no_answer(text: str) -> bool:
@@ -126,14 +269,29 @@ async def ask_stream(
     llm: ChatLLM,
     *,
     user_id: uuid.UUID | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> StreamedAnswer:
     """检索并流式作答。
+
+    Args:
+        history: 这条会话之前的 (role, content)，**不含本轮提问**，从旧到新。
+            有历史时会先把追问改写成独立问题再检索。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
     五条来源的情形——用户会误以为答案有依据。
     """
-    result = await search(session, question, embedder, reranker, user_id=user_id)
+    # 招呼语在检索**之前**拦掉。放到后面就晚了：它一条都召不回，
+    # 会被下面那道闸门变成一句「知识库暂无此内容」
+    if (canned := small_talk_reply(question)) is not None:
+        return StreamedAnswer(stream=iter([canned]), citations=[])
+
+    # 只有检索词用改写后的版本；给模型看的问题仍是用户原话
+    search_query = (
+        await run_in_threadpool(rewrite_query, llm, question, history) if history else question
+    )
+
+    result = await search(session, search_query, embedder, reranker, user_id=user_id)
 
     # 第一道闸门：一条都没召回，不必浪费一次 LLM 调用
     if result.is_empty:
@@ -142,6 +300,7 @@ async def ask_stream(
     context = result.build_context()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
+        *_history_messages(history),
         {
             "role": "user",
             "content": USER_TEMPLATE.format(context=context.text, question=question),
@@ -163,8 +322,11 @@ async def ask(
     llm: ChatLLM,
     *,
     user_id: uuid.UUID | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> Answer:
-    streamed = await ask_stream(session, question, embedder, reranker, llm, user_id=user_id)
+    streamed = await ask_stream(
+        session, question, embedder, reranker, llm, user_id=user_id, history=history
+    )
     text = "".join(streamed.stream)
     answer = Answer(text=text, citations=streamed.citations, images=streamed.images)
     # 模型说了不知道，就别再挂一堆来源——那会让用户以为答案有依据
