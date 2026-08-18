@@ -1,71 +1,86 @@
 "use client";
 
-import { BookOpen, ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { ChevronRight, ExternalLink } from "lucide-react";
 
 import type { Citation } from "@/lib/api";
 
 /**
- * 引用来源卡片列表（ChatGPT Search / 权威知识库引用风格）。
- * 每条可直接点击跳转语雀知识库原文。
+ * 引用来源 — 可折叠列表（默认收起）。
+ *
+ * 设计原则：答案是一级信息，来源是二级信息。
+ * 默认只显示「▸ 使用了 N 个知识来源」，点击展开列表。
  */
 export function Citations({ citations }: { citations: Citation[] }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (!citations || citations.length === 0) return null;
 
   return (
-    <div className="mt-4 space-y-2.5 border-t border-border/60 pt-3">
-      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-        <BookOpen className="size-3.5 text-primary/80" />
-        <span>参考知识库来源 ({citations.length})</span>
-      </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {citations.map((c) => {
-          const cardContent = (
-            <div className="group relative flex items-start gap-2.5 rounded-xl border border-border/70 bg-card/70 p-2.5 text-xs text-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-accent/40 hover:shadow-xs">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10 font-mono text-[11px] font-bold text-primary">
-                {c.n}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-foreground group-hover:text-primary transition-colors">
-                  {c.title}
-                </p>
-                {c.heading && (
-                  <p className="truncate text-[11px] text-muted-foreground mt-0.5">
-                    {c.heading}
-                  </p>
+    <div className="mt-4 pt-3 border-t border-border/40">
+      {/* 折叠触发器 */}
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+      >
+        <ChevronRight
+          className={`size-3.5 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="font-medium">
+          使用了 {citations.length} 个知识来源
+        </span>
+      </button>
+
+      {/* 展开的来源列表 */}
+      {expanded && (
+        <ul className="mt-2 space-y-1 pl-5">
+          {citations.map((c) => {
+            const inner = (
+              <div className="flex items-center gap-2 py-1.5 text-xs min-w-0 group/item">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded bg-foreground/[0.05] font-mono text-[10px] font-semibold text-muted-foreground">
+                  {c.n}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-foreground group-hover/item:text-foreground/80 truncate block">
+                    {c.title}
+                  </span>
+                  {c.heading && (
+                    <span className="text-[11px] text-muted-foreground truncate block">
+                      {c.heading}
+                    </span>
+                  )}
+                </div>
+                {c.url && (
+                  <ExternalLink className="size-3 shrink-0 text-muted-foreground/40 group-hover/item:text-muted-foreground transition-colors" />
                 )}
               </div>
-              {c.url && (
-                <ExternalLink className="size-3.5 shrink-0 text-muted-foreground opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:opacity-100" />
-              )}
-            </div>
-          );
-
-          if (c.url) {
-            return (
-              <a
-                key={c.n}
-                href={c.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}\n点击在语雀知识库中查看原文`}
-                className="block no-underline focus:outline-none"
-              >
-                {cardContent}
-              </a>
             );
-          }
 
-          return (
-            <div
-              key={c.n}
-              title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}`}
-              className="block"
-            >
-              {cardContent}
-            </div>
-          );
-        })}
-      </div>
+            if (c.url) {
+              return (
+                <li key={c.n}>
+                  <a
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`${c.title}${c.heading ? ` · ${c.heading}` : ""}\n点击查看原文`}
+                    className="block rounded-lg px-2 -mx-2 no-underline hover:bg-foreground/[0.03] transition-colors"
+                  >
+                    {inner}
+                  </a>
+                </li>
+              );
+            }
+
+            return (
+              <li key={c.n} className="px-2 -mx-2">
+                {inner}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

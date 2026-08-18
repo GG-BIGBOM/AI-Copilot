@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bot,
   Loader2,
   Menu,
   MessageSquarePlus,
   PanelLeftOpen,
-  Sparkles,
 } from "lucide-react";
 
 import { ChatView } from "@/components/chat/chat-view";
@@ -91,10 +89,8 @@ export default function ChatPage() {
     return (
       <main className="flex h-full items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3 text-muted-foreground text-sm">
-          <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-          <span className="font-medium text-foreground/80">正在载入知识库工作台…</span>
+          <Loader2 className="size-5 animate-spin text-foreground/30" />
+          <span className="font-medium text-foreground/60">正在载入…</span>
         </div>
       </main>
     );
@@ -116,14 +112,14 @@ export default function ChatPage() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col relative h-full">
-        {/* ChatGPT 风格顶部磨砂玻璃导航栏 */}
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 bg-background/80 px-3.5 backdrop-blur-md z-20">
-          <div className="flex items-center gap-2 min-w-0">
+        {/* 顶部导航栏 — 极简 */}
+        <header className="flex h-11 shrink-0 items-center justify-between border-b border-border/60 bg-background px-3 z-20">
+          <div className="flex items-center gap-1.5 min-w-0">
             {/* 移动端打开抽屉 */}
             <Button
               variant="ghost"
               size="icon"
-              className="size-8 md:hidden text-muted-foreground hover:text-foreground"
+              className="size-7 md:hidden text-muted-foreground hover:text-foreground"
               onClick={() => setDrawerOpen(true)}
               title="打开侧边栏"
               aria-label="打开侧边栏"
@@ -136,7 +132,7 @@ export default function ChatPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="hidden md:flex size-8 text-muted-foreground hover:text-foreground"
+                className="hidden md:flex size-7 text-muted-foreground hover:text-foreground"
                 onClick={toggleSidebarCollapse}
                 title="展开侧边栏"
                 aria-label="展开侧边栏"
@@ -145,34 +141,21 @@ export default function ChatPage() {
               </Button>
             )}
 
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Bot className="size-3.5" />
-              </div>
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="truncate text-xs sm:text-sm font-semibold text-foreground">
-                  旗舰版 ERP 知识库助手
-                </span>
-                <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] font-medium text-primary">
-                  <Sparkles className="size-2.5" />
-                  <span>语雀检索增强</span>
-                </span>
-              </div>
-            </div>
+            <span className="text-sm font-semibold text-foreground truncate">
+              旺店通助手
+            </span>
           </div>
 
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground rounded-lg"
-              onClick={newConversation}
-              title="新建对话"
-            >
-              <MessageSquarePlus className="size-3.5" />
-              <span className="hidden sm:inline">新对话</span>
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground rounded-lg"
+            onClick={newConversation}
+            title="新建对话"
+          >
+            <MessageSquarePlus className="size-3.5" />
+            <span className="hidden sm:inline">新对话</span>
+          </Button>
         </header>
 
         {/* key 一变就整棵重挂，切换历史对话时不会串台 */}

@@ -3,62 +3,31 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
-  Bot,
   Check,
-  Coins,
   Copy,
-  FileText,
   Loader2,
-  Package,
   RotateCcw,
-  ShieldCheck,
-  Sparkles,
-  User as UserIcon,
 } from "lucide-react";
 
+import { AgentTrace, DownloadCard } from "@/components/chat/agent-trace";
 import { Citations } from "@/components/chat/citations";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { Button } from "@/components/ui/button";
 import {
   messageCitations,
+  messageDownload,
   messageImages,
   messageText,
+  messageTools,
   type CopilotUIMessage,
 } from "@/lib/chat-types";
 
+/* ─── 空状态场景入口（轻量行式，不是 Card） ─── */
 const SUGGESTIONS = [
-  {
-    icon: FileText,
-    category: "面单与打印",
-    title: "京东电子面单模板怎么设置？",
-    desc: "查看电子面单开通、模板绑定与打印控件配置",
-  },
-  {
-    icon: Package,
-    category: "仓储与售后",
-    title: "退货入库的操作流程是什么？",
-    desc: "了解退货验货、良品/不良品入库及单据流转步骤",
-  },
-  {
-    icon: ShieldCheck,
-    category: "策略配置",
-    title: "怎么配置短信策略与规则？",
-    desc: "配置发货通知、催付短信与自动化触发规则",
-  },
-  {
-    icon: Coins,
-    category: "财务与对账",
-    title: "对账单生成异常怎么排查？",
-    desc: "排查结算费用差异、单据同步状态与核销异常",
-  },
-];
-
-const QUICK_TAGS = [
-  "退货入库流程",
-  "京东面单配置",
-  "短信策略规则",
-  "库存盘点步骤",
-  "对账单核销",
+  { title: "京东电子面单模板怎么设置？", desc: "面单开通、模板绑定与打印控件" },
+  { title: "退货入库的操作流程是什么？", desc: "退货验货、良品与不良品入库" },
+  { title: "怎么配置短信策略与规则？", desc: "发货通知、催付短信与触发规则" },
+  { title: "对账单生成异常怎么排查？", desc: "结算费用差异与核销异常" },
 ];
 
 export function MessageList({
@@ -93,82 +62,68 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, status]);
 
+  /* ═══════════════════════════════════════════════
+     空状态 Hero — 极简 + Dot Grid 背景
+     ═══════════════════════════════════════════════ */
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-8 text-center animate-in fade-in duration-300">
-        <div className="space-y-3.5 max-w-xl">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary to-primary/80 text-primary-foreground shadow-md ring-8 ring-primary/10">
-            <Sparkles className="size-7" />
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-2xl font-bold tracking-tight text-foreground">
-              今天能帮您解答什么？
-            </h2>
-            <p className="text-muted-foreground text-xs sm:text-sm leading-relaxed">
-              基于企业语雀知识库，精准解答 ERP 业务流程、单据策略与配置规范。
-              <br className="hidden sm:inline" />
-              知识库里没有的，助手会明确告知。
-            </p>
-          </div>
-        </div>
+      <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-8 text-center overflow-hidden">
+        {/* Dot Grid + radial 遮罩 */}
+        <div className="absolute inset-0 dot-grid-bg" />
+        <div className="absolute inset-0 bg-radial-[ellipse_at_center] from-background via-background/80 to-transparent" />
 
-        {/* 2x2 场景卡片矩阵 */}
-        <div className="grid w-full max-w-2xl gap-3 sm:grid-cols-2">
-          {SUGGESTIONS.map((s) => {
-            const Icon = s.icon;
-            return (
+        <div className="relative z-10 flex flex-col items-center gap-8 max-w-lg">
+          {/* 品牌 Icon + 标题 */}
+          <div className="space-y-3 text-center">
+            <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-foreground/[0.06] text-foreground/80">
+              <span className="text-xl">◈</span>
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold tracking-tight text-foreground">
+                旺店通助手
+              </h2>
+              <p className="text-muted-foreground text-sm">
+                今天想解决什么问题？
+              </p>
+            </div>
+          </div>
+
+          {/* 场景入口 — 轻量行式，不是卡片 */}
+          <div className="w-full space-y-1">
+            {SUGGESTIONS.map((s) => (
               <button
                 key={s.title}
                 type="button"
                 onClick={() => onPick(s.title)}
-                className="group relative flex flex-col justify-between rounded-2xl border border-border/80 bg-card/60 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-accent/40 hover:shadow-sm"
+                className="group flex w-full items-start gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-foreground/[0.04]"
               >
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                    <Icon className="size-4.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[11px] font-semibold text-primary/80 tracking-wide">
-                      {s.category}
-                    </span>
-                    <p className="font-semibold text-foreground text-xs sm:text-sm mt-0.5 group-hover:text-primary transition-colors">
-                      {s.title}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-1 line-clamp-1">
-                      {s.desc}
-                    </p>
-                  </div>
+                <span className="mt-0.5 flex size-1.5 shrink-0 rounded-full bg-foreground/20 group-hover:bg-foreground/40 transition-colors" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground group-hover:text-foreground/90">
+                    {s.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {s.desc}
+                  </p>
                 </div>
               </button>
-            );
-          })}
-        </div>
-
-        {/* 快捷标签胶囊 */}
-        <div className="flex flex-wrap items-center justify-center gap-2 max-w-xl">
-          <span className="text-[11px] text-muted-foreground font-medium">热门探索：</span>
-          {QUICK_TAGS.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => onPick(tag)}
-              className="rounded-full border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-accent/50 transition-colors"
-            >
-              #{tag}
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
+  /* ═══════════════════════════════════════════════
+     消息列表
+     ═══════════════════════════════════════════════ */
   return (
     <div
       ref={containerRef}
       onScroll={handleScroll}
       className="relative flex-1 overflow-y-auto"
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+      <div className="mx-auto flex max-w-[52rem] flex-col gap-6 px-4 py-6">
         {messages.map((m, index) => {
           const isLast = index === messages.length - 1;
           const isStreaming = isLast && status === "streaming";
@@ -183,9 +138,9 @@ export function MessageList({
         })}
 
         {status === "submitted" && (
-          <div className="flex items-center gap-3 text-muted-foreground text-xs py-3 px-2 rounded-xl bg-muted/30 border border-border/50 animate-pulse">
-            <Loader2 className="size-4 animate-spin text-primary shrink-0" />
-            <span>正在检索语雀知识库并分析匹配段落…</span>
+          <div className="flex items-center gap-3 text-muted-foreground text-sm py-3 pl-11">
+            <Loader2 className="size-3.5 animate-spin shrink-0" />
+            <span className="text-xs">正在检索知识库…</span>
           </div>
         )}
 
@@ -199,17 +154,19 @@ export function MessageList({
           size="icon"
           variant="outline"
           onClick={scrollToBottom}
-          className="fixed bottom-28 right-8 z-30 size-9 rounded-full shadow-md bg-background/90 backdrop-blur-xs border-border/80 hover:bg-accent"
+          className="fixed bottom-28 right-8 z-30 size-8 rounded-full bg-background border-border/60 hover:bg-accent"
+          style={{ boxShadow: "var(--shadow-subtle)" }}
           title="回到底部"
           aria-label="回到底部"
         >
-          <ArrowDown className="size-4" />
+          <ArrowDown className="size-3.5" />
         </Button>
       )}
     </div>
   );
 }
 
+/* ─── 复制按钮 ─── */
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -221,30 +178,33 @@ function CopyButton({ text }: { text: string }) {
   }
 
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      size="sm"
-      className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-foreground/[0.04] transition-colors"
       onClick={copy}
-      title={copied ? "已复制" : "复制回答"}
+      title={copied ? "已复制" : "复制"}
       aria-label={copied ? "已复制" : "复制回答"}
     >
       {copied ? (
         <>
-          <Check className="size-3 text-emerald-500" />
-          <span className="text-emerald-500 text-[11px]">已复制</span>
+          <Check className="size-3 text-emerald-600 dark:text-emerald-400" />
+          <span className="text-emerald-600 dark:text-emerald-400">已复制</span>
         </>
       ) : (
         <>
           <Copy className="size-3" />
-          <span className="text-[11px]">复制</span>
+          <span>复制</span>
         </>
       )}
-    </Button>
+    </button>
   );
 }
 
+/* ═══════════════════════════════════════════════
+   消息气泡
+   • 用户：浅色 muted 气泡（不再是重黑色）
+   • AI：文档式排版，无气泡包裹
+   ═══════════════════════════════════════════════ */
 function Bubble({
   message,
   isStreaming = false,
@@ -258,51 +218,55 @@ function Bubble({
   const text = messageText(message);
   const citations = messageCitations(message);
   const images = messageImages(message);
+  // M7：Agent 的工具调用过程与方案下载。普通问答走直路，这两样都是空的
+  const tools = messageTools(message);
+  const download = messageDownload(message);
 
+  /* ─── 用户消息：右对齐 muted 气泡 ─── */
   if (isUser) {
     return (
-      <div className="flex justify-end gap-3 items-start animate-in fade-in duration-200">
-        <div className="max-w-[85%] rounded-3xl rounded-tr-md bg-primary px-4.5 py-3 text-xs sm:text-sm text-primary-foreground shadow-2xs leading-relaxed">
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-muted px-4 py-2.5 text-sm text-foreground leading-relaxed">
           <p className="break-words whitespace-pre-wrap">{text}</p>
-        </div>
-        <div className="hidden sm:flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-semibold">
-          <UserIcon className="size-4" />
         </div>
       </div>
     );
   }
 
+  /* ─── AI 消息：文档式排版，无气泡 ─── */
   return (
-    <div className="flex justify-start gap-3 items-start group animate-in fade-in duration-200">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-2xs mt-0.5">
-        <Bot className="size-4" />
+    <div className="group flex gap-3 items-start">
+      {/* AI 头像 */}
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-foreground/70 mt-0.5">
+        <span className="text-sm">◈</span>
       </div>
 
-      <div className="flex flex-col gap-2 min-w-0 flex-1 max-w-[92%] sm:max-w-[88%]">
-        <div className="rounded-3xl rounded-tl-md border border-border/80 bg-muted/40 px-4.5 py-3.5 text-foreground leading-relaxed shadow-2xs">
+      <div className="flex flex-col gap-1.5 min-w-0 flex-1 max-w-none">
+        {/* 正文（无边框、无背景，纯文档流） */}
+        <div className="text-foreground">
+          {/* 工具调用过程放正文上方：Agent 十几秒没输出是常态，
+              让用户看到「正在检索知识库…」比盯着空白转圈安心 */}
+          <AgentTrace steps={tools} />
           <MarkdownContent content={text} images={images} isStreaming={isStreaming} />
           <Citations citations={citations} />
+          {download && <DownloadCard url={download.url} name={download.name} />}
         </div>
 
-        {/* 消息底部操作工具栏 */}
-        <div className="flex items-center justify-between px-1 text-muted-foreground text-xs">
-          <div className="flex items-center gap-1">
-            <CopyButton text={text} />
-            {onRegenerate && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={onRegenerate}
-                title="重新生成"
-                aria-label="重新生成"
-              >
-                <RotateCcw className="size-3" />
-                <span className="text-[11px]">重新生成</span>
-              </Button>
-            )}
-          </div>
+        {/* 操作工具栏 — 悬停才可见 */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <CopyButton text={text} />
+          {onRegenerate && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-foreground/[0.04] transition-colors"
+              onClick={onRegenerate}
+              title="重新生成"
+              aria-label="重新生成"
+            >
+              <RotateCcw className="size-3" />
+              <span>重新生成</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
