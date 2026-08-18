@@ -81,10 +81,33 @@ $SSH "set -e
       uv run alembic upgrade head 2>&1 | tail -2
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker
-      sleep 3
-      systemctl is-active copilot-api copilot-worker
-      systemctl is-active copilot-sync.timer"
+      systemctl is-active copilot-worker copilot-sync.timer
 
-echo "==> 验收"
-curl -sf --resolve liushun666.cn:443:${HOST#*@} https://liushun666.cn/api/health && echo
+      # ⚠️ \`systemctl is-active\` **不等于应用可用**。Type=exec 的单元在
+      # 二进制被 exec 那一刻就算 active，而 uvicorn 还要几秒才 import 完、
+      # 开始监听。原来写的是 \`sleep 3\`，M7 把依赖树撑大之后启动要 5 秒，
+      # 于是出现过「服务 active、页面 502」——而且当时脚本照样打印了「完成」。
+      # 改成轮询真实的健康检查，等到就绪为止。
+      for i in \$(seq 1 30); do
+        if curl -sf -o /dev/null http://127.0.0.1:8000/api/health; then
+          echo \"  API 就绪（等了 \${i}s）\"
+          break
+        fi
+        [ \$i -eq 30 ] && { echo '  API 30 秒还没起来，看 journalctl -u copilot-api'; exit 1; }
+        sleep 1
+      done"
+
+echo "==> 验收（公网，走 nginx）"
+# ⚠️ 原来这里写的是 `curl -sf ... && echo`——`&&` 里的失败**不会**被 set -e 拦住，
+# 于是健康检查挂了也照样往下打印「完成」。踩过一次：页面 502，脚本说部署成功。
+# 现在把每条都单独 check，任何一条不过就非零退出。
+#
+# ⭐ 必须用 `--resolve`：本机 VPN 做 fake-IP DNS 劫持，直接 curl 域名会全挂，
+#    看起来像上线失败（M5 的坑 #5）。
+for path in /api/health / /chat/ /documents/; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' \
+        --resolve "liushun666.cn:443:${HOST#*@}" "https://liushun666.cn${path}")
+    printf "  %-14s %s\n" "$path" "$code"
+    [ "$code" = "200" ] || { echo "  ↑ 这条没过，部署未通过验收"; exit 1; }
+done
 echo "完成：https://liushun666.cn/"
