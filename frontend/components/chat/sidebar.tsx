@@ -1,30 +1,45 @@
 "use client";
 
-import { useMemo, useState } from "react";
+/**
+ * 侧边栏 —— Linear 式工作区导航（UI_OPTIMIZATION_SPEC §9）。
+ *
+ * 三条规矩：
+ *   1. 侧边栏是**品牌所在地**，主区顶栏只负责当前会话，两边不重复写产品名；
+ *   2. 行动作（删除）平时不出现，hover 或键盘聚焦才现身；
+ *   3. 折叠态只留一条图标轨，不塞会话列表——56px 宽塞进去只会变成一片噪点，
+ *      要切会话就展开，或者按 Ctrl/Cmd + K。
+ */
+
+import { useMemo } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import {
   FileText,
   LogOut,
-  MessageSquare,
-  MessageSquarePlus,
-  Moon,
+  MoreHorizontal,
   PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
   Search,
-  Sun,
+  SunMoon,
   Trash2,
   X,
 } from "lucide-react";
+import { Menu } from "@base-ui/react/menu";
 
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/lib/theme";
 import type { ConversationSummary, User } from "@/lib/api";
 
 type DateGroup = "今天" | "昨天" | "前 7 天" | "更早";
 
-function groupConversationsByDate(items: ConversationSummary[]): Record<DateGroup, ConversationSummary[]> {
+const GROUP_ORDER = ["今天", "昨天", "前 7 天", "更早"] as const;
+
+function groupConversationsByDate(
+  items: ConversationSummary[],
+): Record<DateGroup, ConversationSummary[]> {
   const groups: Record<DateGroup, ConversationSummary[]> = {
     今天: [],
     昨天: [],
@@ -63,20 +78,30 @@ function CollapsibleLabel({
 }) {
   return (
     <span
-      className="truncate transition-all whitespace-nowrap overflow-hidden"
+      className="truncate whitespace-nowrap overflow-hidden"
       style={{
         opacity: collapsed ? 0 : 1,
         filter: collapsed ? "blur(4px)" : "blur(0px)",
         width: collapsed ? 0 : "auto",
         transitionProperty: "opacity, filter, width",
         transitionDuration: "200ms",
-        transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+        transitionTimingFunction: "var(--ease-out)",
       }}
     >
       {children}
     </span>
   );
 }
+
+/** 侧栏里的一行导航。32–36px 高、8px 圆角、平时没有任何边框 */
+const NAV_ROW =
+  "flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-hover hover:text-foreground";
+
+const MENU_POPUP =
+  "min-w-40 origin-[var(--transform-origin)] rounded-xl border border-border bg-popover p-1 text-popover-foreground outline-hidden transition-[opacity,scale] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] data-starting-style:scale-[0.98] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0";
+
+const MENU_ITEM =
+  "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground outline-none select-none data-highlighted:bg-surface-muted data-highlighted:text-foreground";
 
 export function Sidebar({
   conversations,
@@ -90,6 +115,7 @@ export function Sidebar({
   onPick,
   onDelete,
   onLogout,
+  onOpenSearch,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
@@ -102,22 +128,12 @@ export function Sidebar({
   onPick: (id: string) => void;
   onDelete: (c: ConversationSummary) => void;
   onLogout: () => void;
+  onOpenSearch: () => void;
 }) {
-  const [search, setSearch] = useState("");
   // 主题的应用时机在 layout 的内联脚本里（首帧之前），这里只跟着它显示图标
   const [isDark, toggleTheme] = useDarkMode();
 
-  const filteredConversations = useMemo(() => {
-    if (!search.trim()) return conversations;
-    const q = search.trim().toLowerCase();
-    return conversations.filter((c) => c.title.toLowerCase().includes(q));
-  }, [conversations, search]);
-
-  const grouped = useMemo(
-    () => groupConversationsByDate(filteredConversations),
-    [filteredConversations],
-  );
-
+  const grouped = useMemo(() => groupConversationsByDate(conversations), [conversations]);
   const initialLetter = user.email ? user.email.slice(0, 1).toUpperCase() : "U";
 
   return (
@@ -128,307 +144,259 @@ export function Sidebar({
           <motion.button
             type="button"
             aria-label="关闭侧边栏"
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] md:hidden"
+            className="fixed inset-0 z-40 bg-black/35 md:hidden"
             onClick={onClose}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.18 }}
           />
         )}
       </AnimatePresence>
 
-      <motion.aside
+      {/* 宽度用 CSS 过渡而不是 motion 的 animate：inline style 的 width 会盖掉
+          移动端抽屉的固定宽度，得靠读 window.innerWidth 打补丁，水合时容易错 */}
+      <aside
         className={cn(
-          "bg-sidebar text-sidebar-foreground fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border md:static",
-          // 移动端展示状态
-          open ? "translate-x-0 w-[260px] shadow-lg" : "-translate-x-full md:translate-x-0",
+          "bg-sidebar text-sidebar-foreground fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col",
+          "border-r border-sidebar-border md:static md:w-64",
+          "transition-[width,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          collapsed && "md:w-14",
         )}
-        animate={{
-          width: open ? 260 : (collapsed ? 64 : 260),
-        }}
-        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        style={{
-          // 移动端覆盖 motion animate
-          ...(typeof window !== "undefined" && window.innerWidth < 768
-            ? { width: open ? 260 : 0 }
-            : {}),
-        }}
+        style={open ? { boxShadow: "var(--shadow-floating)" } : undefined}
       >
-        {/* ─── 顶部：品牌 + 新建对话 ─── */}
-        <div className="flex flex-col gap-2 border-b border-sidebar-border p-3">
-          <div className="flex items-center justify-between gap-2">
-            {/* 品牌标识 */}
-            <div className={cn(
-              "flex items-center gap-2 min-w-0 transition-all",
-              collapsed ? "justify-center w-full" : "",
-            )}>
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-                ◈
-              </div>
-              <CollapsibleLabel collapsed={collapsed}>
-                <span className="text-sm font-semibold text-foreground">旺店通助手</span>
-              </CollapsibleLabel>
-            </div>
+        {/* ─── 品牌 ─── */}
+        <div
+          className={cn(
+            "flex h-12 shrink-0 items-center gap-2 px-3",
+            collapsed && "md:justify-center md:px-0",
+          )}
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center text-foreground">
+            <BrandMark className="size-[18px]" />
+          </span>
+          <CollapsibleLabel collapsed={collapsed}>
+            <span className="text-sm font-semibold tracking-tight text-foreground">旺店通助手</span>
+          </CollapsibleLabel>
 
-            {/* 桌面端折叠收起按钮 */}
-            {onToggleCollapse && !collapsed && (
+          <div className="ml-auto flex items-center">
+            {onToggleCollapse && (
               <Button
                 variant="ghost"
-                size="icon"
-                className="hidden md:flex size-7 text-muted-foreground hover:text-foreground"
+                size="icon-sm"
+                className={cn("hidden md:flex", collapsed && "md:hidden")}
                 onClick={onToggleCollapse}
                 title="收起侧边栏"
                 aria-label="收起侧边栏"
               >
-                <PanelLeftClose className="size-4" />
+                <PanelLeftClose />
               </Button>
             )}
-
-            {/* 折叠态展开按钮 */}
-            {onToggleCollapse && collapsed && (
-              <div /> // 占位，品牌标识已居中
-            )}
-
-            {/* 移动端关闭按钮 */}
             <Button
               variant="ghost"
-              size="icon"
-              className="size-7 md:hidden text-muted-foreground hover:text-foreground"
+              size="icon-sm"
+              className="md:hidden"
               onClick={onClose}
               title="关闭侧边栏"
               aria-label="关闭侧边栏"
             >
-              <X className="size-4" />
+              <X />
             </Button>
           </div>
+        </div>
 
-          {/* 新建对话按钮 */}
-          <Button
-            variant="default"
-            size="sm"
-            className={cn(
-              "gap-2 rounded-lg font-medium transition-all active:scale-[0.98]",
-              collapsed ? "justify-center px-0" : "justify-start",
-            )}
+        {/* 折叠态：展开按钮单独占一行，否则品牌那行挤不下 */}
+        {collapsed && onToggleCollapse && (
+          <div className="hidden justify-center px-2 pb-1 md:flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onToggleCollapse}
+              title="展开侧边栏"
+              aria-label="展开侧边栏"
+            >
+              <PanelLeftOpen />
+            </Button>
+          </div>
+        )}
+
+        {/* ─── 主操作 ─── */}
+        <div className={cn("flex flex-col gap-px px-2 pb-2", collapsed && "md:items-center md:px-1.5")}>
+          <button
+            type="button"
             onClick={onNew}
+            className={cn(
+              NAV_ROW,
+              "font-medium text-foreground hover:bg-sidebar-active",
+              collapsed && "md:w-8 md:justify-center md:px-0",
+            )}
+            title="新建对话"
           >
-            <MessageSquarePlus className="size-4 shrink-0" />
-            <CollapsibleLabel collapsed={collapsed}>
-              新建对话
-            </CollapsibleLabel>
-          </Button>
+            <Plus className="size-4 shrink-0" />
+            <CollapsibleLabel collapsed={collapsed}>新建对话</CollapsibleLabel>
+          </button>
 
-          {/* 我的文档 */}
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className={cn(NAV_ROW, collapsed && "md:w-8 md:justify-center md:px-0")}
+            title="搜索对话（Ctrl / Cmd + K）"
+          >
+            <Search className="size-4 shrink-0" />
+            <CollapsibleLabel collapsed={collapsed}>搜索</CollapsibleLabel>
+            {!collapsed && (
+              <kbd className="ml-auto hidden shrink-0 text-[11px] tabular-nums text-muted-foreground/60 md:block">
+                ⌘K
+              </kbd>
+            )}
+          </button>
+
           <Link
             href="/documents"
             onClick={onClose}
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground",
-              collapsed ? "justify-center px-0" : "",
-            )}
+            className={cn(NAV_ROW, collapsed && "md:w-8 md:justify-center md:px-0")}
+            title="知识库"
           >
-            <FileText className="size-3.5 shrink-0 opacity-60" />
-            <CollapsibleLabel collapsed={collapsed}>
-              知识库
-            </CollapsibleLabel>
+            <FileText className="size-4 shrink-0" />
+            <CollapsibleLabel collapsed={collapsed}>知识库</CollapsibleLabel>
           </Link>
-
-          {/* 搜索框 — 折叠时只显示搜索图标 */}
-          {!collapsed && conversations.length > 2 && (
-            <div className="relative">
-              <Search className="text-muted-foreground absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2" />
-              <Input
-                placeholder="搜索历史对话…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-7 pl-8 text-xs bg-sidebar-accent/50 border-sidebar-border rounded-md focus-visible:ring-1"
-              />
-            </div>
-          )}
-          {collapsed && (
-            <button
-              type="button"
-              className="flex items-center justify-center rounded-lg p-1.5 text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground transition-colors"
-              onClick={onToggleCollapse}
-              title="展开搜索"
-            >
-              <Search className="size-3.5" />
-            </button>
-          )}
         </div>
 
         {/* ─── 会话列表 ─── */}
-        <nav className={cn("flex-1 overflow-y-auto px-2 py-3", collapsed ? "px-1.5" : "")}>
-          {collapsed ? (
-            /* 折叠态：不显示列表 */
-            <div className="flex flex-col items-center gap-1 py-2">
-              {conversations.slice(0, 5).map((c) => {
-                const isActive = c.id === activeId;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => onPick(c.id)}
-                    className={cn(
-                      "flex size-8 items-center justify-center rounded-lg transition-colors",
-                      isActive
-                        ? "bg-sidebar-accent text-foreground"
-                        : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
-                    )}
-                    title={c.title || "未命名对话"}
-                  >
-                    <MessageSquare className="size-3.5" />
-                  </button>
-                );
-              })}
-            </div>
-          ) : conversations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-2 text-center text-muted-foreground">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-sidebar-accent/60 mb-2">
-                <MessageSquare className="size-4 opacity-40" />
-              </div>
-              <p className="text-xs font-medium text-foreground/80">暂无历史对话</p>
-              <p className="text-[11px] text-muted-foreground mt-1">发一句问题开启知识库探索</p>
-            </div>
-          ) : filteredConversations.length === 0 ? (
-            <p className="text-muted-foreground px-2 py-6 text-center text-xs">未找到匹配的对话</p>
+        <nav
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-2 pb-2",
+            collapsed && "md:hidden",
+          )}
+          aria-label="历史对话"
+        >
+          {conversations.length === 0 ? (
+            <p className="px-2 py-8 text-center text-[13px] leading-relaxed text-muted-foreground/70">
+              还没有历史对话
+              <br />
+              发一句问题就开始了
+            </p>
           ) : (
-            <div className="space-y-3">
-              {(search.trim() ? (["所有结果"] as const) : (["今天", "昨天", "前 7 天", "更早"] as const)).map(
-                (groupName) => {
-                  const list =
-                    groupName === "所有结果"
-                      ? filteredConversations
-                      : grouped[groupName as DateGroup];
-                  if (!list || list.length === 0) return null;
+            <div className="space-y-4 pt-1">
+              {GROUP_ORDER.map((groupName) => {
+                const list = grouped[groupName];
+                if (!list.length) return null;
 
-                  return (
-                    <div key={groupName} className="space-y-0.5">
-                      <div className="px-2 py-1 text-[10px] font-semibold tracking-wider text-muted-foreground/60 uppercase">
-                        {groupName}
-                      </div>
-                      <ul className="space-y-px">
-                        {list.map((c) => {
-                          const isActive = c.id === activeId;
-                          return (
-                            <li key={c.id} className="group relative">
-                              <button
-                                type="button"
-                                onClick={() => onPick(c.id)}
-                                className={cn(
-                                  "flex w-full items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 text-left text-[13px] transition-colors",
-                                  isActive
-                                    ? "bg-sidebar-accent text-foreground font-medium"
-                                    : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-                                )}
-                                title={c.title}
-                              >
-                                <MessageSquare
-                                  className={cn(
-                                    "size-3.5 shrink-0",
-                                    isActive ? "text-foreground" : "opacity-40 group-hover:opacity-60",
-                                  )}
-                                />
-                                <span className="truncate flex-1">{c.title || "未命名对话"}</span>
-                              </button>
-                              {/* 删除。平时透明，hover/聚焦才现身——常驻一排垃圾桶会把列表
-                                  变成一片图标。但 `focus-visible:opacity-100` 不能省：
-                                  只靠 hover 的话键盘用户永远够不着它 */}
-                              <button
-                                type="button"
-                                onClick={() => onDelete(c)}
+                return (
+                  <div key={groupName}>
+                    <div className="px-2 pb-1 text-[11px] font-medium text-muted-foreground/60">
+                      {groupName}
+                    </div>
+                    <ul>
+                      {list.map((c) => {
+                        const isActive = c.id === activeId;
+                        return (
+                          <li key={c.id} className="group relative">
+                            <button
+                              type="button"
+                              onClick={() => onPick(c.id)}
+                              className={cn(
+                                "flex h-8 w-full items-center rounded-md pl-2 pr-7 text-left text-sm transition-colors",
+                                isActive
+                                  ? "bg-sidebar-active font-medium text-foreground"
+                                  : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground",
+                              )}
+                              title={c.title || "未命名对话"}
+                            >
+                              <span className="truncate">{c.title || "未命名对话"}</span>
+                            </button>
+
+                            {/* 平时透明，hover / 键盘聚焦才现身。不能用 display:none——
+                                那样键盘用户永远够不到它 */}
+                            <Menu.Root>
+                              <Menu.Trigger
                                 className={cn(
                                   "absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center",
-                                  "rounded-md text-muted-foreground opacity-0 transition-opacity",
-                                  "hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100",
-                                  "group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                                  "rounded-sm text-muted-foreground opacity-0 transition-opacity",
+                                  "hover:bg-sidebar-active hover:text-foreground",
+                                  "focus-visible:opacity-100 group-hover:opacity-100 data-popup-open:opacity-100",
                                 )}
-                                title="删除对话"
-                                aria-label={`删除对话 ${c.title || "未命名对话"}`}
+                                aria-label={`对话「${c.title || "未命名对话"}」的更多操作`}
                               >
-                                <Trash2 className="size-3.5" />
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  );
-                },
-              )}
+                                <MoreHorizontal className="size-3.5" />
+                              </Menu.Trigger>
+                              <Menu.Portal>
+                                <Menu.Positioner className="outline-hidden" side="bottom" align="end" sideOffset={4}>
+                                  <Menu.Popup
+                                    className={MENU_POPUP}
+                                    style={{ boxShadow: "var(--shadow-floating)" }}
+                                  >
+                                    <Menu.Item
+                                      className={cn(
+                                        MENU_ITEM,
+                                        "data-highlighted:bg-destructive/10 data-highlighted:text-destructive",
+                                      )}
+                                      onClick={() => onDelete(c)}
+                                    >
+                                      <Trash2 className="size-3.5" />
+                                      删除对话
+                                    </Menu.Item>
+                                  </Menu.Popup>
+                                </Menu.Positioner>
+                              </Menu.Portal>
+                            </Menu.Root>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           )}
         </nav>
 
-        {/* ─── 底部用户信息 ─── */}
-        <div className={cn(
-          "border-t border-sidebar-border p-3 space-y-2",
-          collapsed ? "p-2 space-y-1.5" : "",
-        )}>
-          <div className="flex items-center justify-between gap-2">
-            <div className={cn(
-              "flex items-center gap-2 min-w-0",
-              collapsed ? "justify-center w-full" : "",
-            )}>
-              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-foreground font-semibold text-[11px]">
-                {initialLetter}
-              </div>
-              {!collapsed && (
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-foreground" title={user.email}>
-                    {user.email}
-                  </p>
-                </div>
+        {/* ─── 账号 ─── */}
+        <div className={cn("mt-auto shrink-0 p-2", collapsed && "md:flex md:justify-center md:px-1.5")}>
+          <Menu.Root>
+            <Menu.Trigger
+              className={cn(
+                NAV_ROW,
+                "h-9 data-popup-open:bg-sidebar-hover",
+                collapsed && "md:w-9 md:justify-center md:px-0",
               )}
-            </div>
-
-            {!collapsed && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0 text-muted-foreground hover:text-foreground rounded-lg"
-                onClick={toggleTheme}
-                title={isDark ? "切换为浅色模式" : "切换为深色模式"}
-                aria-label={isDark ? "切换为浅色模式" : "切换为深色模式"}
-              >
-                {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-              </Button>
-            )}
-          </div>
-
-          {collapsed ? (
-            <div className="flex flex-col items-center gap-1">
-              <button
-                type="button"
-                className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground transition-colors"
-                onClick={toggleTheme}
-                title={isDark ? "浅色" : "深色"}
-              >
-                {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-              </button>
-              <button
-                type="button"
-                className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                onClick={onLogout}
-                title="退出登录"
-              >
-                <LogOut className="size-3.5" />
-              </button>
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start gap-2 h-7 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-              onClick={onLogout}
+              aria-label="账号与设置"
             >
-              <LogOut className="size-3.5" />
-              <span>退出登录</span>
-            </Button>
-          )}
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[11px] font-semibold text-foreground">
+                {initialLetter}
+              </span>
+              <CollapsibleLabel collapsed={collapsed}>
+                <span className="text-[13px]">{user.email}</span>
+              </CollapsibleLabel>
+              {!collapsed && <MoreHorizontal className="ml-auto size-3.5 shrink-0 opacity-60" />}
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Positioner className="outline-hidden" side="top" align="start" sideOffset={6}>
+                <Menu.Popup className={MENU_POPUP} style={{ boxShadow: "var(--shadow-floating)" }}>
+                  <div className="px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground/70">
+                    {user.email}
+                  </div>
+                  <Menu.Item className={MENU_ITEM} onClick={toggleTheme}>
+                    <SunMoon className="size-3.5" />
+                    {isDark ? "切换为浅色" : "切换为深色"}
+                  </Menu.Item>
+                  <Menu.Item
+                    className={cn(
+                      MENU_ITEM,
+                      "data-highlighted:bg-destructive/10 data-highlighted:text-destructive",
+                    )}
+                    onClick={onLogout}
+                  >
+                    <LogOut className="size-3.5" />
+                    退出登录
+                  </Menu.Item>
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
         </div>
-      </motion.aside>
+      </aside>
     </>
   );
 }

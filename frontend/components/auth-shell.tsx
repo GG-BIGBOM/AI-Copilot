@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BrandMark } from "@/components/brand-mark";
 
-/** 登录页和注册页共用的外框。 */
+/**
+ * 登录页和注册页共用的外框（UI_OPTIMIZATION_SPEC §20）。
+ *
+ * 去掉了毛玻璃和光晕：这是一个每天要进来好几次的企业工具，不是落地页。
+ * 暖中性底 + 一张安静的卡片就够了。
+ */
 export function AuthShell({
   title,
   description,
@@ -15,32 +20,22 @@ export function AuthShell({
   footer: ReactNode;
 }) {
   return (
-    <main className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-12 bg-background">
-      {/* 极淡的环境光晕 */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 flex items-center justify-center overflow-hidden"
-      >
-        <div className="size-[400px] rounded-full bg-foreground/[0.02] blur-3xl" />
-      </div>
+    <main className="flex min-h-full items-center justify-center bg-background px-4 py-12">
+      <div className="w-full max-w-[22rem]">
+        <div className="flex flex-col items-center gap-2.5 text-center">
+          <BrandMark className="size-6 text-foreground/75" />
+          <div>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">{title}</h1>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+          </div>
+        </div>
 
-      <Card className="w-full max-w-sm rounded-2xl border-border/60 bg-card/90 backdrop-blur-xl transition-all duration-200" style={{ boxShadow: "var(--shadow-floating)" }}>
-        <CardHeader className="space-y-3 text-center pb-4">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-foreground/[0.06] text-foreground/80">
-            <span className="text-xl">◈</span>
-          </div>
-          <div className="space-y-1">
-            <CardTitle className="text-lg font-semibold tracking-tight text-foreground">{title}</CardTitle>
-            <CardDescription className="text-xs leading-relaxed text-muted-foreground">{description}</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <div className="mt-6 rounded-2xl border border-border-subtle bg-surface p-5">
           {children}
-          <div className="border-t border-border/40 pt-4">
-            <p className="text-muted-foreground text-center text-xs">{footer}</p>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <p className="mt-4 text-center text-[13px] text-muted-foreground">{footer}</p>
+      </div>
     </main>
   );
 }

@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+/**
+ * Smart Composer（UI_OPTIMIZATION_SPEC §11）。
+ *
+ * 全应用最重要的一个控件，所以它的规矩最死：
+ *   Enter 发送 · Shift + Enter 换行 · **中文输入法选词时的 Enter 永远不发送**。
+ *
+ * 不放任何还没有真实功能的按钮（上传 / 模型选择 / 模式切换）——
+ * 摆一个点了没反应的图标，比少一个功能更伤信任。
+ */
+
+import { useEffect, useRef } from "react";
 import { ArrowUp, Square } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export function Composer({
   onSend,
@@ -12,23 +21,25 @@ export function Composer({
   busy,
   draft,
   onDraftChange,
+  placeholder = "问一个旺店通相关问题……",
+  autoFocus = false,
 }: {
   onSend: (text: string) => void;
   onStop: () => void;
   busy: boolean;
   draft: string;
   onDraftChange: (text: string) => void;
+  placeholder?: string;
+  autoFocus?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const [rows, setRows] = useState(1);
 
-  // 输入框自适应高度伸缩，最多 200px
+  // 输入框自适应高度伸缩，最多 200px；外框的视觉高度保持稳定
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-    setRows(1);
   }, [draft]);
 
   function submit() {
@@ -39,64 +50,71 @@ export function Composer({
   }
 
   return (
-    <div className="w-full bg-gradient-to-t from-background via-background to-transparent pb-[env(safe-area-inset-bottom)] pt-2">
-      <div className="mx-auto flex max-w-[52rem] flex-col gap-1.5 px-4 pb-3">
-        {/* 输入卡片 — 克制圆角、轻 border、无花哨 glow */}
-        <div
-          className="relative flex flex-col rounded-[20px] border border-border/80 bg-background p-2 transition-all duration-200 focus-within:border-foreground/20 focus-within:shadow-[var(--shadow-subtle)]"
-        >
-          <Textarea
-            ref={ref}
-            rows={rows}
-            value={draft}
-            placeholder="问一个旺店通问题…"
-            title="Enter 发送，Shift + Enter 换行"
-            className="max-h-[200px] min-h-[48px] resize-none border-0 bg-transparent px-3 py-2.5 text-sm leading-relaxed shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/50"
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => {
-              // 中文输入法选词时会触发 Enter，isComposing 为真时不提交
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
+    <div>
+      <div
+        className={cn(
+          "flex flex-col rounded-2xl border border-border bg-surface transition-colors duration-150",
+          // 聚焦：青铜描边 + 一层极淡的青铜底光，不用亮蓝色 ring
+          "focus-within:border-bronze-border focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--bronze),transparent_88%)]",
+        )}
+      >
+        <textarea
+          ref={ref}
+          rows={1}
+          value={draft}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          aria-label="输入你的问题"
+          // text-base + md:text-sm：iOS 上小于 16px 的输入框一聚焦就会放大整页
+          className="max-h-[200px] min-h-12 w-full resize-none bg-transparent px-3.5 pt-3 text-base leading-relaxed outline-none placeholder:text-muted-foreground/70 md:text-[15px]"
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => {
+            // ⭐ 中文输入法选词时会触发 Enter，isComposing 为真时绝不提交
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
 
-          <div className="flex items-center justify-end px-2 pt-0.5 pb-0.5">
-            {busy ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="destructive"
-                className="size-8 rounded-full transition-transform active:scale-95"
-                onClick={onStop}
-                title="停止生成"
-                aria-label="停止生成"
-              >
-                <Square className="size-3.5 fill-current" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="icon"
-                onClick={submit}
-                disabled={!draft.trim()}
-                title="发送问题"
-                aria-label="发送问题"
-                className="size-8 rounded-full bg-foreground text-background transition-all active:scale-95 disabled:opacity-20 hover:opacity-80"
-              >
-                <ArrowUp className="size-4" />
-              </Button>
-            )}
-          </div>
-        </div>
+        <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5 pt-1">
+          <span className="truncate pl-1 text-[11px] text-muted-foreground/60">
+            Enter 发送 · Shift + Enter 换行
+          </span>
 
-        {/* 底部免责声明 */}
-        <div className="flex items-center justify-between px-2 text-[11px] text-muted-foreground/50">
-          <span>AI 回答基于知识库生成，请以最新系统设置为准</span>
-          <span className="hidden sm:inline">Enter 发送 · Shift+Enter 换行</span>
+          {busy ? (
+            <button
+              type="button"
+              onClick={onStop}
+              title="停止生成"
+              aria-label="停止生成"
+              className="flex size-8 shrink-0 items-center justify-center rounded-md bg-destructive/12 text-destructive transition-colors hover:bg-destructive/20"
+            >
+              <Square className="size-3 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!draft.trim()}
+              title="发送问题"
+              aria-label="发送问题"
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-md transition-colors",
+                draft.trim()
+                  ? "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklch,var(--primary),var(--background)_12%)]"
+                  : "cursor-not-allowed bg-surface-muted text-muted-foreground/50",
+              )}
+            >
+              <ArrowUp className="size-4" />
+            </button>
+          )}
         </div>
       </div>
+
+      <p className="mt-2 px-1 text-center text-[11px] text-muted-foreground/55">
+        AI 回答基于知识库生成，请以最新系统设置为准
+      </p>
     </div>
   );
 }

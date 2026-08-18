@@ -2,16 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Loader2,
-  Menu,
-  MessageSquarePlus,
-  PanelLeftOpen,
-} from "lucide-react";
 
+import { BrandMark } from "@/components/brand-mark";
 import { ChatView } from "@/components/chat/chat-view";
+import { ConversationHeader } from "@/components/chat/conversation-header";
+import { ConversationSearch } from "@/components/chat/conversation-search";
 import { Sidebar } from "@/components/chat/sidebar";
-import { Button } from "@/components/ui/button";
 import { api, type ConversationSummary, type StoredMessage } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth-guard";
 import { usePersistedFlag } from "@/lib/persisted-flag";
@@ -37,6 +33,7 @@ export default function ChatPage() {
   const [initialMessages, setInitialMessages] = useState<CopilotUIMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   // 折叠状态存在 localStorage 里。用 useSyncExternalStore 而不是
   // useEffect+setState：后者首帧一定是错的值、随后闪一下，且 React 19 的
   // set-state-in-effect 规则会直接报错
@@ -63,6 +60,18 @@ export default function ChatPage() {
     refreshConversations();
   }, [auth.status, refreshConversations]);
 
+  // Ctrl / Cmd + K 打开会话搜索
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   async function openConversation(id: string) {
     setDrawerOpen(false);
     try {
@@ -77,7 +86,7 @@ export default function ChatPage() {
   async function deleteConversation(c: ConversationSummary) {
     if (!window.confirm(`删除对话「${c.title || "未命名对话"}」？消息记录无法恢复。`)) return;
 
-    // 先从列表里拿掉，失败再放回去——和「我的文档」同一套做法，
+    // 先从列表里拿掉，失败再放回去——和「知识库」同一套做法，
     // 删除很快，转个圈反而显得卡
     const before = conversations;
     setConversations((list) => list.filter((x) => x.id !== c.id));
@@ -107,16 +116,19 @@ export default function ChatPage() {
   if (auth.status !== "authed" || !chatId) {
     return (
       <main className="flex h-full items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground text-sm">
-          <Loader2 className="size-5 animate-spin text-foreground/30" />
-          <span className="font-medium text-foreground/60">正在载入…</span>
+        <div className="flex flex-col items-center gap-3">
+          <BrandMark className="size-6 text-bronze" thinking />
+          <span className="text-[13px] text-muted-foreground">正在载入…</span>
         </div>
       </main>
     );
   }
 
+  // 新会话还没落库，列表里查不到——顶栏显示「新对话」，也不给删除入口
+  const current = conversations.find((c) => c.id === chatId) ?? null;
+
   return (
-    <div className="flex h-full bg-background overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-background">
       <Sidebar
         conversations={conversations}
         activeId={chatId}
@@ -129,54 +141,23 @@ export default function ChatPage() {
         onPick={openConversation}
         onDelete={deleteConversation}
         onLogout={logout}
+        onOpenSearch={() => setSearchOpen(true)}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col relative h-full">
-        {/* 顶部导航栏 — 极简 */}
-        <header className="flex h-11 shrink-0 items-center justify-between border-b border-border/60 bg-background px-3 z-20">
-          <div className="flex items-center gap-1.5 min-w-0">
-            {/* 移动端打开抽屉 */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 md:hidden text-muted-foreground hover:text-foreground"
-              onClick={() => setDrawerOpen(true)}
-              title="打开侧边栏"
-              aria-label="打开侧边栏"
-            >
-              <Menu className="size-4" />
-            </Button>
+      <ConversationSearch
+        open={searchOpen}
+        conversations={conversations}
+        onOpenChange={setSearchOpen}
+        onPick={openConversation}
+      />
 
-            {/* 桌面端当侧边栏折叠时，显示展开按钮 */}
-            {sidebarCollapsed && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="hidden md:flex size-7 text-muted-foreground hover:text-foreground"
-                onClick={toggleSidebarCollapse}
-                title="展开侧边栏"
-                aria-label="展开侧边栏"
-              >
-                <PanelLeftOpen className="size-4" />
-              </Button>
-            )}
-
-            <span className="text-sm font-semibold text-foreground truncate">
-              旺店通助手
-            </span>
-          </div>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground rounded-lg"
-            onClick={newConversation}
-            title="新建对话"
-          >
-            <MessageSquarePlus className="size-3.5" />
-            <span className="hidden sm:inline">新对话</span>
-          </Button>
-        </header>
+      <main className="flex h-full min-w-0 flex-1 flex-col">
+        <ConversationHeader
+          title={current?.title || "新对话"}
+          canDelete={Boolean(current)}
+          onOpenDrawer={() => setDrawerOpen(true)}
+          onDelete={() => current && deleteConversation(current)}
+        />
 
         {/* key 一变就整棵重挂，切换历史对话时不会串台 */}
         <ChatView

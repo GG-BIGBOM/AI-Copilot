@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 
+import { BrandMark } from "@/components/brand-mark";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
+import { PromptStarters } from "@/components/chat/prompt-starters";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/api";
@@ -16,6 +18,9 @@ import type { CopilotUIMessage } from "@/lib/chat-types";
  *
  * ⭐ `chatId` 必须是 UUID。useChat 默认自己生成的是 nanoid，后端解析不出来
  * 就会每轮另开一条会话，多轮对话全散了——见 plan.md M3 的接口约定。
+ *
+ * 空会话和进行中的会话是**两套排版**：空的时候输入框在视觉中心偏上，
+ * 是这一屏唯一的主角（§10）；一旦有了消息，它就退到底部停靠。
  */
 export function ChatView({
   chatId,
@@ -49,38 +54,71 @@ export function ChatView({
 
   const busy = status === "submitted" || status === "streaming";
 
+  const composer = (
+    <Composer
+      draft={draft}
+      onDraftChange={setDraft}
+      busy={busy}
+      onStop={stop}
+      onSend={(text) => sendMessage({ text })}
+      placeholder={messages.length === 0 ? "问一个旺店通相关问题……" : "继续提问……"}
+    />
+  );
+
+  /* ─── 空状态：品牌符号 + 一句话 + 输入框 + 场景入口 ─── */
+  if (messages.length === 0) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* 视觉重心落在 42–45% 高度上：正正好居中会让下半屏显得空（§10.1） */}
+        <div className="mx-auto flex min-h-full w-full max-w-[var(--content-text-max)] flex-col justify-center gap-7 px-4 pt-10 pb-[max(12vh,env(safe-area-inset-bottom))] sm:px-6">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <BrandMark className="size-7 text-foreground/75" />
+            <p className="text-[26px] font-semibold leading-tight tracking-tight text-foreground">
+              今天想解决什么问题？
+            </p>
+          </div>
+
+          {composer}
+
+          <PromptStarters
+            onPick={(text) => {
+              setDraft("");
+              sendMessage({ text });
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── 进行中的会话：正文在上，输入框停靠在底部 ─── */
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList
-        messages={messages}
-        status={status}
-        onPick={(text) => {
-          setDraft("");
-          sendMessage({ text });
-        }}
-        onRegenerate={() => regenerate()}
-      />
+      <MessageList messages={messages} status={status} onRegenerate={() => regenerate()} />
 
-      {error && (
-        <div className="mx-auto w-full max-w-3xl px-4 pb-2">
-          <Alert variant="destructive" className="rounded-2xl border-destructive/40 shadow-xs">
-            <AlertDescription className="flex items-center justify-between gap-3 text-xs">
-              <span>{error.message || "出错了，请稍后重试。"}</span>
-              <Button size="sm" variant="outline" className="h-7 text-xs rounded-lg" onClick={() => regenerate()}>
-                重试
-              </Button>
-            </AlertDescription>
-          </Alert>
+      {/* pb 里带 safe-area：iPhone 上不加这个，输入框会被底部的横条压住 */}
+      <div className="shrink-0 px-4 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
+        <div className="content-grid">
+          <div>
+            {error && (
+              <Alert variant="destructive" className="mb-2">
+                <AlertDescription className="flex items-center justify-between gap-3 text-[13px]">
+                  <span>{error.message || "出错了，请稍后重试。"}</span>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => regenerate()}
+                  >
+                    重试
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+            {composer}
+          </div>
         </div>
-      )}
-
-      <Composer
-        draft={draft}
-        onDraftChange={setDraft}
-        busy={busy}
-        onStop={stop}
-        onSend={(text) => sendMessage({ text })}
-      />
+      </div>
     </div>
   );
 }

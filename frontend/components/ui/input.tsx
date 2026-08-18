@@ -9,7 +9,13 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
       type={type}
       data-slot="input"
       className={cn(
-        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        // 圆角 8px、中性描边，聚焦时描边转青铜（外面那圈 outline 由全局 :focus-visible 给）。
+        // text-base + md:text-sm 是为了 iOS：小于 16px 的输入框聚焦会自动放大页面。
+        "h-8 w-full min-w-0 rounded-md border border-input bg-surface px-2.5 py-1 text-base transition-colors outline-none",
+        "file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground",
+        "placeholder:text-muted-foreground/70 focus-visible:border-bronze-border",
+        "disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-55",
+        "aria-invalid:border-destructive md:text-sm dark:bg-surface-subtle",
         className
       )}
       {...props}
