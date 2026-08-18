@@ -46,7 +46,9 @@ class CorrectionError(ValueError):
 
 @dataclass(slots=True)
 class Correction:
-    path: Path
+    # ⚠️ 数据库那一路没有文件，所以是可空的。取名字一律用 `.name`，
+    # 别直接摸 `.path`——网页写的勘误会让你拿到 None
+    path: Path | None
     target_url: str
     reason: str
     based_on: str = ""
@@ -56,7 +58,7 @@ class Correction:
 
     @property
     def name(self) -> str:
-        return self.path.stem
+        return self.path.stem if self.path else f"网页勘误 · {self.title or self.target_url}"
 
 
 def _as_bool(raw: str) -> bool:
@@ -107,7 +109,7 @@ def load_corrections(root: Path) -> dict[str, Correction]:
         c = parse_correction(path)
         if c.target_url in out:
             raise CorrectionError(
-                f"{path.name} 和 {out[c.target_url].path.name} 指向同一篇文档："
+                f"{path.name} 和 {out[c.target_url].name} 指向同一篇文档："
                 f"{c.target_url}。合并成一个文件。"
             )
         out[c.target_url] = c
@@ -193,3 +195,55 @@ def render_correction(
         lines.append("retired: true")
     lines += ["---", "", body.strip(), ""]
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────
+# 数据库那一路
+#
+# 文件那一路（corrections/*.md）进 Git、能 review，是"正式"的一路。
+# 数据库这一路是给**网页上现场改**用的：实施顾问在客户那儿发现原文写错，
+# 手边没有仓库、也不该等一次上线。
+#
+# ⚠️ **网页版绝不能往 corrections/ 目录写文件**：deploy.sh 第 4 步是
+# `rm -rf $APP_DIR/corrections` 再解包，写进去的下次上线就没了，而且悄无声息。
+# 所以它必须落库。想让它进版本管理，用 `copilot corrections export` 导出来提交。
+# ─────────────────────────────────────────────────────────
+
+
+def from_row(row) -> Correction:
+    """数据库里的一行 → 和文件那一路同构的 Correction。
+
+    转成同一个类型是关键：这样 `apply_corrections` 一个字都不用改，
+    两路来源在它眼里完全一样。
+    """
+    return Correction(
+        path=None,
+        target_url=row.target_url,
+        reason=row.reason,
+        based_on=row.based_on or "",
+        title=row.title or "",
+        retired=bool(row.retired),
+        body=row.body or "",
+    )
+
+
+async def load_db_corrections(session) -> dict[str, Correction]:
+    """读数据库里的勘误，按 target_url 索引。"""
+    from sqlalchemy import select
+
+    from copilot.db.models import Correction as CorrectionRow
+
+    rows = (await session.execute(select(CorrectionRow))).scalars()
+    return {r.target_url: from_row(r) for r in rows}
+
+
+def merge_corrections(
+    from_files: dict[str, Correction], from_db: dict[str, Correction]
+) -> dict[str, Correction]:
+    """两路合并。**同一篇以数据库那条为准。**
+
+    理由是时序：文件那条是上一次提交时的想法，数据库那条是刚刚在网页上写的。
+    冲突时取新的那个，符合直觉。真想让文件版赢，就把数据库那条删掉——
+    删除入口在网页上，不用登服务器。
+    """
+    return {**from_files, **from_db}

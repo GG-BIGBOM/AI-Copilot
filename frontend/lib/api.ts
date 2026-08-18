@@ -29,6 +29,26 @@ export type Citation = {
   score: number;
 };
 
+/** 一条人工勘误：语雀原文写错了，用这条盖掉它。字段跟后端 `CorrectionOut` 对齐。 */
+export type Correction = {
+  id: string;
+  target_url: string;
+  title: string;
+  reason: string;
+  body: string;
+  retired: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CorrectionSaved = {
+  correction: Correction;
+  /** 落库了不等于生效了——找不到对应的语雀原文、或重新入库挂了，都会是 false */
+  applied: boolean;
+  chunks: number;
+  note: string;
+};
+
 export type ConversationSummary = {
   id: string;
   title: string;
@@ -178,6 +198,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
+
+  corrections: () => request<Correction[]>("/api/corrections"),
+
+  /**
+   * 写一条勘误。服务端会**当场**把那一篇重新入库，所以回执里的 `applied`
+   * 才是「现在提问会不会用上」——只看 201 会骗人。
+   */
+  saveCorrection: (body: { target_url: string; title: string; reason: string; body: string }) =>
+    request<CorrectionSaved>("/api/corrections", { method: "POST", body: JSON.stringify(body) }),
+
+  deleteCorrection: (id: string) =>
+    request<void>(`/api/corrections/${id}`, { method: "DELETE" }),
 
   documents: () => request<DocumentSummary[]>("/api/documents"),
 

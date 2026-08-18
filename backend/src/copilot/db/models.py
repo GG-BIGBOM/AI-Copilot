@@ -242,3 +242,43 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class Correction(Base):
+    """网页上写的勘误：语雀原文写错了，用这条盖掉它。
+
+    ⚠️ **和 `corrections/*.md` 是同一层的两个来源**，不是两套机制。
+    ingest 时两边一起读（见 `ingest/corrections.py` 的 `load_corrections`），
+    同一个 target_url 以数据库那条为准——它是你刚在网页上写的那一条。
+
+    为什么要有数据库这一路：文件那一路要有仓库、会跑命令、还得等一次上线，
+    实施顾问在客户现场发现原文写错时用不了。而**服务器上的 `corrections/`
+    目录每次部署都会被仓库版本整个覆盖**（deploy.sh 第 4 步是 `rm -rf` 再解包），
+    所以网页版绝不能往那个目录写文件——写了下次上线就没了，而且没有任何提示。
+
+    `copilot corrections export` 会把这里的记录导成 `corrections/*.md`，
+    想让它进版本管理、被 review 时导一次、提交即可。
+    """
+
+    __tablename__ = "corrections"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # 作者删号了也要留着这条勘误——知识还在生效，不能因为人走了就悄悄失效
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # 被勘误的那篇语雀文档，也是和原文对齐的唯一键。
+    # unique：两条勘误指向同一篇是配置错误，让数据库来挡，别等 ingest 时才抛
+    target_url: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    # 为什么改。**必填**，半年后你会需要它
+    reason: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    # 写这条勘误时语雀那篇的 content_updated_at。语雀后来又更新了就算「过期」
+    based_on: Mapped[str] = mapped_column(String(64), default="")
+    retired: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

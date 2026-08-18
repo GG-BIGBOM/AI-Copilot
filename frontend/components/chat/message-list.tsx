@@ -164,7 +164,9 @@ function Message({
         <div>
           {download && <DownloadCard url={download.url} name={download.name} />}
           <Citations citations={citations} />
-          {!isStreaming && <MessageActions text={text} onRegenerate={onRegenerate} />}
+          {!isStreaming && (
+            <MessageActions text={text} citations={citations} onRegenerate={onRegenerate} />
+          )}
         </div>
       </div>
     </article>

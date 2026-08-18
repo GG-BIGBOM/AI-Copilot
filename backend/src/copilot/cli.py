@@ -58,13 +58,26 @@ async def _ingest(path: str, force: bool, limit: int, owner: str = "") -> None:
 
     # ⭐ 勘误层盖在语雀原文之上。放在 limit 之前：限量试跑也要走同一条路径，
     # 否则「试跑通过、全量才炸」那类问题就要等到全量才发现
-    from copilot.ingest.corrections import apply_corrections, load_corrections
+    from copilot.ingest.corrections import (
+        apply_corrections,
+        load_corrections,
+        load_db_corrections,
+        merge_corrections,
+    )
 
     try:
         corrections = load_corrections(get_settings().corrections_dir)
     except Exception as e:  # noqa: BLE001 - 勘误文件写坏了要说清楚，不能带着错继续入库
         typer.secho(f"勘误文件有问题：{e}", fg=typer.colors.RED)
         raise typer.Exit(1) from e
+
+    # 网页上写的勘误也是勘误。少了这一路，全量 ingest 会把网页改过的内容
+    # **悄悄改回语雀原文**——用户看到的是「我明明改过，怎么又变回去了」
+    async with SessionLocal() as s_corr:
+        from_db = await load_db_corrections(s_corr)
+    if from_db:
+        typer.secho(f"网页勘误 {len(from_db)} 条", fg=typer.colors.CYAN)
+    corrections = merge_corrections(corrections, from_db)
 
     # 勘误层只覆盖语雀公共库。灌私有库时跳过——那是别人自己的文档，
     # 拿一条针对语雀文档的勘误去盖它毫无道理（`target_url` 也对不上）
@@ -83,7 +96,7 @@ async def _ingest(path: str, force: bool, limit: int, owner: str = "") -> None:
             fg=typer.colors.YELLOW,
         )
         for c in missed:
-            typer.secho(f"    {c.path.name} → {c.target_url}", fg=typer.colors.YELLOW)
+            typer.secho(f"    {c.name} → {c.target_url}", fg=typer.colors.YELLOW)
         typer.secho(
             "    多半是 target_url 抄错，或那篇语雀文档换了地址。", fg=typer.colors.YELLOW
         )
@@ -327,7 +340,7 @@ def correct(
     prior = existing.get(entry["source_url"])
     if prior is not None:
         typer.secho(
-            f"这篇已经有勘误了：{prior.path.name}，将在它的基础上改。", fg=typer.colors.CYAN
+            f"这篇已经有勘误了：{prior.name}，将在它的基础上改。", fg=typer.colors.CYAN
         )
         body = prior.body
         reason = prior.reason
@@ -584,3 +597,78 @@ async def _worker(poll: float, once: bool) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+@app.command(name="corrections-export")
+def corrections_export(
+    dry_run: bool = typer.Option(False, "--dry-run", help="只看会写哪些文件，不落盘"),
+) -> None:
+    """把网页上写的勘误导成 `corrections/*.md`，好进版本管理。
+
+    网页那一路存在数据库里——它要能立刻生效，而**服务器上的 corrections/
+    目录每次部署都会被仓库版本整个覆盖**，所以不能往那儿写文件。
+
+    代价是那些勘误不进 Git：没有 diff、没有 review、换台服务器要单独备份数据库。
+    这条命令就是把它们捞回仓库的路：导一次、看一眼 diff、提交。
+
+        uv run copilot corrections-export --dry-run   # 先看会写什么
+        uv run copilot corrections-export             # 真写
+        git add corrections/ && git commit
+
+    导出**不会删数据库里的记录**。两边都在时以数据库为准（见 merge_corrections），
+    所以导出之后行为不变；真想让文件版接管，把网页上那条删掉即可。
+    """
+    import asyncio
+
+    asyncio.run(_corrections_export(dry_run))
+
+
+async def _corrections_export(dry_run: bool) -> None:
+    from sqlalchemy import select
+
+    from copilot.config import get_settings
+    from copilot.db.models import Correction as CorrectionRow
+    from copilot.db.session import SessionLocal
+    from copilot.ingest.corrections import load_corrections, render_correction, slugify
+
+    settings = get_settings()
+    async with SessionLocal() as session:
+        rows = list((await session.execute(select(CorrectionRow))).scalars())
+
+    if not rows:
+        typer.secho("数据库里没有网页勘误。", fg=typer.colors.CYAN)
+        return
+
+    # 已有的文件按 target_url 索引：同一篇要覆盖原来那个文件，
+    # 而不是按标题另起一个 slug——否则同一篇会有两个文件，ingest 直接抛
+    existing = load_corrections(settings.corrections_dir)
+
+    for row in rows:
+        prior = existing.get(row.target_url)
+        out_path = (
+            prior.path
+            if prior is not None and prior.path is not None
+            else settings.corrections_dir / f"{slugify(row.title, row.id.hex[:8])}.md"
+        )
+        text = render_correction(
+            target_url=row.target_url,
+            title=row.title,
+            based_on=row.based_on,
+            reason=row.reason,
+            body=row.body,
+            retired=row.retired,
+        )
+        verb = "覆盖" if out_path.exists() else "新建"
+        typer.echo(f"  {verb} {out_path.name}　← {row.title or row.target_url}")
+        if not dry_run:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(text, encoding="utf-8")
+
+    if dry_run:
+        typer.secho(f"\n（--dry-run，没有真写）共 {len(rows)} 条", fg=typer.colors.YELLOW)
+    else:
+        typer.secho(
+            f"\n导出 {len(rows)} 条到 {settings.corrections_dir}。"
+            "看一眼 diff 再提交；数据库里的记录仍然保留。",
+            fg=typer.colors.GREEN,
+        )

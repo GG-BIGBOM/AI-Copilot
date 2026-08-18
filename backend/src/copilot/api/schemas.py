@@ -173,3 +173,51 @@ class UploadResult(BaseModel):
 
     document: DocumentOut
     duplicate: bool = False
+
+
+class CorrectionIn(BaseModel):
+    """网页上写的一条勘误。
+
+    `reason` 必填不是形式主义：半年后回来看，没有它就不知道当初为什么改，
+    而勘误是**覆盖公共知识库**的东西，说不清理由的覆盖比不覆盖更危险。
+    """
+
+    target_url: str = Field(min_length=8, max_length=1024)
+    title: str = Field(default="", max_length=512)
+    reason: str = Field(min_length=2, max_length=500)
+    body: str = Field(min_length=1)
+
+    @field_validator("target_url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("要填被勘误那篇文档的完整链接")
+        return v
+
+
+class CorrectionOut(BaseModel):
+    id: uuid.UUID
+    target_url: str
+    title: str
+    reason: str
+    body: str
+    retired: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CorrectionSaved(BaseModel):
+    """保存的回执。
+
+    `applied` 是关键字段：勘误落库了不等于生效了（找不到对应的语雀原文、
+    或者重新入库挂了）。不把这个区分告诉前端的话，用户改完看到"已保存"，
+    再问同一个问题却发现答案没变——他只会认为这个功能是假的。
+    """
+
+    correction: CorrectionOut
+    applied: bool
+    chunks: int
+    note: str
