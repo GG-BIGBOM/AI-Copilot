@@ -85,6 +85,12 @@ echo "==> [7/7] 装依赖、跑迁移、重启"
 #    没列的 extra 会被**卸掉**。本机踩过——`uv sync --extra eval` 之后
 #    python-docx/pptx 全被移除，10 个解析测试当场变红。要装两组就一起列。
 #
+# ⚠️⚠️ 同理，**别在服务器上裸跑 `uv run`**。它会先把环境同步成 pyproject
+#    的默认样子（带 dev 组、不带 extra），等于悄悄改了生产的 venv。
+#    临时验证请用 `.venv/bin/python -c ...` 直接调解释器，绕开 uv 的同步。
+#    真动了的话，把上面这条 `uv sync --no-dev --extra parse --extra agent`
+#    原样重跑一遍就能拉回声明状态。
+#
 # ⭐ `--extra agent` 是 M7 的（pydantic-ai + openpyxl）。它拖进来四十来个包，
 #    但**只在有人真的要方案时才 import**（`routes/chat.py` 里那几个 import
 #    写在函数内部，不在模块顶层）。所以普通问答的常驻内存不受影响——
