@@ -1,0 +1,431 @@
+# 路由评测集（M10 P0）
+#
+# ⚠️ 这份题集量的不是「答得对不对」，而是**这句话被送去了哪里**。
+# dataset.yaml 那 55 题全是知识库问答，全 Agent 化之后新增的失败模式
+# ——路由错、越过工具直答、多轮丢状态——现有题集**一道都测不到**。
+#
+# M8 的教训在这里再说一遍：没有评测就没有资格改架构。M10 要动的正是路由，
+# 所以必须先有一个「改之前是多少」的数字。
+#
+# 判定是**确定性的、零成本的**：路由由 `small_talk_kind()` 和 `AGENT_TRIGGERS`
+# 决定，都是纯函数，不调模型。所以这份题集可以随便跑，跑一百遍结果一样。
+#
+# 字段：
+#   q          用户说的那句话
+#   route      **期望**被路由到哪里（不是现在会去哪里）
+#   kind       归类，只影响报表分组
+#   why        这题在测什么。别删
+#   history    可选。多轮追问题用，模拟前面几轮说过什么
+#
+# route 的取值：
+#   smalltalk   招呼 / 道谢 / 告别 —— 固定回复，不检索
+#   capability  问「你能干什么」 —— 固定回复，不检索
+#   kb          走知识库检索（越界提问也走这里，然后由防幻觉闸门说「暂无此内容」）
+#   agent       多轮收集需求 → 出方案 → 导出 xlsx
+#   time        问当前时间 —— 需要一个 current_time 工具
+#
+# ⭐ `time` 这一类**今天必然全错**（现在没有这个工具，会被当成知识库问题，
+# 答一句「知识库暂无此内容」）。那正是要量的东西：它是 M10 P4 的验收基线，
+# 不是评测写坏了。
+
+meta:
+  built_at: '2026-08-18'
+  built_for: M10 P0 —— 全 Agent 化之前的路由基线
+  note: |
+    期望路由写的是「应该去哪」，不是「现在会去哪」。两者的差距就是 M10 要补的账。
+    今天已知会错的：time 全部（没有工具）、以及少数被关键词误伤的 kb 题。
+
+cases:
+  # ======================= 闲聊：固定回复，绝不检索 =======================
+
+  - id: chat-hello
+    kind: 闲聊
+    route: smalltalk
+    q: 你好
+    why: 最基本的一句。线上真实反馈就是它回了「知识库暂无此内容」——
+      一个连招呼都不会回的助手，没人会信任它后面的回答。
+
+  - id: chat-hello-polite
+    kind: 闲聊
+    route: smalltalk
+    q: 您好！
+    why: 带敬语和感叹号。判定前要把句末标点剥掉，否则「你好！」不等于「你好」。
+
+  - id: chat-hi-en
+    kind: 闲聊
+    route: smalltalk
+    q: hi
+    why: 英文招呼。判定要不区分大小写。
+
+  - id: chat-hello-upper
+    kind: 闲聊
+    route: smalltalk
+    q: HELLO
+    why: 同上，全大写。
+
+  - id: chat-anyone
+    kind: 闲聊
+    route: smalltalk
+    q: 在吗？
+    why: 中文语境里最常见的开场，不是问题。
+
+  - id: chat-morning
+    kind: 闲聊
+    route: smalltalk
+    q: 早上好
+    why: 时段问候。注意它含「好」字但不该被当成别的意图。
+
+  - id: chat-thanks
+    kind: 闲聊
+    route: smalltalk
+    q: 谢谢
+    why: 收到答案后的回应。检索它只会得到一堆无关材料。
+
+  - id: chat-got-it
+    kind: 闲聊
+    route: smalltalk
+    q: 明白了
+    why: 多轮里非常高频的一句确认。走检索的话会答一段莫名其妙的东西。
+
+  - id: chat-bye
+    kind: 闲聊
+    route: smalltalk
+    q: 拜拜
+    why: 结束语。
+
+  - id: chat-ok
+    kind: 闲聊
+    route: smalltalk
+    q: 好的
+    why: 和「明白了」同类。⚠️ 这条也是**最容易误伤真问题**的一条，
+      所以判定必须是完全匹配——「好的，那退货怎么弄」不能被它接走。
+
+  # ======================= 能力自述 =======================
+
+  - id: cap-who
+    kind: 能力
+    route: capability
+    q: 你是谁
+    why: 新用户进来第一句常问这个。
+
+  - id: cap-what-can-you-do
+    kind: 能力
+    route: capability
+    q: 你能做什么
+    why: 要说清楚能力**边界**——包括「不知道的会直说不知道」。
+
+  - id: cap-what-can-you-do-2
+    kind: 能力
+    route: capability
+    q: 你能干嘛？
+    why: 口语说法。
+
+  - id: cap-functions
+    kind: 能力
+    route: capability
+    q: 有什么功能
+    why: 不带「你」的问法。
+
+  - id: cap-howto
+    kind: 能力
+    route: capability
+    q: 怎么用
+    why: ⚠️ 边界题。「怎么用」是问产品怎么用；
+      但「怎么用电子面单」是知识库问题（见 kb-howto-waybill）。
+
+  - id: cap-help
+    kind: 能力
+    route: capability
+    q: 帮助
+    why: 单个词的求助。
+
+  - id: cap-intro
+    kind: 能力
+    route: capability
+    q: 介绍一下你自己
+    why: 长一点的问法。
+
+  - id: cap-name
+    kind: 能力
+    route: capability
+    q: 你叫什么
+    why: 同类，测表里覆盖得够不够。
+
+  # ======================= 时间：今天没有这个工具，必然全错 =======================
+
+  - id: time-now
+    kind: 时间
+    route: time
+    q: 现在几点了
+    why: ⚠️ **今天会被当成知识库问题**，回「知识库暂无此内容」。
+      这条和下面几条一起，是 M10 P4 `current_time` 工具的验收基线。
+
+  - id: time-today
+    kind: 时间
+    route: time
+    q: 今天几号
+    why: 同上。ERP 场景里问日期很常见（对账、月结）。
+
+  - id: time-weekday
+    kind: 时间
+    route: time
+    q: 今天星期几
+    why: 同上。
+
+  - id: time-date-full
+    kind: 时间
+    route: time
+    q: 今天是几月几号
+    why: 同上，换个说法。
+
+  - id: time-now-2
+    kind: 时间
+    route: time
+    q: 当前时间是多少
+    why: 同上，书面语。
+
+  - id: time-year
+    kind: 时间
+    route: time
+    q: 现在是哪一年
+    why: 同上。模型自己答这题特别危险——它会答训练截止那一年。
+
+  - id: time-month-end
+    kind: 时间
+    route: time
+    q: 这个月还有几天
+    why: 需要真实日期才能算。模型硬答必错。
+
+  - id: time-tomorrow
+    kind: 时间
+    route: time
+    q: 明天是几号
+    why: 同上，带相对偏移。
+
+  # ======================= 知识库：正经问题，不能被别的路由抢走 =======================
+
+  - id: kb-waybill-jd
+    kind: 知识库
+    route: kb
+    q: 京东电子面单模板怎么设置？
+    why: 最典型的知识库问题。
+
+  - id: kb-return-inbound
+    kind: 知识库
+    route: kb
+    q: 退货入库的操作流程是什么
+    why: 同上，流程类。
+
+  - id: kb-greeting-prefix
+    kind: 知识库
+    route: kb
+    q: 你好，京东电子面单怎么设置
+    why: ⭐ **最重要的一条防误伤题**。带招呼前缀的真问题，
+      如果被寒暄表接走，用户得到的是一句「你好，我是……」，
+      而他问的是一个具体配置。所以寒暄判定必须是完全匹配。
+
+  - id: kb-thanks-prefix
+    kind: 知识库
+    route: kb
+    q: 谢谢你之前说的那个字段叫什么
+    why: 同上，以「谢谢」开头的真问题。
+
+  - id: kb-howto-waybill
+    kind: 知识库
+    route: kb
+    q: 怎么用电子面单
+    why: ⭐ 和 cap-howto 配对。「怎么用」是问产品，「怎么用电子面单」是问知识库。
+      差一个宾语，路由就该不一样。
+
+  - id: kb-help-center
+    kind: 知识库
+    route: kb
+    q: 帮助中心在哪里配置
+    why: 含「帮助」二字的真问题，不能被能力词接走。
+
+  - id: kb-sms-policy
+    kind: 知识库
+    route: kb
+    q: 短信策略在哪里配置
+    why: 常规配置类问题。
+
+  - id: kb-reconcile-error
+    kind: 知识库
+    route: kb
+    q: 对账单生成异常怎么排查
+    why: 排查类问题。
+
+  - id: kb-plan-template
+    kind: 知识库
+    route: kb
+    q: 实施方案模板在哪里下载
+    why: ⚠️ **已知今天会错**：含「实施方案」四个字，会被关键词路由当成
+      「要出一份方案」而进 Agent。但用户问的是知识库里有没有这个模板。
+      这条量的就是关键词路由的误报率。
+
+  - id: kb-config-checklist-doc
+    kind: 知识库
+    route: kb
+    q: 配置清单这个功能是干什么的
+    why: ⚠️ 同上，含「配置清单」。问的是这个功能是什么，不是要一份清单。
+
+  # ======================= 出方案：该进 Agent =======================
+
+  - id: agent-plan-1
+    kind: 方案
+    route: agent
+    q: 帮我出一份实施方案
+    why: Agent 独有的能力：多轮问清需求 → 出方案 → 导出 xlsx。
+
+  - id: agent-plan-2
+    kind: 方案
+    route: agent
+    q: 给我做个配置方案
+    why: 换个说法。
+
+  - id: agent-checklist-1
+    kind: 方案
+    route: agent
+    q: 我需要一份上线清单
+    why: 清单类说法。
+
+  - id: agent-checklist-2
+    kind: 方案
+    route: agent
+    q: 出个实施清单吧
+    why: 同上，口语。
+
+  - id: agent-plan-with-context
+    kind: 方案
+    route: agent
+    q: 客户是做美妆的，两个仓，帮我出个实施配置
+    why: 带上下文的方案请求。真实场景里用户会一次说一堆背景。
+
+  - id: agent-config-check
+    kind: 方案
+    route: agent
+    q: 帮我生成配置检查表
+    why: 检查表说法。
+
+  - id: agent-online-plan
+    kind: 方案
+    route: agent
+    q: 上线方案怎么给我一份
+    why: 语序不同。
+
+  - id: agent-plan-natural
+    kind: 方案
+    route: agent
+    q: 新客户要上线了，需要你给一份配置方案
+    why: 更自然的说法，关键词在句子中段。
+
+  # ======================= 越界：走知识库，然后诚实说没有 =======================
+
+  - id: off-weather
+    kind: 越界
+    route: kb
+    q: 明天上海天气怎么样
+    why: 和 ERP 无关。**应该走知识库然后说没有**，而不是被 Agent 或模型自己答掉。
+      这条测的是「不认识的问题会不会被乱路由」。
+
+  - id: off-stock
+    kind: 越界
+    route: kb
+    q: 旺店通的股票代码是多少
+    why: 听起来像公司信息，知识库里没有。
+
+  - id: off-salary
+    kind: 越界
+    route: kb
+    q: 你们公司薪资待遇怎么样
+    why: 完全不相干，但语气像在问知识库。
+
+  - id: off-competitor
+    kind: 越界
+    route: kb
+    q: 旺店通和聚水潭哪个好
+    why: 比较类问题，知识库里没有立场性内容。危险在于模型很想答。
+
+  - id: off-code
+    kind: 越界
+    route: kb
+    q: 帮我写一段 Python 排序代码
+    why: 通用编程请求。不能被当成「出方案」，也不该真去写。
+
+  - id: off-translate
+    kind: 越界
+    route: kb
+    q: 把这段话翻译成英文
+    why: 通用能力请求。
+
+  - id: off-medical
+    kind: 越界
+    route: kb
+    q: 感冒了吃什么药
+    why: 明显越界。这条也顺带测「越界不会被寒暄表误接」。
+
+  - id: off-math
+    kind: 越界
+    route: kb
+    q: 一百的二次方根是多少
+    why: 模型完全有能力答，但这不是它在这里的职责。
+      答了就等于告诉用户「我什么都能答」，下一次它编一段 ERP 配置时用户也会信。
+
+  # ======================= 多轮追问：路由不变，但要能带上上文 =======================
+
+  - id: follow-defective
+    kind: 追问
+    route: kb
+    history:
+      - [user, 退货入库的操作流程是什么]
+      - [assistant, 退货入库分为创建退货单、到货验收、良品/不良品入库三步。]
+    q: 那不良品呢？
+    why: ⭐ 线上真实反馈。单看这五个字检索必然打偏。
+      路由仍然是 kb，但检索词必须先被补全成独立问题。
+
+  - id: follow-step-two
+    kind: 追问
+    route: kb
+    history:
+      - [user, 京东电子面单模板怎么设置]
+      - [assistant, 第一步开通面单账号，第二步绑定模板，第三步安装打印控件。]
+    q: 第二步具体怎么做
+    why: 序数指代。没有上文的话「第二步」什么都不是。
+
+  - id: follow-it
+    kind: 追问
+    route: kb
+    history:
+      - [user, 短信策略在哪里配置]
+      - [assistant, 在【设置–策略设置–短信策略】里配置。]
+    q: 它支持哪些触发条件
+    why: 代词指代。
+
+  - id: follow-ok-then
+    kind: 追问
+    route: kb
+    history:
+      - [user, 对账单生成异常怎么排查]
+      - [assistant, 先核对结算费用差异。]
+    q: 好的，那核销异常呢
+    why: ⚠️ 以「好的」开头。**不能被寒暄表接走**——完全匹配的判定正是为了这个。
+
+  - id: follow-thanks-then
+    kind: 追问
+    route: kb
+    history:
+      - [user, 仓库绩效策略在哪]
+      - [assistant, 在【设置–仓储设置–绩效策略】。]
+    q: 谢谢，那考核周期怎么改
+    why: 同上，以「谢谢」开头的追问。
+
+  - id: follow-plan-in-context
+    kind: 追问
+    route: agent
+    history:
+      - [user, 帮我出一份实施方案]
+      - [assistant, 好的，请问客户主要在哪些平台经营？]
+    q: 淘宝和抖音两个平台
+    why: ⭐ **粘性路由**。这句话本身没有任何方案关键词，
+      但会话已经在 Agent 流程里，必须继续留在 Agent。
+      M7 线上实测踩过：掉回直路后回了一句「根据参考材料，无法回答」。

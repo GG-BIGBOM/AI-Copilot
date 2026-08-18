@@ -309,3 +309,29 @@ async def test_deep_falls_back_when_not_configured(
     r = await api_client.post("/api/chat", json=payload)
     assert r.status_code == 200
     assert fake_providers.calls, "应该退回简答档，而不是把异常抛给用户"
+
+
+# ---------- 路由分类（eval/routing.py 依赖它）----------
+
+
+def test_small_talk_kind_classifies():
+    """`small_talk_kind` 是路由评测的判定依据，分类不能串。"""
+    from copilot.qa import small_talk_kind
+
+    assert small_talk_kind("你好") == "greeting"
+    assert small_talk_kind("你能做什么") == "capability"
+    assert small_talk_kind("谢谢") == "thanks"
+    assert small_talk_kind("拜拜") == "bye"
+    assert small_talk_kind("京东电子面单怎么设置") is None
+
+
+def test_small_talk_kind_and_reply_agree():
+    """两个函数必须对同一句话给出一致的判断。
+
+    `small_talk_reply` 现在是走 `small_talk_kind` 拼出来的，这条测的是
+    以后有人把其中一个改成"优化版"时会当场红。
+    """
+    from copilot.qa import small_talk_kind, small_talk_reply
+
+    for text in ["你好", "你能做什么", "谢谢", "再见", "退货入库怎么操作", ""]:
+        assert (small_talk_kind(text) is None) == (small_talk_reply(text) is None)

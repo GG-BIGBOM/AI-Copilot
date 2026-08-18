@@ -86,23 +86,40 @@ _BYE_REPLY = "再见，需要的时候再来找我。"
 _TRAILING_PUNCT = "?？.。!！~～,，;；、 \t\n"
 
 
+# 顺序有意义：能力词排在道谢前面，「怎么用」这类先按问能力认
+_SMALL_TALK_TABLE: tuple[tuple[str, set[str], str], ...] = (
+    ("greeting", _GREETING, _GREETING_REPLY),
+    ("capability", _CAPABILITY, _CAPABILITY_REPLY),
+    ("thanks", _THANKS, _THANKS_REPLY),
+    ("bye", _BYE, _BYE_REPLY),
+)
+
+
+def small_talk_kind(question: str) -> str | None:
+    """这句话属于哪一类寒暄。不是寒暄就返回 None。
+
+    单独拆出来是给评测用的（`eval/routing.py` 要量路由准确率）——
+    让评测量**真代码**，而不是它自己抄一份判定逻辑。抄一份的话，
+    改了这边忘了改那边，评测会一直报告一个早就不存在的系统。
+    """
+    q = question.strip().strip(_TRAILING_PUNCT).lower()
+    if not q:
+        return None
+    for kind, table, _ in _SMALL_TALK_TABLE:
+        if q in table:
+            return kind
+    return None
+
+
 def small_talk_reply(question: str) -> str | None:
     """招呼 / 道谢 / 告别 / 问能力 —— 命中就直接给一句固定回复，不检索也不调模型。
 
     返回 None 表示这是一个正经问题，照常走检索。
     """
-    q = question.strip().strip(_TRAILING_PUNCT).lower()
-    if not q:
+    kind = small_talk_kind(question)
+    if kind is None:
         return None
-    if q in _GREETING:
-        return _GREETING_REPLY
-    if q in _CAPABILITY:
-        return _CAPABILITY_REPLY
-    if q in _THANKS:
-        return _THANKS_REPLY
-    if q in _BYE:
-        return _BYE_REPLY
-    return None
+    return next(reply for k, _, reply in _SMALL_TALK_TABLE if k == kind)
 
 
 _TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
