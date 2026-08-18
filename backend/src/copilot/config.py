@@ -69,6 +69,23 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model: str = "deepseek-chat"
 
+    # ===== 视觉：读图转文字（图片上传 + 扫描件 PDF）=====
+    # ⚠️ **不能复用 LLM_API_KEY**。答题走 DeepSeek，它没有视觉能力；
+    # 这里走 Kimi（服务器实测可直连，200 / 3.2s）。留空会退回 llm_api_key，
+    # 那时表现是一个 401——所以 .env 里请显式填。
+    vision_api_key: str = ""
+    vision_base_url: str = "https://api.moonshot.cn/v1"
+    # moonshot-v1-32k-vision-preview 是专做视觉的那个，32k 上下文够放一页密集表格。
+    # kimi-k2.6 也支持读图且更新，但贵一档；换模型只改这一行
+    vision_model: str = "moonshot-v1-32k-vision-preview"
+
+    # 扫描件 PDF 逐页读图的页数上限。**这是一道花钱的闸门**：
+    # 一页约 ¥0.01–0.03，没有上限的话一份 300 页的扫描手册能一次烧掉几十块，
+    # 而用户完全不知道自己触发了什么
+    vision_pdf_max_pages: int = 20
+    # 渲染扫描页的 DPI。150 够认清宋体小五号；再高只是把图变大、把钱烧多
+    vision_pdf_dpi: int = 150
+
     # ===== 认证 =====
     jwt_secret: str = "CHANGE-ME-IN-DOTENV"
     jwt_algorithm: str = "HS256"
@@ -150,7 +167,21 @@ class Settings(BaseSettings):
     # ===== 上传限制 =====
     upload_max_bytes: int = 20 * 1024 * 1024  # 20MB
     upload_max_docs_per_user: int = 200
-    upload_allowed_suffixes: tuple[str, ...] = (".md", ".txt", ".docx", ".pptx", ".pdf")
+    upload_allowed_suffixes: tuple[str, ...] = (
+        ".md",
+        ".txt",
+        ".docx",
+        ".pptx",
+        ".pdf",
+        # 图片走视觉模型转写。**能不能真的解析取决于 VISION_API_KEY 配没配**，
+        # 没配时上传会成功、解析会失败并给出一句人话——比在这里默默不列出来好：
+        # 后者用户看到的是「不支持的文件类型」，而它明明是支持的
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".bmp",
+    )
 
     # ===== 路径 =====
     @property
@@ -160,6 +191,15 @@ class Settings(BaseSettings):
     @property
     def upload_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def corrections_dir(self) -> Path:
+        """人工勘误层。**挂在仓库根、不在 `data/` 下**——它要进 Git。
+
+        `data/` 整个在 .gitignore 里，勘误放进去就等于「改动无记录、换机器就没」，
+        而勘误恰恰是最需要能 diff、能回滚、能看出是谁为什么改的那类东西。
+        """
+        return ROOT_DIR / "corrections"
 
     @property
     def image_dir(self) -> Path:

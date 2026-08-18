@@ -36,6 +36,10 @@ parse = [
     "python-pptx>=1.0",
     "pypdf>=5.1",
     "markdown-it-py>=3.0",
+    # 扫描件 PDF 要先把页面渲染成图才能读。pypdf 只能取文字，渲染不了。
+    # ⭐ 选它不选 PyMuPDF：后者是 AGPL（plan.md 七.3 的红线）。
+    # pypdfium2 是 BSD-3 + Apache-2.0、3.7MB、零依赖，不碰 torch
+    "pypdfium2>=4.30",
 ]
 # 完整解析：仅开发机装。Docling 会带进 torch，服务器上装不得
 parse-full = [

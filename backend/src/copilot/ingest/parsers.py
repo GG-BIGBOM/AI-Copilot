@@ -11,10 +11,19 @@
 （python-docx / python-pptx / pypdf，都在 `parse` 这个 extra 里）。
 PDF 只做纯文本提取，不上 Docling 那条会拖进 torch 的 ML 管线——
 见 plan.md「一、第 3 条硬约束」。
+
+**图片和扫描件走另一条路**：本地跑不了 OCR（同样是 1.6GB 的约束），
+所以送给视觉模型（Kimi）读成文字。这条路和上面几个解析器有一个本质区别——
+**它要联网、要花钱、还可能编造内容**。所以：
+
+- 视觉客户端是**注入**进来的（`parse_upload(..., vision=...)`），不在这里 import。
+  parsers 保持可离线单测，也不会让「解析一个 txt」意外拖起一个 HTTP 客户端。
+- 扫描件 PDF 有页数上限（`vision_pdf_max_pages`），它是一道**花钱的闸门**。
 """
 
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,10 +189,74 @@ def parse_pptx(path: Path) -> ParsedUpload:
     return ParsedUpload(markdown=markdown, note=f"共 {len(prs.slides)} 页")
 
 
+# ---------- 图片（视觉模型）----------
+
+
+def parse_image(path: Path, vision=None) -> ParsedUpload:
+    """.png/.jpg/... → Markdown，靠视觉模型读。
+
+    没配 `VISION_API_KEY` 时报一句人话就停下。**不能默默入库一篇空文档**：
+    那样用户看到的是「已完成」但永远搜不到，和上传坏了完全无法区分。
+    """
+    if vision is None:
+        raise ParseError("服务端没有配置图片解析（VISION_API_KEY），暂时无法处理图片")
+
+    from copilot.providers.vision import VisionError, mime_for
+
+    try:
+        text = vision.transcribe(path.read_bytes(), mime_for(path), hint=path.stem)
+    except VisionError as e:
+        raise ParseError(str(e)) from e
+
+    if not text.strip():
+        # 模型明确说了「这张图没有文字」。这不是失败，但也没有入库的价值——
+        # 一篇没有内容的文档只会占着列表、混进检索
+        raise ParseError("这张图片里没有可识别的文字内容")
+
+    # 图片本身没有标题层级，补一个 `#`：切分器靠它给出「第 N 节」，
+    # 引用里才不会是一句光秃秃的文件名
+    title = path.stem
+    if not text.lstrip().startswith("#"):
+        text = f"# {title}\n\n{text}"
+    return ParsedUpload(markdown=text, note="图片转写")
+
+
+def _pdf_page_images(path: Path, pages: list[int], dpi: int) -> list[bytes]:
+    """把指定页渲染成 PNG 字节。扫描件 PDF 专用。
+
+    ⭐ 用 pypdfium2 不用 PyMuPDF：后者是 AGPL（plan.md 七.3 的许可红线）。
+
+    **一页一渲染、渲完立刻关掉。** 一次性渲 20 页 A4@150dpi 是 130MB 的
+    位图常驻，而 worker 的 `MemoryMax=400M`——那会让解析在中途被 systemd
+    杀掉，用户看到的是「解析失败」而没有任何原因。
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as e:  # pragma: no cover
+        raise ParseError("服务端缺少 PDF 渲染组件（pip install '.[parse]'）") from e
+
+    out: list[bytes] = []
+    doc = pdfium.PdfDocument(str(path))
+    try:
+        for i in pages:
+            page = doc[i]
+            bitmap = page.render(scale=dpi / 72)
+            img = bitmap.to_pil()
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            out.append(buf.getvalue())
+            img.close()
+            bitmap.close()
+            page.close()
+    finally:
+        doc.close()
+    return out
+
+
 # ---------- pdf ----------
 
 
-def parse_pdf(path: Path) -> ParsedUpload:
+def parse_pdf(path: Path, vision=None) -> ParsedUpload:
     """.pdf → 纯文本，一页一节。
 
     **只做纯文本提取**，不做版面还原：PDF 里没有「标题样式」这种结构信息，
@@ -223,9 +296,51 @@ def parse_pdf(path: Path) -> ParsedUpload:
             parts.append(f"## 第 {i} 页\n\n{text}")
 
     markdown = "\n\n".join(parts).strip()
-    if not markdown:
+    if markdown:
+        return ParsedUpload(markdown=markdown, note=f"共 {len(pages)} 页")
+
+    # 一个字都提不出 = 扫描件（整页都是图）。交给视觉模型逐页读。
+    #
+    # ⚠️ **判据是「整篇都空」，不是「某几页空」。** 按页回退看着更聪明，
+    # 实际上一份 200 页的正常 PDF 里夹几页插图是常态，那样会在用户毫不知情的
+    # 情况下反复触发付费调用。宁可漏掉那几页插图。
+    if vision is None:
         raise ParseError("这个 PDF 提取不出文字，可能是扫描件（图片型 PDF），暂不支持")
-    return ParsedUpload(markdown=markdown, note=f"共 {len(pages)} 页")
+    return _parse_scanned_pdf(path, len(pages), vision)
+
+
+def _parse_scanned_pdf(path: Path, total: int, vision) -> ParsedUpload:
+    """扫描件 PDF：逐页渲染成图，再交给视觉模型。"""
+    from copilot.config import get_settings
+    from copilot.providers.vision import VisionError
+
+    s = get_settings()
+    limit = s.vision_pdf_max_pages
+    todo = list(range(min(total, limit)))
+    images = _pdf_page_images(path, todo, s.vision_pdf_dpi)
+
+    parts: list[str] = []
+    for i, raw in enumerate(images, 1):
+        try:
+            text = vision.transcribe(raw, "image/png", hint=f"{path.stem} 第 {i} 页")
+        except VisionError as e:
+            # 单页失败不该毁掉整篇——但**要留痕**。静默跳过的话，
+            # 用户拿到的是一份缺了几页却看起来完整的文档
+            parts.append(f"## 第 {i} 页\n\n[这一页没能识别：{e}]")
+            continue
+        if text.strip():
+            parts.append(f"## 第 {i} 页\n\n{text}")
+
+    markdown = "\n\n".join(parts).strip()
+    if not markdown:
+        raise ParseError("这份扫描件每一页都读不出文字，请确认图像是否清晰")
+
+    note = f"扫描件，视觉识别 {len(todo)} 页"
+    if total > limit:
+        # 截断必须说出来。不说的话，用户搜不到第 21 页的内容时
+        # 只会以为知识库不好用
+        note += f"（共 {total} 页，超出上限 {limit} 页的部分未处理）"
+    return ParsedUpload(markdown=markdown, note=note)
 
 
 # ---------- 分派 ----------
@@ -238,11 +353,30 @@ PARSERS = {
     ".pdf": parse_pdf,
 }
 
+# 这几个必须有视觉模型才解析得了。单列一份是为了让 `parse_upload` 能在
+# 真正读文件之前就判断「这台机器行不行」
+VISION_PARSERS = {
+    ".png": parse_image,
+    ".jpg": parse_image,
+    ".jpeg": parse_image,
+    ".webp": parse_image,
+    ".bmp": parse_image,
+}
 
-def parse_upload(path: Path, suffix: str | None = None) -> ParsedUpload:
-    """按扩展名解析。`suffix` 可显式指定——落盘名是 uuid，但后缀保留，一般不用传。"""
+
+def parse_upload(path: Path, suffix: str | None = None, vision=None) -> ParsedUpload:
+    """按扩展名解析。
+
+    `suffix` 可显式指定——落盘名是 uuid，但后缀保留，一般不用传。
+    `vision` 是读图客户端，只有图片和扫描件 PDF 用得上；传 None 时
+    图片会得到一句「服务端没有配置图片解析」，而不是一个 AttributeError。
+    """
     ext = (suffix or path.suffix).lower()
+    if ext in VISION_PARSERS:
+        return VISION_PARSERS[ext](path, vision=vision)
     parser = PARSERS.get(ext)
     if parser is None:
         raise ParseError(f"不支持的文件类型：{ext or '（无扩展名）'}")
+    if parser is parse_pdf:
+        return parse_pdf(path, vision=vision)
     return parser(path)

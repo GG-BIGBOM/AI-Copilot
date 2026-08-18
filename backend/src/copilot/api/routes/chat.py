@@ -429,3 +429,35 @@ async def list_messages(
         .order_by(Message.created_at, Message.id)
     )
     return list((await session.execute(stmt)).scalars())
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> None:
+    """删除一整段会话，连消息和 Agent 导出的 xlsx 一起。
+
+    别人的会话仍然一律当**不存在**（404 而非 403），和上面两个读接口同一个理由。
+    这条尤其重要：删除接口如果用 403 区分「存在但不是你的」，就等于给了一个
+    「拿 uuid 探别人有没有这段会话」的探针。
+
+    消息不用手动删——`Message.conversation_id` 是 `ondelete="CASCADE"`。
+    但**导出的文件必须自己删**：它在 `data/exports/<user_id>/` 下，
+    数据库里没有任何东西再指向它，留着就是永远不会被回收的孤儿文件。
+    """
+    conv = await session.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
+
+    export_path = conv.export_path
+    await session.delete(conv)
+    await session.commit()
+
+    # 文件在**提交之后**才删，和 docs.py 删文档同一个顺序：
+    # 反过来的话一旦提交失败，库里的会话还在、xlsx 已经没了，
+    # 用户点下载会得到一个「文件已不存在」而不知道为什么
+    if export_path:
+        try:
+            get_settings().export_path(export_path).unlink(missing_ok=True)
+        except (OSError, ValueError) as e:
+            logger.warning("删除导出文件失败 conv=%s %s：%s", conversation_id, export_path, e)

@@ -506,3 +506,103 @@ def test_plain_answer_is_not_no_answer():
     from copilot.qa import is_no_answer
 
     assert not is_no_answer("批量换货一次最多 500 单 [1]。")
+
+
+# ---------- 删除会话 ----------
+
+
+async def test_delete_conversation_removes_messages(
+    api_client, logged_in, public_chunk, fake_providers, maker
+):
+    """删会话要把消息一起带走（靠 messages.conversation_id 的 ON DELETE CASCADE）。"""
+    _, body = public_chunk
+    r = await ask(api_client, body)
+    conv_id = next(p for p in parts(r.text) if p["type"] == "data-conversation")["data"]["id"]
+
+    assert (await api_client.delete(f"/api/conversations/{conv_id}")).status_code == 204
+
+    assert (await api_client.get(f"/api/conversations/{conv_id}/messages")).status_code == 404
+    assert (await api_client.get("/api/conversations")).json() == []
+    async with maker() as s:
+        left = (
+            await s.execute(
+                select(Message).where(Message.conversation_id == uuid.UUID(conv_id))
+            )
+        ).scalars().all()
+    assert left == []
+
+
+async def test_delete_conversation_is_404_the_second_time(
+    api_client, logged_in, public_chunk, fake_providers
+):
+    _, body = public_chunk
+    r = await ask(api_client, body)
+    conv_id = next(p for p in parts(r.text) if p["type"] == "data-conversation")["data"]["id"]
+
+    assert (await api_client.delete(f"/api/conversations/{conv_id}")).status_code == 204
+    assert (await api_client.delete(f"/api/conversations/{conv_id}")).status_code == 404
+
+
+async def test_cannot_delete_another_users_conversation(
+    api_client, logged_in, public_chunk, fake_providers, maker
+):
+    """⭐ 最要紧的一条：别人的会话删不掉，而且回 404 不回 403。
+
+    删除接口如果用 403 区分「存在但不是你的」，就等于给了一个拿 uuid
+    探别人有没有这段会话的探针——比读接口那条更值钱，因为它顺带确认了
+    这个 id 当前是活的。
+    """
+    _, body = public_chunk
+    r = await ask(api_client, body)
+    conv_id = next(p for p in parts(r.text) if p["type"] == "data-conversation")["data"]["id"]
+
+    async with maker() as s:
+        (code,) = await create_invite_codes(s, 1)
+    await api_client.post("/api/auth/logout")
+    reg = await api_client.post(
+        "/api/auth/register",
+        json={
+            "email": f"del-{uuid.uuid4().hex[:8]}@test.local",
+            "password": PASSWORD,
+            "inviteCode": code,
+        },
+    )
+    other_id = uuid.UUID(reg.json()["id"])
+    try:
+        assert (await api_client.delete(f"/api/conversations/{conv_id}")).status_code == 404
+        # 原主人的会话还在
+        async with maker() as s:
+            assert await s.get(Conversation, uuid.UUID(conv_id)) is not None
+    finally:
+        async with maker() as s:
+            await s.execute(delete(InviteCode).where(InviteCode.code == code))
+            await s.execute(delete(User).where(User.id == other_id))
+            await s.commit()
+
+
+async def test_delete_conversation_removes_the_export_file(
+    api_client, logged_in, public_chunk, fake_providers, maker, tmp_path, monkeypatch
+):
+    """导出的 xlsx 必须跟着删。
+
+    库里删掉会话之后，没有任何一行再指向那个文件——留着它就是一个
+    谁都不会去回收的孤儿，而它落在用户目录下、体积不小。
+    """
+    from copilot.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(type(settings), "export_dir", property(lambda self: tmp_path))
+
+    _, body = public_chunk
+    r = await ask(api_client, body)
+    conv_id = next(p for p in parts(r.text) if p["type"] == "data-conversation")["data"]["id"]
+
+    rel = f"{uuid.uuid4().hex}.xlsx"
+    (tmp_path / rel).write_bytes(b"fake xlsx")
+    async with maker() as s:
+        conv = await s.get(Conversation, uuid.UUID(conv_id))
+        conv.export_path = rel
+        await s.commit()
+
+    assert (await api_client.delete(f"/api/conversations/{conv_id}")).status_code == 204
+    assert not (tmp_path / rel).exists()

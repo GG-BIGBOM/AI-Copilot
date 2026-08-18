@@ -98,8 +98,16 @@ async def handle_parse_upload(session: AsyncSession, job: Job, embedder: Embedde
     # worker 进程除了这条任务没有别的事要做，阻塞事件循环没有代价，
     # 而多一层线程池只会多一份内存和一份排查难度。（API 进程里是另一回事，
     # 见 retrieve.py。）
+    # 视觉客户端在这里才取：只有图片和扫描件 PDF 用得上，
+    # 而 `get_vision()` 没配 key 时返回 None，parsers 会给出一句人话
+    from copilot.api.providers import get_vision
+
     try:
-        parsed = parse_upload(path, suffix=Path(doc.original_filename or path.name).suffix)
+        parsed = parse_upload(
+            path,
+            suffix=Path(doc.original_filename or path.name).suffix,
+            vision=get_vision(),
+        )
     except ParseError as e:
         raise PermanentError(str(e)) from e
 

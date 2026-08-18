@@ -10,9 +10,9 @@ import {
   MessageSquarePlus,
   Moon,
   PanelLeftClose,
-  PanelLeftOpen,
   Search,
   Sun,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -88,6 +88,7 @@ export function Sidebar({
   onToggleCollapse,
   onNew,
   onPick,
+  onDelete,
   onLogout,
 }: {
   conversations: ConversationSummary[];
@@ -99,6 +100,7 @@ export function Sidebar({
   onToggleCollapse?: () => void;
   onNew: () => void;
   onPick: (id: string) => void;
+  onDelete: (c: ConversationSummary) => void;
   onLogout: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -310,12 +312,12 @@ export function Sidebar({
                         {list.map((c) => {
                           const isActive = c.id === activeId;
                           return (
-                            <li key={c.id}>
+                            <li key={c.id} className="group relative">
                               <button
                                 type="button"
                                 onClick={() => onPick(c.id)}
                                 className={cn(
-                                  "group relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors",
+                                  "flex w-full items-center gap-2 rounded-lg py-1.5 pl-2 pr-8 text-left text-[13px] transition-colors",
                                   isActive
                                     ? "bg-sidebar-accent text-foreground font-medium"
                                     : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
@@ -329,6 +331,23 @@ export function Sidebar({
                                   )}
                                 />
                                 <span className="truncate flex-1">{c.title || "未命名对话"}</span>
+                              </button>
+                              {/* 删除。平时透明，hover/聚焦才现身——常驻一排垃圾桶会把列表
+                                  变成一片图标。但 `focus-visible:opacity-100` 不能省：
+                                  只靠 hover 的话键盘用户永远够不着它 */}
+                              <button
+                                type="button"
+                                onClick={() => onDelete(c)}
+                                className={cn(
+                                  "absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center",
+                                  "rounded-md text-muted-foreground opacity-0 transition-opacity",
+                                  "hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100",
+                                  "group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                                )}
+                                title="删除对话"
+                                aria-label={`删除对话 ${c.title || "未命名对话"}`}
+                              >
+                                <Trash2 className="size-3.5" />
                               </button>
                             </li>
                           );

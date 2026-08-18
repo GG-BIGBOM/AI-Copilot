@@ -20,11 +20,20 @@
 #   must_include  答案里必须出现的关键事实（判定不区分大小写；数字/编码类要原样）
 #   must_not_include  出现即算错（一般用于挡「换个说法把不知道说成知道」）
 #   why           这题在测什么。**别删**——半年后回来看，没有这行就不知道当初为什么出这道题
+#   hard          难题标记。M8 那 41 题在 v3 上饱和到 100%，饱和的题集**只能发现退化、
+#                 不能证明改进**——任何改动都显示「没变化」。2026-08-18 补了这批
+#                 需要跨块/跨文档/否定推理的题，专门用来把天花板顶开
+#   scope         public（默认，打公共库）/ private（打某个用户的私有库，
+#                 要配合 `--as-user <邮箱>` 跑，见 eval/private/README.md）
 
 meta:
-  corpus: 语雀 wdterpqjb 14 个库 / 746 篇 / 5268 块
+  corpus: 语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）
   built_at: '2026-08-17'
   built_from: 人工阅读 1178 个「含界面路径且长于 220 字」的块后出题
+  # 2026-08-18 第二批：14 道难题。出题方式和第一批一样是**先读语料再出题**——
+  # 每条事实都用 SQL 在 chunks 里核实过原文，包括 no_answer 那几道的「确实没有」。
+  # 判分器同时从 deepseek-reasoner 换成 gemini-2.5-pro（换厂，解决同源偏心）
+  revised_at: '2026-08-18'
 
 cases:
   # ======================= fact：有明确答案 =======================
@@ -341,3 +350,202 @@ cases:
     source: 组合装
     why: 材料写了触发条件和「匹配失败则递交失败」，但没写失败后如何补救。
       测「答已有的、点明缺的」这条铁律。
+
+  # ======================= 第二批：难题（2026-08-18）=======================
+  #
+  # 为什么要有这一批：v3 在原来 41 题上是 100%，**天花板到了**。
+  # 一个饱和的题集只能证明「没退化」，任何改进都显示为 0。
+  # 这 14 道专攻四种原来没覆盖的能力：
+  #   多跳    答案要拼两处材料，缺一处就答不全
+  #   跨文档  两篇文档各有一半
+  #   否定    材料里写的是「不支持/不能」，要照实说不能，而不是找个近似的说能
+  #   条件    材料里是「一般不行，但满足某条件可以」，只答一半就是错
+  #
+  # 前三种最容易出的错是**含混地答对一半**——判分器看得出来，人扫一眼看不出来。
+
+  - id: hard-multi-gift-window-and-cap
+    kind: fact
+    hard: true
+    q: 赠品策略按历史订单计算时，可以往前查多少天？符合条件的订单又最多取几笔参与计算？
+    source: 赠品流程解析
+    must_include: ['64', '50']
+    why: 多跳。两个数字都在 1.4.8.6 版本更新那一段里，但分属两条并列说明。
+      只答 64 天不答 50 笔，读起来完全通顺——这正是「含混答对一半」的典型。
+
+  - id: hard-multi-logistics-quota-version-and-path
+    kind: fact
+    hard: true
+    q: 物流类型单量限制这个功能要升级到哪个版本才有？在哪个菜单路径下配置？
+    source: 物流单量限制
+    must_include: ['1.5.8.6', '物流策略']
+    why: 多跳。版本号在文档开头的加粗提示里，路径在功能说明的第 1 条。
+      版本号这类信息模型很容易略过不说，因为不说也像个完整答案。
+
+  - id: hard-negation-feishu-at-member
+    kind: fact
+    hard: true
+    q: 飞书群的消息通知能 @ 到指定的某个员工吗？
+    source: 消息通知
+    must_include: ['不支持']
+    must_not_include: ['可以@指定', '支持指定员工']
+    why: 否定推理。同一篇文档花了大篇幅讲钉钉/企业微信怎么 @ 到具体人，
+      只有最后一句说飞书不支持。模型极容易把前面的通用步骤套到飞书上答「可以」。
+
+  - id: hard-negation-manual-order-tiered-gift
+    kind: fact
+    hard: true
+    q: 手工建单的订单能参与阶梯满赠的策略试算吗？
+    source: 阶梯满赠
+    must_include: ['不支持']
+    why: 否定推理。这条藏在「排查步骤」列表的第 2 条里，
+      而整篇文档都在讲怎么配置阶梯满赠——上下文全是「能」，只有这一句是「不能」。
+
+  - id: hard-negation-anchor-role-auto-create
+    kind: fact
+    hard: true
+    q: 主播绩效里的助播、场控、运营这几个角色，系统会自动创建吗？
+    source: 主播绩效
+    must_include: ['手动']
+    why: 否定推理 + 实体区分。同一篇里「主播」是可以自动创建的，
+      只有助播/场控/运营不行。答错的典型方式是把主播那条规则套到全部角色上。
+
+  - id: hard-conditional-purchase-audit-override
+    kind: fact
+    hard: true
+    q: 勾选了「阻止采购价大于上次采购价通过审核」之后，采购价超了就一定审核不过吗？
+    source: 采购单审核
+    must_include: ['强制审核']
+    why: 条件推理。材料原文是「无法通过审核，强制审核可通过」——
+      只读前半句会答「过不了」，那是错的；而这个错误读起来非常合理。
+
+  - id: hard-crossdoc-limit-100-both
+    kind: fact
+    hard: true
+    q: 自定义属性和计量单位的辅助单位，各自最多能添加多少个？
+    source: 计量单位
+    must_include: ['100']
+    why: 跨文档。两个上限分别写在《自定义属性》和《计量单位》两篇里，
+      数值恰好都是 100——所以这题真正考的是**有没有同时找到两篇**，
+      而不是记住一个数。只召回一篇也能答出 100，判分器要看它有没有覆盖两者。
+
+  - id: hard-numeric-combo-refresh-cap
+    kind: fact
+    hard: true
+    q: 组合装右键刷新固定售价和金额占比，一次最多能操作多少条？
+    source: 货品设置
+    must_include: ['3000']
+    why: 单点数字，但埋在一个很长的括号注释里（「（单次最多操作3000条）」）。
+      M8 查出的召回失败就是这种形态：事实在块的中段，重排容易把它排下去。
+
+  - id: hard-numeric-guobu-cap
+    kind: fact
+    hard: true
+    q: 国补政策里，每位消费者每类产品能补贴几件？每件的补贴上限是多少钱？
+    source: 国补
+    must_include: ['1', '2000']
+    why: 多跳 + 两个量纲不同的数字（件数、金额）。
+      只答金额不答件数是最常见的半对。
+
+  - id: hard-version-douyin-shared-waybill
+    kind: fact
+    hard: true
+    q: 1.3.1.4 版本能用抖音电子面单的多店铺共享面单功能吗？如果不能有什么替代办法？
+    source: 获取单号常见报错
+    must_include: ['不支持']
+    why: 否定 + 追加要求（替代方案）。材料里两句话紧挨着：不支持，
+      建议先用线下热敏物流或给每个店铺新建物流。
+      只答「不支持」就丢了用户真正要的那一半。
+
+  - id: hard-probe-quota-refresh
+    kind: probe
+    hard: true
+    q: 给顺丰配的每日单量用完了，第二天还要手动去调一次吗？
+    source: 物流单量限制
+    must_include: ['刷新']
+    why: 问法完全是用户口吻，材料里的说法是「每日0点刷新成每日最多消耗单量」，
+      字面没有「手动」「第二天」。考的是能不能把场景翻译成材料里的术语。
+
+  - id: hard-probe-one-strategy-per-logistics
+    kind: probe
+    hard: true
+    q: 同一个快递公司想配两条不同的单量限制策略，能配吗？
+    source: 物流单量限制
+    must_include: ['一条']
+    why: 否定 + 转述。材料写的是「每个物流类型只能有一条策略」，
+      而问题用的是「快递公司」「两条」。同义转换 + 否定，双重难度。
+
+  - id: hard-noanswer-tiktok
+    kind: no_answer
+    hard: true
+    q: TikTok 小店的电子面单模板要怎么在旗舰版 ERP 里配置？
+    why: 语料里有抖音、京东、快手、美团、拼多多、唯品会 MP 六个平台的面单模板文档，
+      **唯独没有 TikTok**（SQL 核实：0 块）。这题专门测「邻近主题拉不拉得住」——
+      六篇高度相似的文档就在旁边，模型很容易照着抖音那篇编一份 TikTok 的步骤出来。
+
+  - id: hard-noanswer-lazada
+    kind: no_answer
+    hard: true
+    q: Lazada 店铺的订单怎么同步到 ERP？
+    why: 同上，Lazada 在语料里是 0 块。但「速卖通」有 14 块——
+      跨境平台这个语义邻域是**存在**的，所以这题比问一个完全无关的词更难。
+
+  # ======================= 私有库（scope: private）=======================
+  #
+  # 这组题**不和上面 55 题一起跑**，要 `--as-user <邮箱>`，见 eval/private/README.md。
+  # 度量的是 M8 明确列为缺口的那件事：私有库的检索质量从来没被量过。
+  #
+  # 夹具里每个数字都刻意和语雀语料不重合（语料里没有"星辰电商"）。
+  # 所以答对 = 私有文档真的在混合检索池里冒了头；答成公共库里某个相近的数字
+  # = 私有文档被挤掉了。这是这组题唯一的判据。
+
+  - id: priv-fact-zhongtong-cap
+    kind: fact
+    scope: private
+    q: 星辰电商给中通配的日单量上限是多少？
+    source: 客户A-实施配置约定
+    must_include: ['800']
+    why: 最基本的一条：私有文档能不能被检索到。
+      注意语料里另有一篇《物流单量限制》讲顺丰 1000 单——
+      答成 1000 就是私有文档被公共库挤掉了，这个错误极具迷惑性。
+
+  - id: priv-fact-warehouse-scope
+    kind: fact
+    scope: private
+    q: 星辰电商的华南备货仓负责发哪些省份？
+    source: 客户A-实施配置约定
+    must_include: ['广东', '广西', '海南']
+    why: 三项并列，考的是块没被从中间切断。
+
+  - id: priv-negation-combo-split
+    kind: fact
+    scope: private
+    q: 星辰电商的组合装订单需要拆分吗？
+    source: 客户A-实施配置约定
+    must_include: ['不']
+    why: 否定 + 强干扰。公共库里《流程中拆分条件说明》整篇都在讲怎么拆组合装，
+      语义上和这个问题贴得极近。模型很容易拿公共库那篇来回答一个私有约定。
+
+  - id: priv-multi-reconciliation
+    kind: fact
+    scope: private
+    q: 星辰电商的对账以什么为准？多大的差异需要人工复核？
+    source: 客户A-实施配置约定
+    must_include: ['平台结算单', '500']
+    why: 多跳，两个事实在同一节的两句话里。
+
+  - id: priv-noanswer-not-in-fixture
+    kind: no_answer
+    scope: private
+    q: 星辰电商的退货入库要走哪几个审核节点？
+    why: ⭐ 夹具里**没有**退货流程。但公共库里退货入库的文档一大把——
+      所以这题在测「会不会拿公共库的通用流程冒充这家客户的专属约定」。
+      这是私有库场景下最危险的一种幻觉：答案看着专业、其实和这家客户无关。
+
+  - id: priv-probe-inventory-line
+    kind: probe
+    scope: private
+    q: 星辰的 SKU 库存低到多少会在采购建议里飘红？
+    source: 客户A-实施配置约定
+    must_include: ['20']
+    why: 口语化问法（"飘红"是原文用词，但"低到多少"不是），
+      且答案是个很小的数字，容易和文档里其他数字（8 号、3 号）混淆。

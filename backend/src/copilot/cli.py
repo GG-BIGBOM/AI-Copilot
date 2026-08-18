@@ -31,14 +31,17 @@ def ingest(
     path: str = typer.Argument("", help="要入库的目录，默认 data/raw/yuque"),
     force: bool = typer.Option(False, "--force", help="忽略 content_hash，全部重新向量化"),
     limit: int = typer.Option(0, "--limit", help="只处理前 N 篇，用于小批量试跑"),
+    owner: str = typer.Option(
+        "", "--owner", help="写进这个用户的私有库（邮箱）。不给则写公共库"
+    ),
 ) -> None:
-    """把本地 Markdown 切分、向量化、写入公共库。"""
+    """把本地 Markdown 切分、向量化、写入公共库（或某个用户的私有库）。"""
     import asyncio
 
-    asyncio.run(_ingest(path, force, limit))
+    asyncio.run(_ingest(path, force, limit, owner))
 
 
-async def _ingest(path: str, force: bool, limit: int) -> None:
+async def _ingest(path: str, force: bool, limit: int, owner: str = "") -> None:
     from pathlib import Path
 
     from copilot.config import get_settings
@@ -52,14 +55,73 @@ async def _ingest(path: str, force: bool, limit: int) -> None:
         raise typer.Exit(1)
 
     docs = list(load_yuque_dir(root))
+
+    # ⭐ 勘误层盖在语雀原文之上。放在 limit 之前：限量试跑也要走同一条路径，
+    # 否则「试跑通过、全量才炸」那类问题就要等到全量才发现
+    from copilot.ingest.corrections import apply_corrections, load_corrections
+
+    try:
+        corrections = load_corrections(get_settings().corrections_dir)
+    except Exception as e:  # noqa: BLE001 - 勘误文件写坏了要说清楚，不能带着错继续入库
+        typer.secho(f"勘误文件有问题：{e}", fg=typer.colors.RED)
+        raise typer.Exit(1) from e
+
+    # 勘误层只覆盖语雀公共库。灌私有库时跳过——那是别人自己的文档，
+    # 拿一条针对语雀文档的勘误去盖它毫无道理（`target_url` 也对不上）
+    if owner:
+        corrections = {}
+    docs, applied, missed = apply_corrections(docs, corrections)
+    retired = [c for c in applied if c.retired]
+    if applied:
+        typer.secho(
+            f"勘误生效 {len(applied)} 条（其中作废 {len(retired)} 篇）", fg=typer.colors.CYAN
+        )
+    if missed:
+        # 对不上号 = 一个字都没生效，而输出里完全看不出来。必须吵。
+        typer.secho(
+            f"⚠️ {len(missed)} 条勘误没有对上任何一篇语雀文档，它们不会生效：",
+            fg=typer.colors.YELLOW,
+        )
+        for c in missed:
+            typer.secho(f"    {c.path.name} → {c.target_url}", fg=typer.colors.YELLOW)
+        typer.secho(
+            "    多半是 target_url 抄错，或那篇语雀文档换了地址。", fg=typer.colors.YELLOW
+        )
+
     if limit:
         docs = docs[:limit]
     typer.echo(f"待处理 {len(docs)} 篇，来自 {root}\n")
 
+    # ⭐ owner_id 决定这批文档进公共库还是某人的私有库。**这是隔离的入口**，
+    # 传错了就是把一个人的资料塞进所有人都能搜到的地方——而且不会报错
+    owner_id = None
+    if owner:
+        from sqlalchemy import select
+
+        from copilot.db.models import User
+
+        async with SessionLocal() as s0:
+            user = (
+                await s0.execute(select(User).where(User.email == owner))
+            ).scalar_one_or_none()
+        if user is None:
+            typer.secho(f"库里没有这个用户：{owner}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        owner_id = user.id
+        typer.secho(f"写入 {owner} 的私有库（只有他自己搜得到）", fg=typer.colors.CYAN)
+
     embedder = SiliconFlowEmbedder()
     async with SessionLocal() as session:
+        if retired:
+            n = await _retire(session, [c.target_url for c in retired])
+            typer.secho(f"已从索引移除作废文档 {n} 篇", fg=typer.colors.CYAN)
         stats = await ingest_documents(
-            session, docs, embedder, force=force, report=lambda m: typer.echo(m)
+            session,
+            docs,
+            embedder,
+            owner_id=owner_id,
+            force=force,
+            report=lambda m: typer.echo(m),
         )
 
     typer.echo("")
@@ -173,6 +235,191 @@ def sync_yuque_cmd(
         typer.echo("\n真正的失败（需要排查）：")
         for err in stats.errors[:10]:
             typer.secho(f"  {err}", fg=typer.colors.RED)
+
+
+async def _retire(session, urls: list[str]) -> int:
+    """把标了 `retired` 的语雀文档从索引里彻底删掉（含块）。
+
+    只删公共库那一行（`owner_id IS NULL`）。用户上传的私有文档和语雀无关，
+    就算 source_url 撞上了也不能碰——那是别人的东西。
+    """
+    from sqlalchemy import delete, select
+
+    from copilot.db.models import Chunk, Document
+
+    stmt = select(Document).where(
+        Document.source_url.in_(urls), Document.owner_id.is_(None)
+    )
+    docs = list((await session.execute(stmt)).scalars())
+    for doc in docs:
+        await session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+        await session.delete(doc)
+    await session.commit()
+    return len(docs)
+
+
+def _load_manifest() -> dict:
+    """读 sync 落下的增量台账。没有就返回空——勘误本身不依赖它，
+    只有「判断有没有过期」这一件事需要。"""
+    import json
+
+    from copilot.config import get_settings
+
+    path = get_settings().data_dir / "raw" / "yuque" / "_manifest.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.command()
+def correct(
+    keyword: str = typer.Argument(..., help="按标题搜要勘误的文档，如「京东面单」"),
+    retire: bool = typer.Option(False, "--retire", help="整篇作废（语雀删了或彻底过时）"),
+) -> None:
+    """修正语雀文档里写错的内容。
+
+    改动落在 `corrections/<slug>.md`，进 Git、可 diff、可回滚，
+    下次 `copilot ingest` 时覆盖语雀原文，`deploy.sh` 会一起推到服务器。
+
+    **不会碰 `data/raw/yuque/`**——那是 sync 的产物，永远保持和语雀一致。
+    """
+    from copilot.config import get_settings
+    from copilot.ingest.chunker import parse_frontmatter
+    from copilot.ingest.corrections import (
+        load_corrections,
+        render_correction,
+        slugify,
+    )
+
+    settings = get_settings()
+    manifest = _load_manifest()
+    if not manifest:
+        typer.secho(
+            "找不到 data/raw/yuque/_manifest.json，先跑一次 `copilot sync-yuque`。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    kw = keyword.strip().lower()
+    hits = [
+        e
+        for e in manifest.values()
+        if kw in (e.get("title") or "").lower() or kw in (e.get("book_name") or "").lower()
+    ]
+    if not hits:
+        typer.secho(f"没有标题或知识库名含「{keyword}」的文档。", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+
+    hits.sort(key=lambda e: (e.get("book_name") or "", e.get("title") or ""))
+    if len(hits) > 30:
+        typer.secho(f"命中 {len(hits)} 篇，太多了，换个更具体的关键词。", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+
+    for i, e in enumerate(hits, 1):
+        typer.echo(f"  [{i}] {e.get('book_name')} · {e.get('title')}")
+    idx = 1 if len(hits) == 1 else typer.prompt("选哪一篇", type=int)
+    if not 1 <= idx <= len(hits):
+        typer.secho("序号不在范围里。", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    entry = hits[idx - 1]
+
+    existing = load_corrections(settings.corrections_dir)
+    prior = existing.get(entry["source_url"])
+    if prior is not None:
+        typer.secho(
+            f"这篇已经有勘误了：{prior.path.name}，将在它的基础上改。", fg=typer.colors.CYAN
+        )
+        body = prior.body
+        reason = prior.reason
+        out_path = prior.path
+    else:
+        raw = settings.data_dir / "raw" / "yuque" / entry["path"]
+        _, body = parse_frontmatter(raw.read_text(encoding="utf-8"))
+        body = body.strip()
+        reason = ""
+        out_path = settings.corrections_dir / (
+            slugify(f"{entry['book_slug']}-{entry['title']}", entry["book_slug"]) + ".md"
+        )
+
+    if retire:
+        reason = reason or typer.prompt("作废原因（会写进文件，半年后你会需要它）")
+        body = ""
+    else:
+        # ⭐ 用 click 的编辑器：它负责临时文件、编码和「用户没存就当放弃」。
+        # 自己起 subprocess 的话，Windows 上要处理 notepad 不返回退出码这类破事
+        edited = typer.edit(body, extension=".md")
+        if edited is None:
+            typer.secho("没有改动，什么都没写。", fg=typer.colors.YELLOW)
+            raise typer.Exit(0)
+        body = edited.strip()
+        if not body:
+            typer.secho(
+                "正文被清空了。整篇作废请用 `copilot correct <关键词> --retire`。",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+        reason = typer.prompt("改了什么、为什么改", default=reason or None)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        render_correction(
+            target_url=entry["source_url"],
+            title=f"{entry.get('book_name') or ''} · {entry['title']}".strip(" ·"),
+            # 记下此刻语雀那边的版本。它后来又更新了的话，
+            # `copilot corrections` 会把这条标成「过期」——这是这套机制的核心
+            based_on=entry.get("content_updated_at", ""),
+            reason=reason,
+            body=body,
+            retired=retire,
+        ),
+        encoding="utf-8",
+    )
+    typer.secho(f"已写入 {out_path}", fg=typer.colors.GREEN)
+    typer.echo("接下来：")
+    typer.echo("  copilot ingest        # 让勘误生效（本机）")
+    typer.echo("  git add corrections/  # 改动进版本库")
+    typer.echo("  ./deploy/deploy.sh    # 推到服务器")
+
+
+@app.command()
+def corrections(
+    check: bool = typer.Option(False, "--check", help="有过期勘误时退出码非 0，给部署脚本用"),
+) -> None:
+    """列出所有人工勘误，并标出哪些已经过期。
+
+    过期 = 写完这条勘误之后，语雀那篇原文又更新了。此时勘误仍然生效，
+    但它依据的原文已经变了——可能语雀那边已经自己改对了，
+    也可能改了别的地方而你的覆盖把新内容一起盖掉了。**需要人去看一眼。**
+    """
+    from copilot.config import get_settings
+    from copilot.ingest.corrections import load_corrections, stale_corrections
+
+    items = load_corrections(get_settings().corrections_dir)
+    if not items:
+        typer.echo("还没有任何勘误。")
+        return
+
+    # 按 target_url 索引，不拿 Correction 本身当 key——它是 slots dataclass，
+    # 有 __eq__ 没 __hash__，塞进 dict 会直接 TypeError
+    stale = {c.target_url: now for c, now in stale_corrections(items.values(), _load_manifest())}
+    for c in sorted(items.values(), key=lambda x: x.name):
+        mark, color = ("作废", typer.colors.MAGENTA) if c.retired else ("勘误", typer.colors.GREEN)
+        if c.target_url in stale:
+            mark, color = "过期", typer.colors.YELLOW
+        typer.secho(f"  [{mark}] {c.title or c.name}", fg=color)
+        typer.echo(f"         {c.reason}")
+        typer.echo(f"         {c.target_url}")
+        if c.target_url in stale:
+            typer.secho(
+                f"         ⚠️ 语雀已更新到 {stale[c.target_url]}"
+                f"（勘误基于 {c.based_on}），去核对一下",
+                fg=typer.colors.YELLOW,
+            )
+
+    typer.echo("")
+    typer.secho(f"共 {len(items)} 条，其中过期 {len(stale)} 条", fg=typer.colors.CYAN)
+    if check and stale:
+        raise typer.Exit(1)
 
 
 @app.command()

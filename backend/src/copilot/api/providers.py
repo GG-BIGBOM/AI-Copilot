@@ -41,10 +41,34 @@ def get_llm() -> ChatLLM:
     return ChatLLM()
 
 
+def get_vision():
+    """读图客户端。**没配 key 就返回 None，不抛异常。**
+
+    这条路只有 worker 解析图片时才走，而 worker 是常驻进程：在这里抛
+    异常会让它每轮循环都因为「没配视觉」而崩一次，连带把普通 docx 的
+    解析也拖下水。返回 None，让 parsers 那边给出一句人话的失败原因。
+    """
+    from copilot.config import get_settings
+
+    if not (get_settings().vision_api_key or get_settings().llm_api_key):
+        return None
+    try:
+        return _build_vision()
+    except Exception:  # noqa: BLE001 - 建不起来就是没有，理由由解析那边报给用户
+        return None
+
+
+@lru_cache(maxsize=1)
+def _build_vision():
+    from copilot.providers.vision import VisionLLM
+
+    return VisionLLM()
+
+
 def close_all() -> None:
     """lifespan 关闭时调用。没被创建过的就不去碰它，免得反而触发一次初始化。"""
-    for factory in (get_llm, get_siliconflow_client):
+    for factory in (get_llm, get_siliconflow_client, _build_vision):
         if factory.cache_info().currsize:
             factory().close()
-    for factory in (get_llm, get_embedder, get_reranker, get_siliconflow_client):
+    for factory in (get_llm, get_embedder, get_reranker, get_siliconflow_client, _build_vision):
         factory.cache_clear()

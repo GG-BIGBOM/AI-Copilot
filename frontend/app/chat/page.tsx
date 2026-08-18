@@ -74,6 +74,25 @@ export default function ChatPage() {
     }
   }
 
+  async function deleteConversation(c: ConversationSummary) {
+    if (!window.confirm(`删除对话「${c.title || "未命名对话"}」？消息记录无法恢复。`)) return;
+
+    // 先从列表里拿掉，失败再放回去——和「我的文档」同一套做法，
+    // 删除很快，转个圈反而显得卡
+    const before = conversations;
+    setConversations((list) => list.filter((x) => x.id !== c.id));
+    try {
+      await api.deleteConversation(c.id);
+    } catch {
+      setConversations(before);
+      return;
+    }
+    // ⭐ 删的正好是当前打开的那段：必须换一个新会话 id。
+    // 不换的话输入框还指着一个已经不存在的 id，下一句话会以这个 id 重新
+    // 建一段会话——用户眼里就是「删掉的对话自己回来了」
+    if (c.id === chatId) newConversation();
+  }
+
   function newConversation() {
     setDrawerOpen(false);
     setInitialMessages([]);
@@ -108,6 +127,7 @@ export default function ChatPage() {
         onToggleCollapse={toggleSidebarCollapse}
         onNew={newConversation}
         onPick={openConversation}
+        onDelete={deleteConversation}
         onLogout={logout}
       />
 

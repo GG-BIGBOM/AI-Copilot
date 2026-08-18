@@ -97,3 +97,12 @@ def make_scanned_pdf(path: Path) -> Path:
     with path.open("wb") as f:
         writer.write(f)
     return path
+
+
+def make_png(path: Path, size=(120, 60), color=(240, 240, 240)) -> Path:
+    """一张纯色 PNG。内容不重要——图片解析这条路上，"看懂什么"由视觉模型负责，
+    测试要验的是它前后的管道：格式转换、失败处理、标题补齐。"""
+    from PIL import Image
+
+    Image.new("RGB", size, color).save(path, format="PNG")
+    return path

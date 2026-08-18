@@ -15,22 +15,37 @@ WEB_DIR=/var/www/copilot
 SSH="ssh -i $KEY -o BatchMode=yes $HOST"
 cd "$(dirname "$0")/.."
 
-echo "==> [1/6] 本机自检（不过就别推上去）"
+echo "==> [1/7] 本机自检（不过就别推上去）"
 ( cd backend && uv run ruff check . && uv run pytest -q )
 ( cd frontend && npm run lint && npx tsc --noEmit )
 
-echo "==> [2/6] 构建前端"
+# 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
+# 拦下来只会逼人加 --skip 绕过去，那这条检查就永远没人看了。
+( cd backend && uv run copilot corrections --check ) || \
+    echo "  ⚠️ 上面有过期的勘误，语雀原文已经变了，抽空核对一下"
+
+echo "==> [2/7] 构建前端"
 ( cd frontend && rm -rf out && npm run build )
 [ -f frontend/out/index.html ] || { echo "构建没产出 out/，中止"; exit 1; }
 
-echo "==> [3/6] 推送后端代码"
+echo "==> [3/7] 推送后端代码"
 # 本机可能没有 rsync（Git Bash 默认不带），tar over ssh 到哪都能用。
 # 排除 .venv：服务器自己 uv sync，两边平台不同，venv 不能直接搬
 tar -czf - --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
     -C backend src alembic alembic.ini pyproject.toml uv.lock .env.example \
   | $SSH "tar -xzf - -C $APP_DIR && chown -R copilot:copilot $APP_DIR"
 
-echo "==> [4/6] 同步 systemd 单元文件"
+echo "==> [4/7] 推送勘误层"
+# corrections/ 在**仓库根**、不在 backend 下，所以单独推一次。
+#
+# ⭐ 用 `--delete` 的语义：先清空再解包。本机删掉一条勘误（= 撤销修正）时，
+# 不清空的话服务器上那份会永远留着——本机看不到、线上还在生效，
+# 这是最难查的一类不一致。
+tar -czf - --exclude='.gitkeep' corrections \
+  | $SSH "rm -rf $APP_DIR/corrections && tar -xzf - -C $APP_DIR \
+          && chown -R copilot:copilot $APP_DIR/corrections"
+
+echo "==> [5/7] 同步 systemd 单元文件"
 # M5 时这两个文件是手动 scp 上去的，结果 M6 加 worker 才发现「服务器上的单元
 # 文件和仓库里的可能不一致」没人守着。放进部署流程，仓库即事实。
 #
@@ -45,7 +60,7 @@ tar -czf - -C deploy copilot-api.service copilot-worker.service \
 # timer 要 `--now`：光 enable 只建了开机自启的符号链接，**这次不会跑起来**，
 # `systemctl is-active` 会一直是 inactive，而那看起来像装失败了
 
-echo "==> [5/6] 推送前端产物"
+echo "==> [6/7] 推送前端产物"
 # 先解到 .new 再整目录替换：避免用户正好在传输中途刷到半个站
 tar -czf - -C frontend/out . \
   | $SSH "rm -rf $WEB_DIR.new && mkdir -p $WEB_DIR.new && tar -xzf - -C $WEB_DIR.new \
@@ -53,7 +68,7 @@ tar -czf - -C frontend/out . \
           && mv $WEB_DIR.new $WEB_DIR && rm -rf $WEB_DIR.old \
           && chown -R www-data:www-data $WEB_DIR"
 
-echo "==> [6/6] 装依赖、跑迁移、重启"
+echo "==> [7/7] 装依赖、跑迁移、重启"
 # ⭐ COPILOT_ROOT 必须显式给。config.py 会向上找 .env.example 来定位项目根，
 #    但部署布局和开发布局不同，靠猜迟早出错——而它出错时是**静默**的：
 #    读不到 .env 就用字段默认值，最后报「数据库密码错误」，

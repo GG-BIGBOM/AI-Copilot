@@ -170,15 +170,49 @@ class CaseResult:
 # ---------- 载入 ----------
 
 
-def load_cases(only: str | None = None) -> tuple[dict, list[dict]]:
+def load_cases(only: str | None = None, scope: str = "public") -> tuple[dict, list[dict]]:
     import yaml
 
     data = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
-    cases = data["cases"]
+    # ⭐ scope 默认只取公共库的题。**这条不能省**：私有库的题打的是别人的
+    # 文档集，混进来会让历史 tag 之间的 --compare 变成拿两个不同的题集比大小，
+    # 而报告上完全看不出来
+    cases = [c for c in data["cases"] if c.get("scope", "public") == scope]
     if only:
         keys = {k.strip() for k in only.split(",") if k.strip()}
         cases = [c for c in cases if c["id"] in keys or c["kind"] in keys]
     return data.get("meta", {}), cases
+
+
+def resolve_user(email: str):
+    """把邮箱换成 user_id。私有库评测用。"""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from copilot.db.models import User
+    from copilot.db.session import SessionLocal
+
+    async def go():
+        from copilot.db.session import engine
+
+        try:
+            async with SessionLocal() as s:
+                return (
+                    await s.execute(select(User).where(User.email == email))
+                ).scalar_one_or_none()
+        finally:
+            # ⭐ 必须 dispose。这个函数自己 `asyncio.run()` 起了一个事件循环，
+            # 用完就关；但连接池里那条 asyncpg 连接还绑在已经死掉的循环上。
+            # 后面 retrieve_all 再 `asyncio.run()` 时会复用它，报出来的是
+            # `AttributeError: 'NoneType' object has no attribute 'send'`——
+            # 一个和「用户查询」八竿子打不着的错误，排查方向全歪。
+            await engine.dispose()
+
+    user = asyncio.run(go())
+    if user is None:
+        raise SystemExit(f"库里没有这个用户：{email}")
+    return user.id
 
 
 # ---------- 阶段一：检索（串行） ----------
@@ -187,10 +221,12 @@ def load_cases(only: str | None = None) -> tuple[dict, list[dict]]:
 CORPUS_STATS: dict = {}  # 检索时顺手记下当时的块数，换 chunk 参数重灌后能看出规模变化
 
 
-def retrieve_all(cases: list[dict], cfg: Config, quiet: bool = False) -> list[CaseResult]:
+def retrieve_all(
+    cases: list[dict], cfg: Config, quiet: bool = False, user_id=None
+) -> list[CaseResult]:
     import asyncio
 
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     from copilot.db.models import Chunk
     from copilot.db.session import SessionLocal
@@ -208,8 +244,14 @@ def retrieve_all(cases: list[dict], cfg: Config, quiet: bool = False) -> list[Ca
         emb, rr = SiliconFlowEmbedder(client=client), SiliconFlowReranker(client=client)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
+            # 可见范围 = 公共库 +（指定用户时）他的私有库，和线上完全一致
+            scope_filter = (
+                Chunk.owner_id.is_(None)
+                if user_id is None
+                else or_(Chunk.owner_id.is_(None), Chunk.owner_id == user_id)
+            )
             CORPUS_STATS["chunk_count"] = await session.scalar(
-                select(func.count(Chunk.id)).where(Chunk.owner_id.is_(None))
+                select(func.count(Chunk.id)).where(scope_filter)
             )
             for i, case in enumerate(cases, 1):
                 res = await search(
@@ -217,7 +259,7 @@ def retrieve_all(cases: list[dict], cfg: Config, quiet: bool = False) -> list[Ca
                     case["q"],
                     emb,
                     rr,
-                    user_id=None,  # 评测只打公共库
+                    user_id=user_id,  # None = 只打公共库
                     top_k=r["top_k"],
                     rerank_k=r["rerank_k"],
                     score_threshold=r["threshold"],
@@ -366,6 +408,10 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
 # ---------- 阶段三：判分（并行） ----------
 
 
+# 判分重试次数。跨境网络抖动是常态，不重试的话指标会被网络污染
+JUDGE_RETRIES = 4
+
+
 def judge_all(
     results: list[CaseResult], cases: list[dict], workers: int = 5, quiet: bool = False
 ) -> str:
@@ -396,28 +442,36 @@ def judge_all(
             cr.verdict, cr.grounded, cr.reason = "no_answer", True, "答案是兜底话术"
             return
 
+        messages = [
+            {"role": "system", "content": JUDGE_SYSTEM},
+            {
+                "role": "user",
+                "content": JUDGE_USER.format(
+                    q=cr.q, context=cr.context[:6000], answer=cr.answer[:3000]
+                ),
+            },
+        ]
+        # ⭐ 判分必须重试。国内连 Gemini 会随机 SSL 断流——2026-08-18 第一轮
+        # 55 题里 11 题挂在 `UNEXPECTED_EOF_WHILE_READING`，报告上显示成
+        # 「12 题没过」，看起来像模型答错了，**而它们根本没被判过**。
+        # 判分器的网络抖动伪装成模型退化，是这套指标最坏的一种失真。
         raw = ""
-        try:
-            raw = judge.complete(
-                [
-                    {"role": "system", "content": JUDGE_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": JUDGE_USER.format(
-                            q=cr.q, context=cr.context[:6000], answer=cr.answer[:3000]
-                        ),
-                    },
-                ],
-                temperature=0.0,
-            )
-            payload = json.loads(_strip_fence(raw))
-            cr.verdict = str(payload.get("verdict", ""))
-            cr.grounded = bool(payload.get("grounded"))
-            cr.unsupported = cr.unsupported or str(payload.get("unsupported") or "")
-            cr.reason = str(payload.get("reason") or "")
-        except Exception as e:  # noqa: BLE001
-            cr.verdict = "judge_error"
-            cr.reason = f"{type(e).__name__}: {e} | 原始输出：{raw[:160]}"
+        last: Exception | None = None
+        for attempt in range(JUDGE_RETRIES):
+            try:
+                raw = judge.complete(messages, temperature=0.0)
+                payload = json.loads(_strip_fence(raw))
+                cr.verdict = str(payload.get("verdict", ""))
+                cr.grounded = bool(payload.get("grounded"))
+                cr.unsupported = cr.unsupported or str(payload.get("unsupported") or "")
+                cr.reason = str(payload.get("reason") or "")
+                return
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if attempt < JUDGE_RETRIES - 1:
+                    time.sleep(2.0 * (attempt + 1))
+        cr.verdict = "judge_error"
+        cr.reason = f"{type(last).__name__}: {last} | 原始输出：{raw[:160]}"
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for i, _ in enumerate(pool.map(one, results), 1):
@@ -498,6 +552,14 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
             len([r for r in results if not r.said_no_answer]),
         ),
     }
+    # ⭐ 难题单独一条。总准确率会被 41 道已经饱和的老题稀释——
+    # 14 道新题全错，总数也才掉 25 个点，看着像「小幅波动」
+    hard_ids = {c["id"] for c in cases if c.get("hard")}
+    hard = [r for r in results if r.id in hard_ids]
+    if hard:
+        m["难题准确率"] = pct(sum(r.passed for r in hard), len(hard))
+        m["难题数"] = len(hard)
+
     m["分类准确率"] = {
         kind: pct(
             sum(r.passed for r in results if r.kind == kind),
@@ -517,6 +579,8 @@ METRIC_HELP = {
     "幻觉率": "该说「暂无此内容」却给了实质答案的比例。**这个数字要压到 0**",
     "假阴性率": "材料里有答案、却答「暂无此内容」的比例。它和幻觉率是一对："
     "prompt 闸门收紧一分，幻觉降一点、假阴性涨一点",
+    "难题准确率": "标了 hard 的题（多跳/跨文档/否定/条件）的判对比例。"
+    "**改动的效果先看这个数**——老题在 v3 上已经饱和，看总准确率会被稀释成噪声",
     "无据陈述率": "答了的题里，判分器发现「有材料不支持的具体说法」的比例。"
     "比幻觉率更细：答案整体方向对，但夹了一句编的",
 }
@@ -568,6 +632,10 @@ def print_report(
         v = metrics[k]
         unit = "" if k == "题数" else "%"
         print(f"  {k:<12} {v}{unit}")
+    # 难题单独打一行。**改动的效果先看这个数**：老题在 v3 上已经饱和，
+    # 总准确率会把 14 道难题的变化稀释成看不见的小数
+    if "难题准确率" in metrics:
+        print(f"  {'难题准确率':<11} {metrics['难题准确率']}%（{metrics['难题数']} 题）")
     print()
     print("  分类准确率：", "  ".join(f"{k} {v}%" for k, v in metrics["分类准确率"].items()))
 
@@ -635,14 +703,14 @@ def compare(tags: list[str]) -> None:
 # ---------- 只验检索 ----------
 
 
-def check(cases: list[dict], cfg: Config) -> None:
+def check(cases: list[dict], cfg: Config, user_id=None) -> None:
     """不调 LLM，只看检索。用来验「评测集本身立不立得住」。
 
     两件事必须在这里发现，否则整套指标都是错的：
       1. fact 题的期望来源根本检索不到 → 那题在考检索，不是在考生成
       2. no_answer 题其实检索得到答案 → 模型答出来反而被判成幻觉
     """
-    results = retrieve_all(cases, cfg, quiet=True)
+    results = retrieve_all(cases, cfg, quiet=True, user_id=user_id)
     by_id = {c["id"]: c for c in cases}
 
     print()
@@ -691,13 +759,24 @@ def main() -> None:
         "--agent", action="store_true", help="评 M7 的 Agent 路径而不是直路"
     )
     ap.add_argument("--workers", type=int, default=5)
+    ap.add_argument(
+        "--as-user",
+        default="",
+        metavar="EMAIL",
+        help="按这个用户的可见范围跑私有库那组题（见 eval/private/README.md）",
+    )
     args = ap.parse_args()
 
     if args.compare:
         compare(args.compare)
         return
 
-    meta, cases = load_cases(args.only or None)
+    # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——
+    # 混跑等于把两个不同的题集算进同一个准确率
+    user_id = resolve_user(args.as_user) if args.as_user else None
+    meta, cases = load_cases(args.only or None, scope="private" if user_id else "public")
+    if not cases:
+        raise SystemExit("这个范围里一道题都没有，检查 --only / --as-user")
     cfg = Config(
         top_k=args.top_k,
         rerank_k=args.rerank_k,
@@ -707,19 +786,21 @@ def main() -> None:
     )
 
     if args.check:
-        check(cases, cfg)
+        check(cases, cfg, user_id=user_id)
         return
 
     tag = args.tag or datetime.now().strftime("run-%m%d-%H%M")
     t0 = time.monotonic()
     print(f"评测 {len(cases)} 题　参数 {cfg.resolved()}")
+    if user_id:
+        print(f"可见范围：公共库 + {args.as_user} 的私有库")
     if cfg.agent:
         # Agent 自己决定检索几次，所以「检索」和「生成」分不开，只能一起跑
         print("── Agent 逐题跑（检索由它自己决定）──")
         results = run_agent_cases(cases, cfg)
     else:
         print("── 检索（串行，受 SiliconFlow 限速）──")
-        results = retrieve_all(cases, cfg)
+        results = retrieve_all(cases, cfg, user_id=user_id)
         print("── 生成答案 ──")
         answer_all(results, workers=args.workers, system_prompt=cfg.system_prompt())
     print("── 判分 ──")

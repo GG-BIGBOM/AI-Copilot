@@ -1,0 +1,401 @@
+{
+  "tag": "private-2-v4",
+  "ran_at": "2026-08-18T03:57:30+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "4b4013a0",
+    "chunk_count": 4570
+  },
+  "judge_model": "gemini-2.5-pro",
+  "metrics": {
+    "题数": 6,
+    "准确率": 83.3,
+    "检索命中率": 80.0,
+    "引用正确率": 80.0,
+    "幻觉率": 100.0,
+    "假阴性率": 0.0,
+    "无据陈述率": 0.0,
+    "分类准确率": {
+      "fact": 100.0,
+      "probe": 100.0,
+      "partial": 0.0,
+      "no_answer": 0.0
+    }
+  },
+  "cases": [
+    {
+      "id": "priv-fact-zhongtong-cap",
+      "kind": "fact",
+      "q": "星辰电商给中通配的日单量上限是多少？",
+      "answer": "星辰电商给中通配的日单量上限是 **800 单** [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9941
+        },
+        {
+          "n": 2,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.3085
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1163
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 分销常见问题",
+          "heading": "申请可调整的功能上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/zi7hxqgg3o90c7b8",
+          "score": 0.1018
+        },
+        {
+          "n": 5,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.0994
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "客户A-实施配置约定",
+        "📒常见问题库 · 分销常见问题",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新"
+      ],
+      "top_score": 0.9940627217292786,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从参考材料中提取了星辰电商给中通配置的日单量上限为800单。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1976
+    },
+    {
+      "id": "priv-fact-warehouse-scope",
+      "kind": "fact",
+      "q": "星辰电商的华南备货仓负责发哪些省份？",
+      "answer": "星辰电商的华南备货仓（编码 XC-HN-02）只发广东、广西、海南三省，其余地区一律由华东主仓发货 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9883
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.2283
+        },
+        {
+          "n": 3,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.1426
+        },
+        {
+          "n": 4,
+          "title": "设置 · 就近仓库",
+          "heading": "3、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/egbpgt",
+          "score": 0.0076
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "设置 · 就近仓库"
+      ],
+      "top_score": 0.9883391857147217,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地根据参考材料[1]回答了问题，指出了华南备货仓负责的省份。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1599
+    },
+    {
+      "id": "priv-negation-combo-split",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单需要拆分吗？",
+      "answer": "星辰电商的组合装订单是否需要拆分，材料里没有关于这家客户的专门约定。材料只提供了组合装拆分的通用规则，不能当作星辰电商的安排。\n\n关于组合装拆分的通用规则，材料中有以下内容：\n\n1. **按指定组合装拆分**：订单包含设置的组合装就会拆分。拆分条件可配置为“1个1单”（按组合装数量拆分，一个组合装一个订单）或“1种1单”（按组合装种类拆分，一种组合装一个订单）。组合装的打印方式只能为【组合装】或【组合装以及明细】[1]。\n2. **按货品指定仓库拆分**：合装的打印方式为【组合装】或【组合装以及明细】时，系统不做拆分处理。除【指定组合装拆分】、【按组合装指定仓库拆分】、【按重量拆分】外，其他拆分均不会拆分此类型的组合装。其他拆分默认只处理组合装打印内容为【组合装明细】的订单[2]。\n3. **组合装大件拆分**：当订单中有拆分属性为大件拆分的组合装时，订单将会被拆分。独立大件必须单独发，普通大件可与非大件一起发。包含单品大件时，组合装大件全部拆分出去[3]。\n4. **按货品标签拆分**：按照设置的单品、组合装标签进行拆分订单。勾选“支持组合装拆分”配置时支持组合装拆分；当组合装与单品同样有拆分标签时，可设置成合为一单还是独立拆分。如果整单货品都是标签的货品，则不会拆分[4]。\n\n**材料里没有**：星辰电商这家客户关于组合装订单是否需要拆分的具体约定。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9828
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品指定仓库拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9769
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "组合装大件拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.975
+        },
+        {
+          "n": 4,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品标签拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9665
+        },
+        {
+          "n": 5,
+          "title": "销售 · 拆单发货使用说明",
+          "heading": "支持拆单发货的平台",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/xqfkpb",
+          "score": 0.9561
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "销售 · 拆单发货使用说明"
+      ],
+      "top_score": 0.9827925562858582,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地指出参考材料中没有关于“星辰电商”的具体信息，并准确地总结了材料中提到的组合装订单拆分的通用规则。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1486
+    },
+    {
+      "id": "priv-multi-reconciliation",
+      "kind": "fact",
+      "q": "星辰电商的对账以什么为准？多大的差异需要人工复核？",
+      "answer": "星辰电商对账以**平台结算单**为准，不以 ERP 发货单为准 [1]。差异超过 **500 元**的单据挂起人工复核，500 元以内的直接入账 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.9976
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4984
+        },
+        {
+          "n": 3,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.1953
+        },
+        {
+          "n": 4,
+          "title": "账款 · 平台对账",
+          "heading": "一．平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0513
+        },
+        {
+          "n": 5,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.1、导入平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0344
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定",
+        "账款 · 平台对账",
+        "账款 · 平台对账",
+        "账款 · 平台对账"
+      ],
+      "top_score": 0.9976344108581543,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了对账标准和需要人工复核的差异金额，且所有信息均来自参考材料。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1851
+    },
+    {
+      "id": "priv-noanswer-not-in-fixture",
+      "kind": "no_answer",
+      "q": "星辰电商的退货入库要走哪几个审核节点？",
+      "answer": "根据材料，星辰电商的退货入库流程如下：\n\n1. 在【仓储—入库管理—销售退货—入库开单】中引用【已审核】状态的退货单，输入入库数量等信息后提交入库单 [1]。\n2. 在【销退入库管理】中审核入库单，审核后即为入库完成 [1]。\n\n关于审核节点，材料中明确提到的审核节点是**入库单审核**（即销退入库管理中的审核）[1]。材料中未提及星辰电商退货入库的其他审核节点（如退货单审核等）的具体约定。\n\n另外，材料提到若勾选【销售退货入库需要质检】配置，则仓库销售退货入库后要经过质检流程，将已入库货品分货，并将残次品移位到残次品货位 [3]。但材料未说明该配置在星辰电商是否启用。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 创建退换单以及销退入库流程",
+          "heading": "二、销退入库流程 › 1、退货流程-分步入库",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ib91lq",
+          "score": 0.637
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 销退质检",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tq5z5p",
+          "score": 0.3187
+        },
+        {
+          "n": 3,
+          "title": "设置 · 出入库",
+          "heading": "12. 【销售退货入库需要质检】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.2994
+        },
+        {
+          "n": 4,
+          "title": "设置 · 出入库",
+          "heading": "21、【快速退货入库增加入库必须要输入【生产日期】的配置】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.1765
+        },
+        {
+          "n": 5,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1439
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 创建退换单以及销退入库流程",
+        "仓储 · 销退质检",
+        "设置 · 出入库",
+        "设置 · 出入库",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.6370260715484619,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从参考材料中提取了退货入库流程，并指出了其中明确提到的审核节点是“入库单审核”，同时正确说明了材料并未提及星辰电商是否启用了质检流程。",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 1231
+    },
+    {
+      "id": "priv-probe-inventory-line",
+      "kind": "probe",
+      "q": "星辰的 SKU 库存低到多少会在采购建议里飘红？",
+      "answer": "星辰的 SKU 安全库存线统一为 **20 件**，低于此数在采购建议里飘红 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9931
+        },
+        {
+          "n": 2,
+          "title": "设置 · 同步设置",
+          "heading": "9.【平台货品库存同步预警值】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg3k7xqwrdlrhipi",
+          "score": 0.0293
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 库存同步常见报错及解决方案",
+          "heading": "8、Q：库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ts8by7gundrlk7zr",
+          "score": 0.0207
+        },
+        {
+          "n": 4,
+          "title": "销售 · 库存同步常见报错及解决方案",
+          "heading": "8、Q:库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/fo7xg3",
+          "score": 0.0207
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 以货找单",
+          "heading": "五、版本优化 › 1、【仓储】【服装快进快出易用性优化】",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/vfsiclyv73qtn6uo",
+          "score": 0.0153
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "设置 · 同步设置",
+        "📒常见问题库 · 库存同步常见报错及解决方案",
+        "销售 · 库存同步常见报错及解决方案",
+        "仓储 · 以货找单"
+      ],
+      "top_score": 0.9931390881538391,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从参考材料[1]中提取了“低于20件在采购建议里飘红”这一信息，回答了问题。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1544
+    }
+  ]
+}

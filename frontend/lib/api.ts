@@ -166,6 +166,9 @@ export const api = {
 
   messages: (id: string) => request<StoredMessage[]>(`/api/conversations/${id}/messages`),
 
+  deleteConversation: (id: string) =>
+    request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
+
   documents: () => request<DocumentSummary[]>("/api/documents"),
 
   uploadDocument: (file: File) => upload("/api/documents", file),

@@ -32,7 +32,11 @@ import { api, ApiError, DOC_IN_PROGRESS, type DocumentSummary } from "@/lib/api"
 import { useRequireAuth } from "@/lib/auth-guard";
 import { cn } from "@/lib/utils";
 
-const ACCEPT = ".md,.txt,.docx,.pptx,.pdf";
+// 图片和扫描件 PDF 走视觉模型转写，比文本解析慢（一页约 5–10 秒），
+// 但对用户是同一条路：传上去、等状态转绿。
+// ⚠️ 要和后端 `upload_allowed_suffixes` 保持一致——这里多写一个类型，
+// 用户传上去只会收到一句「不支持的文件类型」，而他明明是照着提示传的
+const ACCEPT = ".md,.txt,.docx,.pptx,.pdf,.png,.jpg,.jpeg,.webp,.bmp";
 const POLL_MS = 3000;
 
 const STATUS: Record<
@@ -195,7 +199,7 @@ export default function DocumentsPage() {
             {busy ? "正在上传…" : "把文件拖到这里，或点下面的按钮选择"}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            支持 md / txt / docx / pptx / pdf，单份不超过 20MB
+            支持 md / txt / docx / pptx / pdf / 图片（截图会自动转成文字），单份不超过 20MB
           </p>
           <input
             ref={fileInput}

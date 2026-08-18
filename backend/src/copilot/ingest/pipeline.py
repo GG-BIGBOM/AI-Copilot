@@ -76,6 +76,10 @@ def load_yuque_dir(root: Path) -> Iterable[SourceDoc]:
         body = body.strip()
         if not body:
             continue
+        # README 是目录自己的说明文档，不是语料。
+        # 混进去会变成一篇「怎么用这个目录」的可检索文档，答案里冒出来非常怪
+        if path.stem.lower() == "readme":
+            continue
         book = meta.get("book") or ""
         title = meta.get("title") or path.stem
         yield SourceDoc(
