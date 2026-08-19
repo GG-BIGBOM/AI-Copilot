@@ -14,6 +14,7 @@ import { Menu } from "@base-ui/react/menu";
 import { Menu as MenuIcon, MoreHorizontal, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 
 export function ConversationHeader({
@@ -57,7 +58,7 @@ export function ConversationHeader({
             <MoreHorizontal className="size-4" />
           </Menu.Trigger>
           <Menu.Portal>
-            <Menu.Positioner className="outline-hidden" side="bottom" align="end" sideOffset={6}>
+            <Menu.Positioner className={POPUP_LAYER} side="bottom" align="end" sideOffset={6}>
               <Menu.Popup
                 className="min-w-40 origin-[var(--transform-origin)] rounded-xl border border-border bg-popover p-1 text-popover-foreground outline-hidden transition-[opacity,scale] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] data-starting-style:scale-[0.98] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0"
                 style={{ boxShadow: "var(--shadow-floating)" }}

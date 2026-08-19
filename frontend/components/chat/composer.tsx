@@ -16,6 +16,7 @@ import { Menu } from "@base-ui/react/menu";
 import { ArrowUp, Check, ChevronDown, Square } from "lucide-react";
 
 import { ANSWER_MODES, MODE_META, type AnswerMode } from "@/lib/answer-mode";
+import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,7 +46,7 @@ function ModePicker({
         <ChevronDown className="size-3 opacity-60" />
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner className="outline-hidden" side="top" align="start" sideOffset={8}>
+        <Menu.Positioner className={POPUP_LAYER} side="top" align="start" sideOffset={8}>
           <Menu.Popup
             className="w-60 origin-[var(--transform-origin)] rounded-xl border border-border bg-popover p-1 outline-hidden transition-[opacity,scale] duration-150 data-starting-style:scale-[0.98] data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0"
             style={{ boxShadow: "var(--shadow-floating)" }}

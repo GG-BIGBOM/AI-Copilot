@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError, DOC_IN_PROGRESS, type DocumentSummary } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth-guard";
+import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 
 // 图片和扫描件 PDF 走视觉模型转写，比文本解析慢（一页约 5–10 秒），
@@ -416,7 +417,7 @@ export default function DocumentsPage() {
                         </Menu.Trigger>
                         <Menu.Portal>
                           <Menu.Positioner
-                            className="outline-hidden"
+                            className={POPUP_LAYER}
                             side="bottom"
                             align="end"
                             sideOffset={4}

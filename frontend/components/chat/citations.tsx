@@ -17,6 +17,7 @@
 import { PreviewCard } from "@base-ui/react/preview-card";
 import { ArrowUpRight } from "lucide-react";
 
+import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/api";
 
@@ -85,7 +86,7 @@ export function CitationChip({ citation }: { citation: Citation }) {
     <PreviewCard.Root>
       {trigger}
       <PreviewCard.Portal>
-        <PreviewCard.Positioner sideOffset={8} collisionPadding={12}>
+        <PreviewCard.Positioner className={POPUP_LAYER} sideOffset={8} collisionPadding={12}>
           <PreviewCard.Popup className={POPUP} style={{ boxShadow: "var(--shadow-floating)" }}>
             <SourcePreview citation={citation} />
           </PreviewCard.Popup>
@@ -146,7 +147,7 @@ export function Citations({ citations }: { citations: Citation[] }) {
             <PreviewCard.Root>
               <SourceRowTrigger citation={c} />
               <PreviewCard.Portal>
-                <PreviewCard.Positioner sideOffset={8} collisionPadding={12}>
+                <PreviewCard.Positioner className={POPUP_LAYER} sideOffset={8} collisionPadding={12}>
                   <PreviewCard.Popup
                     className={POPUP}
                     style={{ boxShadow: "var(--shadow-floating)" }}

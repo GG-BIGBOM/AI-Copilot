@@ -31,6 +31,7 @@ import { Menu } from "@base-ui/react/menu";
 
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
+import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/lib/theme";
 import type { ConversationSummary, User } from "@/lib/api";
@@ -428,7 +429,7 @@ export function Sidebar({
                                 <MoreHorizontal className="size-3.5" />
                               </Menu.Trigger>
                               <Menu.Portal>
-                                <Menu.Positioner className="outline-hidden" side="bottom" align="end" sideOffset={4}>
+                                <Menu.Positioner className={POPUP_LAYER} side="bottom" align="end" sideOffset={4}>
                                   <Menu.Popup
                                     className={MENU_POPUP}
                                     style={{ boxShadow: "var(--shadow-floating)" }}
@@ -479,7 +480,7 @@ export function Sidebar({
               {!collapsed && <MoreHorizontal className="ml-auto size-3.5 shrink-0 opacity-60" />}
             </Menu.Trigger>
             <Menu.Portal>
-              <Menu.Positioner className="outline-hidden" side="top" align="start" sideOffset={6}>
+              <Menu.Positioner className={POPUP_LAYER} side="top" align="start" sideOffset={6}>
                 <Menu.Popup className={MENU_POPUP} style={{ boxShadow: "var(--shadow-floating)" }}>
                   <div className="px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground/70">
                     {user.email}
