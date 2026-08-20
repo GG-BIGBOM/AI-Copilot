@@ -268,14 +268,26 @@ def test_two_modes_share_the_same_hard_rules():
     """⚠️ 详解档是「同一份事实说得更透」，不是「可以多说材料里没有的」。
 
     防幻觉那段铁律两档必须一字不差——做成两份，迟早有一份会先松掉。
-    """
-    from copilot.qa import _TEMPLATE, system_prompt_for
 
-    rules = _TEMPLATE.split("写法要求：")[0]
-    for mode in ("fast", "deep"):
-        assert rules in system_prompt_for(mode)
-        assert "不得用你自己的常识补全或推测" in system_prompt_for(mode)
-        assert "知识库暂无此内容" in system_prompt_for(mode)
+    ⚠️ **比的是渲染之后的 prompt，不是 `_TEMPLATE` 那个模板串。**
+    M12 之后模板里带了 `{head}` / `{rule1}` / `{rule3_tail}` 三个占位符
+    （常识兜底的两个版本），拿原始模板去 `in` 渲染结果必然不成立——
+    而那种失败看起来像「两档不一致了」，其实什么都没不一致。
+    """
+    from copilot.qa import system_prompt_for
+
+    for general in (True, False):
+        fast = system_prompt_for("fast", general=general)
+        deep = system_prompt_for("deep", general=general)
+        # 「写法要求」以上是铁律，两档必须逐字相同；以下才是各自的写法
+        assert fast.split("写法要求：")[0] == deep.split("写法要求：")[0]
+        assert fast.split("写法要求：")[1] != deep.split("写法要求：")[1]
+        # 两个版本都必须留着那句兜底话术——常识兜底放开的是「能不能用自己的
+        # 知识答概念」，**不是**「具体配置查不到也可以编一个」
+        assert "知识库暂无此内容" in fast
+
+    # 严格版那句原文还在（关掉开关就该完全回到 M11 的行为）
+    assert "不得用你自己的常识补全或推测" in system_prompt_for("fast", general=False)
 
 
 def test_unknown_mode_falls_back_to_fast():

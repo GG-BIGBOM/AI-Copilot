@@ -97,7 +97,7 @@ def wanted_sources(case: dict) -> list[str]:
 # ---------- 数据结构 ----------
 
 
-def _guard_suffix(mode: str) -> str:
+def _guard_suffix(mode: str, general: bool | None = None) -> str:
     """主体约束那一段（M11 P3 第 3 步）追加在 system prompt 后面的文本。
 
     ⚠️ **拿 `system_prompt_for` 算差值，不要自己抄一份。**
@@ -106,7 +106,8 @@ def _guard_suffix(mode: str) -> str:
     """
     from copilot.qa import system_prompt_for
 
-    return system_prompt_for(mode, subject_guard=True)[len(system_prompt_for(mode)) :]
+    base = system_prompt_for(mode, general=general)
+    return system_prompt_for(mode, subject_guard=True, general=general)[len(base) :]
 
 
 @dataclass
@@ -119,13 +120,22 @@ class Config:
     # 回答档位：fast 简答（DeepSeek）/ deep 详解（Kimi）。
     # 两档的**铁律完全一样**，差的是写法和模型——所以这才是一次干净的 A/B
     mode: str = "fast"
+    # 常识兜底（M12）。None = 读 .env；True/False = 这一轮强制用哪一版铁律 1。
+    # ⚠️ 它**同时影响两处**：prompt 里的铁律 1 和 3，以及「一条都没召回」时
+    # 还调不调模型。只改 prompt 不改闸门的话，放开版会在所有 no_answer 题上
+    # 拿到和严格版一模一样的兜底话术——A/B 会显示「毫无变化」，而那是假的
+    general: bool | None = None
 
     def system_prompt(self) -> str | None:
         if self.prompt == "current":
             from copilot.qa import DEFAULT_MODE, system_prompt_for
 
-            # 档位不是默认那档时，要用那一档的 prompt，否则 A/B 只换了模型没换写法
-            return None if self.mode == DEFAULT_MODE else system_prompt_for(self.mode)
+            # 档位不是默认那档时，要用那一档的 prompt，否则 A/B 只换了模型没换写法。
+            # `general` 显式指定时也必须自己拼——`SYSTEM_PROMPT` 那个模块常量是
+            # 按 .env 在 import 时算好的，拿它做 A/B 等于两轮都用同一版铁律 1
+            if self.mode == DEFAULT_MODE and self.general is None:
+                return None
+            return system_prompt_for(self.mode, general=self.general)
         from prompts import ARCHIVE
 
         if self.prompt not in ARCHIVE:
@@ -160,7 +170,7 @@ class Config:
             # v3 和 v4 只差主体约束里的一句话，结果两轮存出来的 sha 一模一样。
             # 指纹漏掉了唯一变过的那个东西，等于没有指纹。
             "prompt_sha": hashlib.sha256(
-                (prompt_text + _guard_suffix(self.mode)).encode()
+                (prompt_text + _guard_suffix(self.mode, self.general)).encode()
             ).hexdigest()[:8],
         }
 
@@ -341,10 +351,16 @@ def answer_all(
     quiet: bool = False,
     system_prompt: str | None = None,
     mode: str = "fast",
+    general: bool | None = None,
 ) -> None:
     from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
-    from copilot.qa import NO_ANSWER, SYSTEM_PROMPT, USER_TEMPLATE, is_no_answer
+    from copilot.qa import EMPTY_CONTEXT, NO_ANSWER, SYSTEM_PROMPT, USER_TEMPLATE, is_no_answer
+
+    # 常识兜底开着时，「一条都没召回」不再是免费的兜底话术——那正是最该问
+    # 一次模型的时候。留 None 就读 .env，和线上一致
+    if general is None:
+        general = get_settings().allow_general_knowledge
 
     # 允许换 prompt：A/B 时必须拿**同一份评测集**跑两个 prompt，
     # 否则指标的变化归不了因（见 eval/prompts.py 的说明）
@@ -367,11 +383,16 @@ def answer_all(
         llm = ChatLLM()
 
     def one(cr: CaseResult) -> None:
-        if not cr.citations:
-            # 第一道闸门：什么都没召回，线上会直接返回兜底话术，不调 LLM
+        if not cr.citations and not general:
+            # 第一道闸门：什么都没召回，线上会直接返回兜底话术，不调 LLM。
+            # ⚠️ **常识兜底开着时这道闸门要让路**，否则所有 no_answer 题都会
+            # 拿到一模一样的兜底话术，A/B 显示「毫无变化」——而那是假的：
+            # 线上那条路会去问模型。评测和线上在这里必须是同一个行为
             cr.answer = NO_ANSWER
         else:
-            user_msg = USER_TEMPLATE.format(context=cr.context, question=cr.q)
+            user_msg = USER_TEMPLATE.format(
+                context=cr.context or EMPTY_CONTEXT, question=cr.q
+            )
             system = prompt + guarded_suffix if cr.subject_guard else prompt
             messages = [
                 {"role": "system", "content": system},
@@ -859,6 +880,16 @@ def main() -> None:
     ap.add_argument("--check", action="store_true", help="只验检索，不调 LLM")
     ap.add_argument("--compare", nargs="+", metavar="TAG", help="对比若干轮结果")
     ap.add_argument("--only", default="", help="只跑指定 id 或 kind，逗号分隔")
+    # ⭐ 常识兜底的 A/B（M12）。**必须能在同一次运行里指定**，
+    # 而不是靠改 .env 再跑一遍：改 .env 那种做法下，两轮之间除了这个开关
+    # 还可能悄悄差别的东西（谁记得中途有没有动过别的？），
+    # 而这一改动推翻的是铁律 1，值得一次干净的 A/B。
+    ap.add_argument(
+        "--general",
+        choices=("on", "off"),
+        default="",
+        help="常识兜底开/关。不传则读 .env 的 ALLOW_GENERAL_KNOWLEDGE",
+    )
     ap.add_argument("--top-k", type=int, default=0)
     ap.add_argument("--rerank-k", type=int, default=0)
     ap.add_argument("--threshold", type=float, default=-1.0)
@@ -900,6 +931,7 @@ def main() -> None:
         prompt=args.prompt,
         agent=args.agent,
         mode=args.mode,
+        general={"on": True, "off": False}.get(args.general),
     )
 
     if args.check:
@@ -920,7 +952,11 @@ def main() -> None:
         results = retrieve_all(cases, cfg, user_id=user_id)
         print("── 生成答案 ──")
         answer_all(
-            results, workers=args.workers, system_prompt=cfg.system_prompt(), mode=cfg.mode
+            results,
+            workers=args.workers,
+            system_prompt=cfg.system_prompt(),
+            mode=cfg.mode,
+            general=cfg.general,
         )
     print("── 判分 ──")
     judge = judge_all(results, cases, workers=args.workers)

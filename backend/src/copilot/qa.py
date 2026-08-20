@@ -1,10 +1,32 @@
 """带引用的问答。
 
 防幻觉是这里的头等大事。ERP 实施场景下，一个编造出来的配置步骤可能让客户
-的订单卡住——**答错比答"不知道"代价大得多**。所以设了两道闸门：
+的订单卡住——**答错比答"不知道"代价大得多**。
 
-    第一道  检索层：一条够格的结果都没有 → 直接返回兜底话术，根本不调 LLM
-    第二道  prompt：明确要求"材料里没有就说没有"，并禁止用常识补全
+⭐ **M12 把这条红线挪了一次位置，值得说清楚挪到了哪里。**
+
+M1–M11 的红线是「不许用自己的知识」（铁律 1 原文：不得用你自己的常识补全）。
+它挡住了幻觉，也挡住了一类正当问题——2026-08-20 线上实测：用户追问
+「品牌方又是什么」，模型答了一段正确的行业概念解释，被硬防线整段换成
+「知识库暂无此内容」；而事后查证，知识库里**确实没有**这个概念的定义
+（最高分 0.35 那条讲的是一盘货库存），**怎么修检索都救不回来**。
+一个连行业术语都要拒答的助手，用起来像坏的。
+
+所以红线从「知识的来源」挪到了**「错了会不会伤到人」**：
+
+    可以用自己的知识答     行业术语、概念解释、通用做法     错了是理解偏差
+    绝不能凭记忆写         界面路径、菜单层级、字段名、
+                          参数取值、数量上限               错了客户的订单卡住
+
+`ALLOW_GENERAL_KNOWLEDGE=false` 一行退回 M11 的行为，两版 prompt 都留在
+这个文件里（`_RULE1_STRICT` / `_RULE1_OPEN`），**其余铁律一字不差**。
+
+三道闸门现在是这样：
+
+    第一道  检索层：一条都没召回 → 放开时**让路**（那正是最需要问模型的时候），
+            关闭时直接返回兜底话术、不调 LLM
+    第二道  prompt：材料里有的以材料为准；没有的分三种情形处理（铁律 3）
+    第三道  agent/guard.py：一个工具都没调却写出**操作步骤**的，一律拦下
 
 第二道是主闸门。第一道只滤掉明显无关的，因为重排分数的绝对值很低
 （实测正确答案 0.02、无关内容 0.0001），靠绝对阈值卡不住。
@@ -21,6 +43,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from copilot.config import get_settings
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
 from copilot.retrieve import Citation, has_private_chunks, search
@@ -69,15 +92,16 @@ _GREETING_REPLY = """你好，我是旺店通旗舰版 ERP 的知识库助手。
 
 _CAPABILITY_REPLY = """我是旺店通旗舰版 ERP 的知识库助手，能做四件事：
 
-1. **回答操作与配置问题** —— 只依据知识库作答，每句结论都标出处；
-   材料里没有的会直说没有，不猜。
+1. **回答操作与配置问题** —— 优先依据知识库作答，每句有依据的结论都标出处。
 2. **带上操作截图** —— 原文档里有配图的步骤，会把截图一起给你。
 3. **读你自己的文档** —— 在「知识库」页上传操作手册、FAQ、截图，
    之后提问就能引用到它，而且只有你自己能检索到。
 4. **生成实施配置方案** —— 说一句「帮我出一份实施方案」，我会多轮问清楚需求，
    最后给一份可下载的 Excel。
 
-我不知道的事情会直接说不知道 —— ERP 里一个编出来的配置步骤，可能让客户的订单卡住。"""
+知识库里没有的行业术语、通用概念，我会按通用理解说一说，**并且告诉你这一段
+没有出处**。但**具体的界面路径、字段名、参数上限我绝不会凭记忆编** ——
+ERP 里一个编出来的配置步骤，可能让客户的订单卡住。那种问题查不到我就说查不到。"""
 
 _THANKS_REPLY = "不客气。还有别的问题随时问。"
 _BYE_REPLY = "再见，需要的时候再来找我。"
@@ -131,10 +155,57 @@ def small_talk_reply(question: str) -> str | None:
     return None if kind is None else canned_reply(kind)
 
 
-_TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。
+_HEAD_STRICT = "你是一名旺店通旗舰版 ERP 的实施顾问助手，只依据下面提供的「参考材料」回答问题。"
+_HEAD_OPEN = "你是一名旺店通旗舰版 ERP 的实施顾问助手。回答优先依据下面提供的「参考材料」。"
+
+# 铁律 1 和 3 的第二种情形，两个版本。**其余铁律两个版本一字不差。**
+_RULE1_STRICT = """1. 只用参考材料里的信息作答，**不得用你自己的常识补全或推测**。"""
+
+# ⚠️⚠️ **这几行看着啰嗦，一个字都别删。试过，破了线。**
+#
+# 2026-08-21 为了救配图带出率（放开后 83.3% → 33.3%），把这段从 7 行压到 3 行、
+# 把下面铁律 3 的三分支压成两句。配图确实回到了 50%，代价是**幻觉率 0% → 50%**：
+# 16 道 no_answer 题错了 8 道，其中两道是这个样子——
+#
+#     问：Lazada 店铺的订单怎么同步到 ERP？（知识库里没有 Lazada 的任何文档）
+#     答：进入【设置】-【基本设置】-【店铺】，点击"添加"，店铺平台选择 "Lazada"…[5]
+#
+# 它把材料里通用的建店流程照抄下来，**把平台名换成了 Lazada，还挂上了 [5]**。
+# 用户照着点进去，下拉框里根本没有那一项——而那句话是有出处的样子。
+# 这正是这次改动唯一没有商量余地的那条线。
+#
+# 所以：**长度换的是这条线，不是啰嗦。** 配图那 2 道题另想办法（扩题集），
+# 别再从这里省字。
+_RULE1_OPEN = """1. **材料里有的，一律以材料为准**，并按第 2 条标出来源编号。
+   材料里没有、而你确实知道的通用知识（行业术语、概念解释、通用做法），**可以答**。
+   ⚠️ 但有一条绝不能破：**不要凭记忆写旺店通的界面路径、菜单层级、字段名、
+   参数取值、数量上限。** 这一类只能来自材料。
+   你记忆里的路径和真实系统对不上时，用户会照着去点——而他分辨不出
+   这一句和有出处的那一句有什么区别。（**这不是保守，是这个产品唯一
+   会真正伤到人的错误形态**：一个编出来的配置步骤能让客户的订单卡住。）"""
+
+_RULE3_TAIL_STRICT = (
+    "   - 只有当材料**完全没有**与问题相关的内容时，才**只回复这一句**："
+    "知识库暂无此内容。\n"
+    "     不要解释、不要道歉、不要给建议、不要试着换个角度答。"
+)
+
+# ⚠️ **三个分支要分开写，不能合并成两句。** 理由同 `_RULE1_OPEN` 上面那段：
+# 合并版实测把幻觉率从 0% 打到 50%。真正起作用的是最后那句
+# 「凭记忆编一个出来是这里唯一不可接受的答法」——它是这段里唯一一句
+# 把「不知道」和「编一个」明确对立起来的话。
+_RULE3_TAIL_OPEN = """   - 材料里**完全没有**与问题相关的内容时：
+     · 这是个通用概念 / 术语 / 行业常识，而你确实知道 → **就答**，
+       但要先说明一句这不是知识库里的内容（如「知识库里没有这一条，按通用理解：」），
+       并且**不要给它标来源编号**——[n] 只属于材料里的内容。
+     · 这是旺店通的具体配置、路径、取值、上限，而材料里没有 → **只回复这一句**：
+       知识库暂无此内容。**凭记忆编一个出来是这里唯一不可接受的答法。**
+     · 你也确实不知道 → 同样只回复：知识库暂无此内容。"""
+
+_TEMPLATE = """{head}
 
 铁律：
-1. 只用参考材料里的信息作答，**不得用你自己的常识补全或推测**。
+{rule1}
 2. 每一句结论后面标注来源编号，如 [1]、[2]。多个来源就写 [1][3]。
 3. **先看材料里有没有能用的内容，再决定怎么答。这个顺序不能反**：
    - 材料里有能回答的内容——**哪怕只回答了问题的一部分**——就把那部分答出来，
@@ -143,8 +214,7 @@ _TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依
      ⚠️ 说「材料里没有」只针对**问题问到的东西**，而且要先通读全部材料再说。
      不要顺手罗列问题没问到的方面、也不要凭印象断定某件事材料没写——
      说错一句「材料未提及 X」和编造一个 X 一样是错的。
-   - 只有当材料**完全没有**与问题相关的内容时，才**只回复这一句**：知识库暂无此内容。
-     不要解释、不要道歉、不要给建议、不要试着换个角度答。
+{rule3_tail}
 4. 材料里写了具体的数字、上限、界面路径、字段名时，**照原文答**，不要概括成
    「有一定限制」「在设置里」这类说法——问的人要的就是那个具体值。
 5. **材料里的 [图1]、[图2] 是原文档的操作截图，要带上。** 你引用哪段材料，
@@ -301,14 +371,26 @@ ANSWER_STYLES = {"fast": _STYLE_FAST, "deep": _STYLE_DEEP}
 DEFAULT_MODE = "fast"
 
 
-def system_prompt_for(mode: str = DEFAULT_MODE, *, subject_guard: bool = False) -> str:
+def system_prompt_for(
+    mode: str = DEFAULT_MODE, *, subject_guard: bool = False, general: bool | None = None
+) -> str:
     """按档位拼出 system prompt。认不出来的档位一律退回简答档。
 
-    `subject_guard` 只由 `ask_stream` 在三个条件同时成立时置 True，
+    `subject_guard` 只由 `ask_stream` 在两个条件同时成立时置 True，
     见 `_SUBJECT_GUARD` 上面那段注释。**调用方不要自己开这个开关**——
     它一旦变成常开，就又是 M9 那条和铁律 3 打架的全局规则了。
+
+    `general` 是常识兜底（M12）。留 None 则读配置 `ALLOW_GENERAL_KNOWLEDGE`；
+    传死值是给评测用的——A/B 两版 prompt 必须能在同一次运行里都拿到。
     """
-    prompt = _TEMPLATE.format(style=ANSWER_STYLES.get(mode, _STYLE_FAST))
+    if general is None:
+        general = get_settings().allow_general_knowledge
+    prompt = _TEMPLATE.format(
+        head=_HEAD_OPEN if general else _HEAD_STRICT,
+        rule1=_RULE1_OPEN if general else _RULE1_STRICT,
+        rule3_tail=_RULE3_TAIL_OPEN if general else _RULE3_TAIL_STRICT,
+        style=ANSWER_STYLES.get(mode, _STYLE_FAST),
+    )
     return prompt + _SUBJECT_GUARD if subject_guard else prompt
 
 
@@ -322,6 +404,11 @@ USER_TEMPLATE = """参考材料：
 ---
 
 问题：{question}"""
+
+# 一条都没召回时，`{context}` 会是空串。**得明说是空的**，不能留一片空白：
+# 留白的话模型多半会当成「材料没给全」，然后开始猜材料里可能写了什么；
+# 明说没有，它才会走铁律 3 的第二种情形（常识兜底或拒答）。
+EMPTY_CONTEXT = "（这次检索一条都没命中，知识库里没有与这个问题相关的内容。）"
 
 # ─────────────────────────────────────────────────────────
 # 多轮改写
@@ -486,8 +573,16 @@ async def ask_stream(
 
     result = await search(session, search_query, embedder, reranker, user_id=user_id)
 
-    # 第一道闸门：一条都没召回，不必浪费一次 LLM 调用
-    if result.is_empty:
+    # 第一道闸门：一条都没召回。
+    #
+    # ⚠️ **常识兜底打开后这道闸门必须让路**（M12）。它原来的作用是「省一次
+    # LLM 调用」——反正材料是空的，模型只能答不知道。但允许用常识之后，
+    # 材料为空恰恰是**最需要**问一次模型的时候：「品牌方是什么」在知识库里
+    # 一条都没有，而它是个正当问题。
+    #
+    # 代价说清楚：这条路以前是 0 成本的，现在每一次「知识库里没有」都要花
+    # 一次模型调用。挡在前面的仍然是寒暄短路（那个不花钱）。
+    if result.is_empty and not get_settings().allow_general_knowledge:
         return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     context = result.build_context()
@@ -502,7 +597,9 @@ async def ask_stream(
         *_history_messages(history),
         {
             "role": "user",
-            "content": USER_TEMPLATE.format(context=context.text, question=question),
+            "content": USER_TEMPLATE.format(
+                context=context.text or EMPTY_CONTEXT, question=question
+            ),
         },
     ]
     return StreamedAnswer(

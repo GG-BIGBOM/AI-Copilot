@@ -61,6 +61,7 @@ from copilot.agent.agent import build_agent, usage_limits
 from copilot.agent.deps import AgentDeps
 from copilot.agent.guard import looks_like_kb_answer
 from copilot.api import stream
+from copilot.config import get_settings
 from copilot.qa import NO_ANSWER
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,20 @@ async def run_agent_stream(
         # ⚠️ `used_tools` 这个前提不能省。`generate_plan` 之后 Agent 会写一段
         # 带界面路径的方案摘要，长得和越线的一模一样，但它有据——据在刚跑完的
         # 那个工具里。少了这个判断，整条出方案流程会变成「知识库暂无此内容」。
-        if not used_tools and looks_like_kb_answer(text):
+        # ⚠️ **常识兜底打开时，这道防线只拦「像操作步骤」的那一半**（M12）。
+        #
+        # 2026-08-20 线上实测：用户追问「品牌方又是什么」，模型没调工具、
+        # 写了一段正确的行业概念解释，被这里整段换成了「知识库暂无此内容」。
+        # 事后查证：知识库里**确实没有**这个概念的定义，上一轮召回的 5 块材料
+        # 也一个「品牌方」都没有——换句话说怎么修检索都救不回来，
+        # 而防线把一个正当的问题变成了一句拒答。
+        #
+        # 所以判据从「像不像知识库答案」收窄成「像不像**操作步骤**」：
+        # 带界面路径、菜单层级、[n] 引用标记的，仍然一律拦下（那是真会伤人的
+        # 那一种）；纯概念解释放行。开关关掉时行为和以前一模一样。
+        if not used_tools and looks_like_kb_answer(
+            text, operational_only=get_settings().allow_general_knowledge
+        ):
             logger.warning(
                 "越过工具直答，已拦下：question=%r answer=%r", deps.question[:60], text[:120]
             )
