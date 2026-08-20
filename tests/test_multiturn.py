@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from chat_helpers import FakeLLM, ask, parts
+from chat_helpers import FakeLLM, PartsFromStream, ask, parts
 from sqlalchemy import select
 
 from copilot.db.models import Message
@@ -69,7 +69,7 @@ async def test_greeting_answers_without_retrieval(
 # ---------- 多轮 ----------
 
 
-class ScriptedLLM:
+class ScriptedLLM(PartsFromStream):
     """按调用顺序返回不同结果，用来分开看「改写」和「作答」两次调用。"""
 
     def __init__(self, rewritten: str, answer: str) -> None:
@@ -138,7 +138,7 @@ async def test_first_turn_does_not_rewrite(api_client, logged_in, public_chunk, 
 FULL_ANSWER = "第一步先进入设置，第二步绑定账号，第三步打印面单"
 
 
-class SlowLLM:
+class SlowLLM(PartsFromStream):
     """一个字一个字慢慢吐，好让测试在中途把请求取消掉。
 
     ⭐ **`emitted_enough` 是为了不掐秒表。** 「睡 0.55 秒再取消」在本机单跑
@@ -472,3 +472,141 @@ async def test_small_talk_still_short_circuits_a_fresh_conversation(
     body = "".join(p["delta"] for p in parts(r.text) if p["type"] == "text-delta")
     assert "不客气" in body
     assert fake_providers.calls == [], "固定回复不该调模型"
+
+
+# ---------- 首字到了才开正文 ----------
+
+
+class SilentLLM(PartsFromStream):
+    """一个字都不吐的模型。用来测「没有内容就不该开正文片段」。"""
+
+    def stream(self, messages: list[dict], temperature: float = 0.1) -> Iterator[str]:
+        return iter(())
+
+    def complete(self, messages: list[dict], temperature: float = 0.1) -> str:
+        return ""
+
+    def close(self) -> None:
+        pass
+
+
+async def test_no_text_part_when_model_says_nothing(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch
+):
+    """⭐ `text-start` 要等**第一个字真的到了**才发。
+
+    原来是在调模型之前就发，于是 AI SDK 立刻从 `submitted` 切到 `streaming`，
+    前端那句「正在分析」消失、换成一条空答案加一个闪烁光标。
+    普通模型只闪几百毫秒看不出来；详解档走的 kimi-k2.6 是推理模型，
+    它先吐三千字草稿，**正文首字要 60 秒**——线上表现就是
+    「选了详解，没有回答内容」。
+    """
+    from copilot.api import providers
+
+    title, body = public_chunk
+    monkeypatch.setattr(providers, "get_llm", lambda: SilentLLM())
+
+    r = await ask(api_client, body)
+    assert r.status_code == 200
+
+    types = [p["type"] for p in parts(r.text)]
+    assert "text-start" not in types, "一个字都没有，不该开一个空的正文片段"
+    assert "text-delta" not in types
+    assert types[-2:] == ["finish-step", "finish"], "协议骨架仍然要完整收尾"
+
+
+async def test_text_part_still_opens_when_there_is_content(
+    api_client, logged_in, public_chunk, fake_providers
+):
+    """有内容时协议形状不变——晚发不等于不发。"""
+    title, body = public_chunk
+    r = await ask(api_client, body)
+    types = [p["type"] for p in parts(r.text)]
+    assert "text-start" in types and "text-end" in types
+    # text-start 必须排在第一个 text-delta 前面
+    assert types.index("text-start") < types.index("text-delta")
+
+
+# ---------- 详解档：推理草稿 ----------
+
+
+class ThinkingLLM:
+    """推理模型：先吐几句草稿，再吐正文。
+
+    对应线上实测的 kimi-k2.6——第一个草稿字 1 秒就到，
+    **第一个正文字要 8~60 秒**。中间那段就是用户抱怨的「详解没有回答内容」。
+    """
+
+    def __init__(self, draft: str, answer: str) -> None:
+        self.draft = draft
+        self.answer = answer
+
+    def stream_parts(self, messages: list[dict], temperature: float = 0.1):
+        for ch in self.draft:
+            yield "reasoning", ch
+        for ch in self.answer:
+            yield "content", ch
+
+    def stream(self, messages: list[dict], temperature: float = 0.1) -> Iterator[str]:
+        return (t for k, t in self.stream_parts(messages, temperature) if k == "content")
+
+    def complete(self, messages: list[dict], temperature: float = 0.1) -> str:
+        return "".join(self.stream(messages, temperature))
+
+    def close(self) -> None:
+        pass
+
+
+async def test_reasoning_is_streamed_separately_from_the_answer(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch
+):
+    """⭐ 草稿要**边出边发**，而且和正文分开。
+
+    这是「详解太慢」的正解：模型其实 1 秒就开口了，只是说的是草稿。
+    不发草稿，前端那几十秒就是一片空白；混进正文，用户会读到
+    「材料里没提到…」这种自我推翻的话，比空白更糟。
+    """
+    from copilot.api import providers
+
+    title, body = public_chunk
+    llm = ThinkingLLM(draft="先看材料里有没有提到绑定网点", answer="第一步进入设置[1]。")
+    monkeypatch.setattr(providers, "get_llm", lambda: llm)
+
+    r = await ask(api_client, body)
+    assert r.status_code == 200
+    chunks = parts(r.text)
+    kinds = [c["type"] for c in chunks]
+
+    assert "reasoning-start" in kinds and "reasoning-end" in kinds
+    drafted = "".join(c["delta"] for c in chunks if c["type"] == "reasoning-delta")
+    answered = "".join(c["delta"] for c in chunks if c["type"] == "text-delta")
+    assert drafted == "先看材料里有没有提到绑定网点"
+    assert answered == "第一步进入设置[1]。"
+
+    # 草稿在正文之前，而且**先收尾**——不然前端两个块会叠在一起
+    assert kinds.index("reasoning-start") < kinds.index("text-start")
+    assert kinds.index("reasoning-end") < kinds.index("text-start")
+
+
+async def test_draft_never_becomes_the_stored_answer(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch, maker
+):
+    """⚠️ 草稿**不是答案**：不落库，也不参与「说了不知道就别挂来源」的判定。
+
+    落库的话，用户翻历史记录看到的是一段自言自语；参与判定的话，
+    草稿里一句「材料里好像没有」就能把整条回答的来源全撤掉。
+    """
+    from copilot.api import providers
+
+    title, body = public_chunk
+    conv_id = str(uuid.uuid4())
+    llm = ThinkingLLM(draft="知识库暂无此内容？再找找", answer="第一步进入设置[1]。")
+    monkeypatch.setattr(providers, "get_llm", lambda: llm)
+
+    r = await ask(api_client, body, conv_id=conv_id)
+    assert r.status_code == 200
+    # 草稿里带着那句"暂无此内容"，但正文有实质回答——来源该照挂
+    assert [c for c in parts(r.text) if c["type"] == "data-citations"], "来源被草稿误伤了"
+
+    rows = await _messages_of(maker, conv_id)
+    assert rows[1].content == "第一步进入设置[1]。", "草稿混进了落库的答案"

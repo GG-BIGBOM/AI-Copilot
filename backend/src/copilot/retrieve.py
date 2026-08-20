@@ -136,6 +136,37 @@ def _visibility_filter(user_id: uuid.UUID | None) -> ColumnElement[bool]:
     return public_only | (Chunk.owner_id == user_id)
 
 
+# 人工订正要排到第几位。**不是无条件置顶**：
+# 只有重排分到了这条线，才认为「这条订正确实是在回答用户这次问的问题」。
+# 无条件置顶的错法很难查——一条为别的问题写的订正会挤掉真正对的那一篇，
+# 表现是「自从我改了那个答案，别的问题也开始答错了」。
+VERIFIED_PROMOTE_SCORE = 0.5
+
+
+def _verified_first(
+    picked: list[tuple[Chunk, float]],
+) -> list[tuple[Chunk, float]]:
+    """把够格的人工订正提到最前面，其余顺序原样保留。
+
+    ⭐ **这是「我改了答案，下次就照我改的答」这句承诺的落点。**
+    订正块和语雀原文一起参与检索，但检索分只反映「像不像」，
+    不反映「谁说了算」——人写定的答案说了算，所以要在这里明确排一次。
+
+    ⚠️ 它**只重排，不放行**：threshold 已经滤过一轮，这里不会把
+    低于门槛的东西捞回来。也不改 `_visibility_filter` ——可见性只有那一个收口。
+    """
+    if not any(c.verified for c, _ in picked):
+        return picked
+    def promoted(pair: tuple[Chunk, float]) -> bool:
+        chunk, score = pair
+        return bool(chunk.verified) and score >= VERIFIED_PROMOTE_SCORE
+
+    front = [p for p in picked if promoted(p)]
+    if not front:
+        return picked
+    return front + [p for p in picked if not promoted(p)]
+
+
 async def search(
     session: AsyncSession,
     query: str,
@@ -190,6 +221,8 @@ async def search(
     else:
         # 没有重排器时退回向量顺序，分数用 1/(1+序号) 占位
         picked = [(c, 1.0 / (i + 1)) for i, c in enumerate(candidates[:rerank_k])]
+
+    picked = _verified_first(picked)
 
     return RetrievalResult(
         chunks=[

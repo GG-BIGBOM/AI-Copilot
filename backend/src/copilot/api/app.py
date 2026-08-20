@@ -19,6 +19,8 @@ from copilot.api.routes import auth as auth_routes
 from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import corrections as corrections_routes
 from copilot.api.routes import docs as docs_routes
+from copilot.api.routes import invites as invites_routes
+from copilot.api.routes import verified as verified_routes
 from copilot.auth.security import ensure_production_ready
 from copilot.config import get_settings
 from copilot.db.session import engine
@@ -71,6 +73,8 @@ def create_app() -> FastAPI:
     app.include_router(chat_routes.router)
     app.include_router(docs_routes.router)
     app.include_router(corrections_routes.router)
+    app.include_router(invites_routes.router)
+    app.include_router(verified_routes.router)
 
     # 镜像下来的语雀配图。
     # ⚠️ 线上由 **nginx** 直接发（`location /images/ { alias .../data/images/; }`），

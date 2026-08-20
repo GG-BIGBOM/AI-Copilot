@@ -104,7 +104,12 @@ export function ChatView({
   /* ─── 进行中的会话：正文在上，输入框停靠在底部 ─── */
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList messages={messages} status={status} onRegenerate={() => regenerate({ body: { mode } })} />
+      <MessageList
+        messages={messages}
+        status={status}
+        mode={mode}
+        onRegenerate={() => regenerate({ body: { mode } })}
+      />
 
       {/* pb 里带 safe-area：iPhone 上不加这个，输入框会被底部的横条压住 */}
       <div className="shrink-0 px-4 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">

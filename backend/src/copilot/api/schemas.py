@@ -56,8 +56,22 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: str
     created_at: datetime
+    # 前端据此决定要不要显示「邀请码」入口。摆一个点了就 403 的菜单项
+    # 比不摆更糟——用户会以为自己该有这个权限
+    is_admin: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class InviteCreate(BaseModel):
+    """一次最多 20 个。要更多多点几次——比手滑打成 1000 好"""
+
+    count: int = Field(default=1, ge=1, le=20)
+
+
+class InviteOut(BaseModel):
+    codes: list[str]
+    unused: int
 
 
 class UIMessage(BaseModel):
@@ -220,4 +234,33 @@ class CorrectionSaved(BaseModel):
     correction: CorrectionOut
     applied: bool
     chunks: int
+    note: str
+
+
+class VerifiedIn(BaseModel):
+    """一条答案订正：这个问题，以后照这个答。
+
+    没有 `reason`——和勘误层不同，这里改的是**答案本身**，改成什么样一眼就看得见，
+    再要一段理由只会让人放弃填写。多一个必填框，就少一半的人会用。
+    """
+
+    question: str = Field(min_length=2, max_length=1024)
+    answer: str = Field(min_length=1)
+
+
+class VerifiedOut(BaseModel):
+    id: uuid.UUID
+    question: str
+    answer: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class VerifiedSaved(BaseModel):
+    """保存的回执。`applied` 同 `CorrectionSaved`：落库了不等于进索引了。"""
+
+    verified: VerifiedOut
+    applied: bool
     note: str

@@ -58,6 +58,10 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 管理员：能生成邀请码。**没有自助升级的路**——第一个管理员由命令行
+    # `copilot admin <邮箱>` 指定。留一个网页上的「升级自己」入口，
+    # 等于邀请制形同虚设：任何注册用户都能给自己发无限邀请码
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # M8 的成本兜底：每日 token 配额，0 表示不限
     daily_token_quota: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -145,6 +149,10 @@ class Chunk(Base):
     # `id` 对应正文里的 `[图:a3f9]` 标记。检索时会把这些标记重新编号成
     # `[图1][图2]` 再给模型——它只能引用真实存在的编号，编不出不存在的图。
     images: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
+    # 这一块来自人工订正（`VerifiedAnswer`）。检索里靠它把「人写定的标准答案」
+    # 排到语雀原文前面——见 `retrieve.py` 的 `_verified_first`。
+    # 冗余在这里而不是连 Document 表：检索是热路径，为一个布尔量多一次 join 不值当
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -277,6 +285,43 @@ class Correction(Base):
     # 写这条勘误时语雀那篇的 content_updated_at。语雀后来又更新了就算「过期」
     based_on: Mapped[str] = mapped_column(String(64), default="")
     retired: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class VerifiedAnswer(Base):
+    """答案订正：某个问题的**标准答案**，由人写定。
+
+    和 `Correction` 的区别，一句话：
+
+        Correction     改的是「哪一篇文档」    要选文档、重写整篇正文
+        VerifiedAnswer 改的是「哪一个问题」    看到答案不对，当场改成对的
+
+    用户真正想做的是后者。为了改一句话去重写一整篇语雀原文，太重了，
+    重到没人会用——而没人用的订正功能等于没有。
+
+    ⚠️ **它不是检索之外的另一条路。** 保存时会写成一篇
+    `source_type="verified"` 的公共文档 + 若干块，照常向量化、照常参与检索、
+    照常被引用（见 `api/routes/verified.py`）。**别为它单开一套召回**：
+    单开就意味着两条召回路径、两套 owner_id 隔离规则，而隔离是这个项目里
+    唯一一条错了就不可挽回的规则。
+
+    `question` unique：同一个问题只能有一条标准答案。有两条的话，
+    检索会随机命中其中一条，而这种错的样子是「答案时好时坏」，最难查。
+    """
+
+    __tablename__ = "verified_answers"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # 作者删号了订正要留着——知识还在生效，不能因为人走了就悄悄失效
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    question: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
+    answer: Mapped[str] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

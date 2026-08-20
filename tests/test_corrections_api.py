@@ -164,3 +164,49 @@ def test_db_correction_has_a_readable_name():
 
     c = CorrectionFile(path=None, target_url=URL, reason="r", title="打印位置")
     assert "打印位置" in c.name
+
+
+# ---------- 邀请码（管理员） ----------
+
+
+async def test_invites_need_admin(api_client, author):
+    """非管理员一律 403。留个自助升级的口子，邀请制就形同虚设了。"""
+    assert (await api_client.get("/api/invites")).status_code == 403
+    assert (await api_client.post("/api/invites", json={"count": 1})).status_code == 403
+
+
+async def test_admin_can_generate(api_client, author, maker):
+    """管理员能生成，返回的是全部未使用的码。"""
+    async with maker() as s:
+        u = await s.get(User, author)
+        u.is_admin = True
+        await s.commit()
+
+    r = await api_client.post("/api/invites", json={"count": 3})
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["unused"] >= 3
+    assert len(data["codes"]) >= 3
+
+    r2 = await api_client.get("/api/invites")
+    assert r2.status_code == 200
+    assert set(data["codes"]) <= set(r2.json()["codes"])
+
+
+async def test_count_is_capped(api_client, author, maker):
+    """一次最多 20 个——手滑打成 1000 该被挡下来。"""
+    async with maker() as s:
+        u = await s.get(User, author)
+        u.is_admin = True
+        await s.commit()
+    assert (await api_client.post("/api/invites", json={"count": 1000})).status_code == 422
+
+
+async def test_me_reports_admin_flag(api_client, author, maker):
+    """前端靠 /me 里的 is_admin 决定要不要显示那个入口。"""
+    assert (await api_client.get("/api/auth/me")).json()["is_admin"] is False
+    async with maker() as s:
+        u = await s.get(User, author)
+        u.is_admin = True
+        await s.commit()
+    assert (await api_client.get("/api/auth/me")).json()["is_admin"] is True

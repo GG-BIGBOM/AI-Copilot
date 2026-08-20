@@ -28,6 +28,20 @@ export function messageText(message: CopilotUIMessage): string {
 }
 
 /**
+ * 取这条消息的推理草稿（详解档才有）。
+ *
+ * ⚠️ **草稿不是答案。** 它是详解档那个推理模型在正式作答前的自言自语，
+ * 里面尽是「材料里好像没提到…」这类会被自己推翻的话。所以它单独渲染、
+ * 默认折叠，也**不**参与复制、订正、判「有没有答案」。
+ *
+ * 它存在的唯一理由是等待：实测第一个草稿字 1 秒就到，第一个正文字要 8~60 秒。
+ * 没有它，那几十秒前端一个字都没有，用户以为「详解不回答」。
+ */
+export function messageReasoning(message: CopilotUIMessage): string {
+  return message.parts.map((p) => (p.type === "reasoning" ? p.text : "")).join("");
+}
+
+/**
  * 取这条消息带的引用。
  *
  * 后端保证：模型回答「知识库暂无此内容」时**根本不会发**这个片段，

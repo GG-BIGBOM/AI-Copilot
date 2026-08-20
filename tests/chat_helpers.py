@@ -13,7 +13,6 @@ from collections.abc import Iterator
 
 from copilot.providers.base import RerankResult
 
-
 PASSWORD = "test-password-2026"
 DIM = 1024
 
@@ -49,7 +48,21 @@ class TopOneReranker:
         return [RerankResult(index=0, score=0.9)] if documents else []
 
 
-class FakeLLM:
+class PartsFromStream:
+    """把只会 `stream()` 的假模型补上 `stream_parts()`。
+
+    真的 `ChatLLM` 反过来：`stream_parts()` 是本体，`stream()` 是它的正文过滤。
+    假模型里没有推理草稿可吐，所以这里一律标成 `content`。
+    想测草稿那一路的用例，自己实现 `stream_parts` 覆盖掉这个默认实现。
+    """
+
+    def stream_parts(
+        self, messages: list[dict], temperature: float = 0.1
+    ) -> Iterator[tuple[str, str]]:
+        return (("content", piece) for piece in self.stream(messages, temperature))
+
+
+class FakeLLM(PartsFromStream):
     def __init__(self, reply: str) -> None:
         self.reply = reply
         self.calls: list[list[dict]] = []

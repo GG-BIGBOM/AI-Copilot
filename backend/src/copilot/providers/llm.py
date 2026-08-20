@@ -51,10 +51,28 @@ class ChatLLM:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def stream(self, messages: list[dict], temperature: float = 0.1) -> Iterator[str]:
-        """流式生成。temperature 压得很低——知识库问答要的是照着材料说，不是创作。
+    def stream_parts(
+        self, messages: list[dict], temperature: float = 0.1
+    ) -> Iterator[tuple[str, str]]:
+        """流式生成，逐段吐出 `(kind, text)`，kind 是 `reasoning` 或 `content`。
 
+        temperature 压得很低——知识库问答要的是照着材料说，不是创作。
         除非这个模型自己锁死了温度（见 `forced_temperature`）。
+
+        ⭐ **为什么要把 `reasoning_content` 也吐出来。**
+        详解档走的 kimi-k2.6 是推理模型。实测（8 段材料的真实上下文）：
+
+            第一个 reasoning 字   0.8 ~ 1.5 秒
+            第一个正文字          8 ~ 60 秒
+
+        只取 content 的话，那中间几十秒**前端一个字都没有**——用户看到的就是
+        「选了详解，它不回答」。而模型其实一直在说话，只是说的是草稿。
+        把草稿也送出去，等待就从"死机"变成"看得见它在想"。
+
+        试过的另一条路：`{"thinking": {"type": "disabled"}}` 是 Moonshot 认的
+        参数（配 temperature=0.6），确实能把推理关掉。但关掉之后详解档就只是
+        「换了个模型的简答档」，而这一档存在的理由恰恰是想得久一点。
+        `reasoning_effort` 三档实测都没有量级差别，不值得引入一个新旋钮。
         """
         payload = {
             "model": self._model,
@@ -80,8 +98,17 @@ class ChatLLM:
                     delta = json.loads(data)["choices"][0].get("delta", {})
                 except (KeyError, IndexError, ValueError):
                     continue
+                # 顺序要紧：同一个 delta 里两样都有时，草稿先于正文
+                if reasoning := delta.get("reasoning_content"):
+                    yield "reasoning", reasoning
                 if content := delta.get("content"):
-                    yield content
+                    yield "content", content
+
+    def stream(self, messages: list[dict], temperature: float = 0.1) -> Iterator[str]:
+        """只要正文。给不关心推理过程的调用方用（改写问题、评测、Agent）。"""
+        for kind, text in self.stream_parts(messages, temperature):
+            if kind == "content":
+                yield text
 
     def complete(self, messages: list[dict], temperature: float = 0.1) -> str:
         return "".join(self.stream(messages, temperature))

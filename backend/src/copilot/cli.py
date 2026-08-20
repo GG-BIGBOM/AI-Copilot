@@ -672,3 +672,41 @@ async def _corrections_export(dry_run: bool) -> None:
             "看一眼 diff 再提交；数据库里的记录仍然保留。",
             fg=typer.colors.GREEN,
         )
+
+
+@app.command()
+def admin(
+    email: str = typer.Argument(..., help="要设为管理员的账号邮箱"),
+    revoke: bool = typer.Option(False, "--revoke", help="改成取消管理员"),
+) -> None:
+    """把某个账号设为管理员（能在网页上生成邀请码）。
+
+    ⚠️ **只有这一条路。** 网页上没有「把自己升级成管理员」的接口——
+    留那个口子等于邀请制形同虚设：任何注册用户都能给自己发无限邀请码。
+
+        uv run copilot admin you@example.com
+        uv run copilot admin someone@example.com --revoke
+    """
+    import asyncio
+
+    asyncio.run(_admin(email, revoke))
+
+
+async def _admin(email: str, revoke: bool) -> None:
+    from sqlalchemy import select
+
+    from copilot.db.models import User
+    from copilot.db.session import SessionLocal
+
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.email == email.strip().lower()))
+        ).scalar_one_or_none()
+        if user is None:
+            typer.secho(f"库里没有这个账号：{email}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        user.is_admin = not revoke
+        await session.commit()
+
+    verb = "取消了" if revoke else "设为"
+    typer.secho(f"{email} 已{verb}管理员。", fg=typer.colors.GREEN)

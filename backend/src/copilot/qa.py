@@ -318,7 +318,10 @@ class StreamedAnswer:
     「知识库暂无此内容」时，正文里根本不会出现任何 [图N]，也就什么都不会渲染。
     """
 
-    stream: Iterator[str]
+    # `(kind, text)`，kind 是 `reasoning`（模型的草稿）或 `content`（正文）。
+    # ⚠️ **草稿不是答案**，落库和判「知识库暂无此内容」都只能看 content。
+    # 它存在的唯一理由是详解档的正文首字要等几十秒，中间总得让人看见点什么
+    stream: Iterator[tuple[str, str]]
     citations: list[Citation]
     images: list[dict] = field(default_factory=list)
     # 送进模型的上下文原文。调用方用它记 token 用量——
@@ -352,7 +355,7 @@ async def ask_stream(
     # 招呼语在检索**之前**拦掉。放到后面就晚了：它一条都召不回，
     # 会被下面那道闸门变成一句「知识库暂无此内容」
     if (canned := small_talk_reply(question)) is not None:
-        return StreamedAnswer(stream=iter([canned]), citations=[])
+        return StreamedAnswer(stream=iter([("content", canned)]), citations=[])
 
     # 只有检索词用改写后的版本；给模型看的问题仍是用户原话
     search_query = (
@@ -363,7 +366,7 @@ async def ask_stream(
 
     # 第一道闸门：一条都没召回，不必浪费一次 LLM 调用
     if result.is_empty:
-        return StreamedAnswer(stream=iter([NO_ANSWER]), citations=[])
+        return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     context = result.build_context()
     messages = [
@@ -375,7 +378,7 @@ async def ask_stream(
         },
     ]
     return StreamedAnswer(
-        stream=llm.stream(messages),
+        stream=llm.stream_parts(messages),
         citations=result.citations,
         images=context.images,
         context_text=context.text,
@@ -396,7 +399,7 @@ async def ask(
     streamed = await ask_stream(
         session, question, embedder, reranker, llm, user_id=user_id, history=history, mode=mode
     )
-    text = "".join(streamed.stream)
+    text = "".join(t for kind, t in streamed.stream if kind == "content")
     answer = Answer(text=text, citations=streamed.citations, images=streamed.images)
     # 模型说了不知道，就别再挂一堆来源——那会让用户以为答案有依据
     if answer.is_no_answer:

@@ -9,32 +9,32 @@
  * 只放**真的有用的**几个。规范里还提到「赞 / 踩」，但后端没有反馈接口，
  * 做一个点了什么都不会发生的按钮比少一个按钮更糟（§38.4）。
  *
- * 「答错了」只在这条回答**有带链接的来源**时才出现：勘误是「盖掉某一篇语雀
- * 原文」，没有目标就无从盖起。没有来源还摆个按钮，点进去只能让人手填 URL，
- * 而填错的表现是「保存成功但一个字都没生效」——最难查的那种。
+ * 「答错了」的条件是**这一轮有提问**（`question`），不是「有来源」。
+ * 订正存的是问答对，键是那句提问；至于这次的答案是查出来的还是编出来的，
+ * 反倒不影响——**恰恰是没查到来源、答得最离谱的那次，最需要人来改**。
+ * （旧版按「有带链接的来源」判，因为那时改的是语雀原文，没有目标就无从盖起。）
  */
 
 import { useState } from "react";
 import { Check, Copy, PencilLine, RotateCcw } from "lucide-react";
 
-import { CorrectionDialog } from "@/components/chat/correction-dialog";
-import type { Citation } from "@/lib/api";
+import { VerifyDialog } from "@/components/chat/verify-dialog";
 
 const ACTION =
   "inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground";
 
 export function MessageActions({
   text,
-  citations = [],
+  question,
   onRegenerate,
 }: {
   text: string;
-  citations?: Citation[];
+  /** 这一轮用户问的那句话。订正以它为键——没有它就无从订正 */
+  question?: string;
   onRegenerate?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [correcting, setCorrecting] = useState(false);
-  const canCorrect = citations.some((c) => c.url);
 
   function copy() {
     if (!text) return;
@@ -59,21 +59,22 @@ export function MessageActions({
         </button>
       )}
 
-      {canCorrect && (
+      {question && (
         <>
           <button
             type="button"
             className={ACTION}
             onClick={() => setCorrecting(true)}
-            aria-label="这条答错了，去改知识库"
+            aria-label="这条答错了，改成正确的答案"
           >
             <PencilLine className="size-3.5" />
-            答错了
+            答错了，我来改
           </button>
-          <CorrectionDialog
+          <VerifyDialog
             open={correcting}
-            citations={citations}
             onOpenChange={setCorrecting}
+            question={question}
+            answer={text}
           />
         </>
       )}

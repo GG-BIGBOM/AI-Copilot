@@ -24,12 +24,14 @@ import {
   Search,
   SunMoon,
   ListChecks,
+  Ticket,
   Trash2,
   X,
 } from "lucide-react";
 import { Menu } from "@base-ui/react/menu";
 
 import { BrandMark } from "@/components/brand-mark";
+import { InviteDialog } from "@/components/chat/invite-dialog";
 import { Button } from "@/components/ui/button";
 import { POPUP_LAYER } from "@/lib/layers";
 import { cn } from "@/lib/utils";
@@ -144,6 +146,7 @@ export function Sidebar({
   const [managing, setManaging] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const grouped = useMemo(() => groupConversationsByDate(conversations), [conversations]);
   const initialLetter = user.email ? user.email.slice(0, 1).toUpperCase() : "U";
@@ -493,6 +496,12 @@ export function Sidebar({
                     <ListChecks className="size-3.5" />
                     管理对话
                   </Menu.Item>
+                  {user.is_admin && (
+                    <Menu.Item className={MENU_ITEM} onClick={() => setInviting(true)}>
+                      <Ticket className="size-3.5" />
+                      邀请码
+                    </Menu.Item>
+                  )}
                   <Menu.Item className={MENU_ITEM} onClick={toggleTheme}>
                     <SunMoon className="size-3.5" />
                     {isDark ? "切换为浅色" : "切换为深色"}
@@ -513,6 +522,8 @@ export function Sidebar({
           </Menu.Root>
         </div>
       </aside>
+
+      <InviteDialog open={inviting} onOpenChange={setInviting} />
     </>
   );
 }

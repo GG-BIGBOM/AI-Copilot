@@ -87,7 +87,11 @@ async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
         deps.images = list(streamed.images)
         await deps.emit_images()
 
-        async for piece in iterate_in_threadpool(streamed.stream):
+        async for kind, piece in iterate_in_threadpool(streamed.stream):
+            # Agent 这一路只要正文。推理草稿（详解档才有）先丢掉——
+            # Agent 自己的过程展示走的是 tool trace，再叠一层草稿只会更吵
+            if kind != "content":
+                continue
             buf.append(piece)
             await deps.emit_text(piece)
     except Exception as e:  # noqa: BLE001 - 见文件头第 2 条

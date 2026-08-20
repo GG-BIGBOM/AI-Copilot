@@ -94,6 +94,25 @@ def text_end(text_id: str) -> str:
     return encode({"type": "text-end", "id": text_id})
 
 
+# ---------- 推理草稿 ----------
+#
+# AI SDK 的 reasoning part。前端 `useChat` 会把它们收成 `type: "reasoning"` 的
+# part，和正文分开。**分开这件事是刚需**：草稿里会出现「材料里没提到…」
+# 「也许是设置-快递管理？」这类自我推翻的话，混进正文就是一条会引人误会的答案。
+
+
+def reasoning_start(part_id: str) -> str:
+    return encode({"type": "reasoning-start", "id": part_id})
+
+
+def reasoning_delta(part_id: str, delta: str) -> str:
+    return encode({"type": "reasoning-delta", "id": part_id, "delta": delta})
+
+
+def reasoning_end(part_id: str) -> str:
+    return encode({"type": "reasoning-end", "id": part_id})
+
+
 # ---------- 自定义数据 ----------
 
 

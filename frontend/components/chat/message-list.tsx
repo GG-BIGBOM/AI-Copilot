@@ -15,14 +15,17 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { AgentTrace, DownloadCard } from "@/components/chat/agent-trace";
+import type { AnswerMode } from "@/lib/answer-mode";
 import { BrandMark } from "@/components/brand-mark";
 import { Citations } from "@/components/chat/citations";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { MessageActions } from "@/components/chat/message-actions";
+import { ReasoningPanel } from "@/components/chat/reasoning-panel";
 import {
   messageCitations,
   messageDownload,
   messageImages,
+  messageReasoning,
   messageText,
   messageTools,
   type CopilotUIMessage,
@@ -31,10 +34,13 @@ import {
 export function MessageList({
   messages,
   status,
+  mode,
   onRegenerate,
 }: {
   messages: CopilotUIMessage[];
   status: "submitted" | "streaming" | "ready" | "error";
+  /** 详解档要等得久得多，等待文案得说清楚，不能干晾着 */
+  mode?: AnswerMode;
   onRegenerate?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,10 +75,16 @@ export function MessageList({
         <div className="flex flex-col gap-8 px-4 py-8 sm:px-6">
           {messages.map((m, index) => {
             const isLast = index === messages.length - 1;
+            // 「答错了，我来改」要拿这一轮的提问当键。往前找最近的一条用户消息，
+            // 而不是 index-1——重新生成之后中间可能夹着别的东西
+            const prevUser = messages
+              .slice(0, index)
+              .findLast((x) => x.role === "user");
             return (
               <Message
                 key={m.id}
                 message={m}
+                question={prevUser ? messageText(prevUser) : undefined}
                 isStreaming={isLast && status === "streaming"}
                 onRegenerate={isLast && status === "ready" ? onRegenerate : undefined}
               />
@@ -84,7 +96,14 @@ export function MessageList({
             <div className="content-grid">
               <div className="flex items-center gap-1.5 text-[13px] text-foreground">
                 <BrandMark className="size-4 text-bronze" thinking />
-                <span className="shimmer shimmer-duration-2400">正在理解问题</span>
+                <span className="shimmer shimmer-duration-2400">
+                {mode === "deep" ? "正在深入分析" : "正在理解问题"}
+              </span>
+              {mode === "deep" && (
+                // kimi-k2.6 是推理模型：它先在心里打三千字草稿，正文首字要一分钟。
+                // 不说这一句，用户只会以为卡住了
+                <span className="text-muted-foreground">详解档要想得久一些，请稍候</span>
+              )}
               </div>
             </div>
           )}
@@ -111,14 +130,18 @@ export function MessageList({
 
 function Message({
   message,
+  question,
   isStreaming,
   onRegenerate,
 }: {
   message: CopilotUIMessage;
+  /** 这一轮用户问的那句话，传给「答错了，我来改」 */
+  question?: string;
   isStreaming: boolean;
   onRegenerate?: () => void;
 }) {
   const text = messageText(message);
+  const reasoning = messageReasoning(message);
   const citations = messageCitations(message);
   const images = messageImages(message);
   // M7：Agent 的工具调用过程与方案下载。普通问答走直路，这两样都是空的
@@ -141,6 +164,9 @@ function Message({
   /* ─── AI 消息：文档式排版，没有气泡 ─── */
   return (
     <article className="group">
+      {/* 草稿排在最前：详解档的那几十秒里，它是页面上**唯一**在动的东西 */}
+      <ReasoningPanel text={reasoning} hasAnswer={Boolean(text)} isStreaming={isStreaming} />
+
       {tools.length > 0 && (
         <div className="content-grid">
           <div>
@@ -165,7 +191,7 @@ function Message({
           {download && <DownloadCard url={download.url} name={download.name} />}
           <Citations citations={citations} />
           {!isStreaming && (
-            <MessageActions text={text} citations={citations} onRegenerate={onRegenerate} />
+            <MessageActions text={text} question={question} onRegenerate={onRegenerate} />
           )}
         </div>
       </div>

@@ -18,6 +18,26 @@ export type User = {
   id: string;
   email: string;
   created_at: string;
+  /** 管理员能生成邀请码。非管理员根本看不到那个入口 */
+  is_admin?: boolean;
+};
+
+export type InviteState = { codes: string[]; unused: number };
+
+/** 一条答案订正：这个问题以后照这个答。字段跟后端 `VerifiedOut` 对齐。 */
+export type Verified = {
+  id: string;
+  question: string;
+  answer: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VerifiedSaved = {
+  verified: Verified;
+  /** 落库了不等于进索引了。只看 201 会骗人——用户改完再问一遍会发现答案没变 */
+  applied: boolean;
+  note: string;
 };
 
 /** 一条引用来源，对应答案里的 [1][2]。字段名跟后端 `Citation.to_dict()` 对齐。 */
@@ -198,6 +218,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
+
+  invites: () => request<InviteState>("/api/invites"),
+
+  createInvites: (count: number) =>
+    request<InviteState>("/api/invites", { method: "POST", body: JSON.stringify({ count }) }),
+
+  verified: () => request<Verified[]>("/api/verified"),
+
+  /** 订正一条答案。服务端**当场**把它写进索引，所以回执里的 `applied` 才是真话。 */
+  saveVerified: (body: { question: string; answer: string }) =>
+    request<VerifiedSaved>("/api/verified", { method: "POST", body: JSON.stringify(body) }),
+
+  deleteVerified: (id: string) => request<void>(`/api/verified/${id}`, { method: "DELETE" }),
 
   corrections: () => request<Correction[]>("/api/corrections"),
 

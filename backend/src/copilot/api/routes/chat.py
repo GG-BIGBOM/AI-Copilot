@@ -201,6 +201,8 @@ async def _chat_stream(
     message_id = stream.new_id("msg")
     text_id = stream.new_id("txt")
     text_open = False
+    reason_id = stream.new_id("rsn")
+    reason_open = False
 
     yield stream.start(message_id)
     yield stream.start_step()
@@ -237,13 +239,34 @@ async def _chat_stream(
             text_stream = streamed.stream
             citations = streamed.citations
 
-            yield stream.text_start(text_id)
-            text_open = True
             buf: list[str] = []
             writer = _AnswerWriter(session, conv.id)
 
             try:
-                async for piece in iterate_in_threadpool(text_stream):
+                async for kind, piece in iterate_in_threadpool(text_stream):
+                    # ⭐ **推理草稿边出边发。**
+                    # 详解档走的 kimi-k2.6 是推理模型，实测第一个草稿字 1 秒就到，
+                    # 而**第一个正文字要 8~60 秒**。不发草稿的话，那几十秒前端
+                    # 一个字都没有——用户看到的就是「选了详解，它不回答」。
+                    # 草稿走 reasoning part，和正文分开：里面尽是「材料里没提到…」
+                    # 这种自我推翻的话，混进正文就成了一条会骗人的答案。
+                    if kind == "reasoning":
+                        if not reason_open:
+                            yield stream.reasoning_start(reason_id)
+                            reason_open = True
+                        yield stream.reasoning_delta(reason_id, piece)
+                        continue
+
+                    # ⭐ **第一个正文字到了才发 `text-start`。**
+                    # 原来是在调模型之前就发，于是 AI SDK 立刻从 `submitted`
+                    # 切到 `streaming`——前端那句「正在理解问题」消失，换成一条
+                    # 空答案加一个闪烁光标。用户看到的就是「没有回答内容」。
+                    if reason_open:
+                        yield stream.reasoning_end(reason_id)
+                        reason_open = False
+                    if not text_open:
+                        yield stream.text_start(text_id)
+                        text_open = True
                     buf.append(piece)
                     yield stream.text_delta(text_id, piece)
                     if writer.due:
@@ -252,8 +275,12 @@ async def _chat_stream(
                 # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0
                 await writer.interrupted("".join(buf))
                 raise
-            yield stream.text_end(text_id)
-            text_open = False
+            if reason_open:
+                yield stream.reasoning_end(reason_id)
+                reason_open = False
+            if text_open:
+                yield stream.text_end(text_id)
+                text_open = False
 
             answer = "".join(buf)
             # ⚠️ 见文件头第 1 条：说了"不知道"就不能挂来源
@@ -275,6 +302,8 @@ async def _chat_stream(
 
     except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("聊天流出错：user=%s question=%r", user_id, question[:80])
+        if reason_open:
+            yield stream.reasoning_end(reason_id)
         if text_open:
             yield stream.text_end(text_id)
         yield stream.error(GENERIC_ERROR)
