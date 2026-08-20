@@ -99,12 +99,17 @@ $SSH "set -e
       export PATH=/root/.local/bin:\$PATH COPILOT_ROOT=$APP_DIR
       cd $APP_DIR
       uv sync --no-dev --extra parse --extra agent 2>&1 | tail -2
-      # ⚠️ **迁移用 .venv/bin/alembic，不能用 `uv run alembic`。**
-      # `uv run` 会先把环境同步成 pyproject 的默认样子——带 dev 组、**不带 extra**，
+      # ⚠️ **迁移用 .venv/bin/alembic，不能用 uv run alembic。**
+      # uv run 会先把环境同步成 pyproject 的默认样子——带 dev 组、**不带 extra**，
       # 正好把上一行刚装好的 parse/agent 卸掉。表现极其难查：部署脚本全绿、
       # 网站也正常，只有「上传文档」和「出方案」两条路悄悄坏掉，
       # 而且下次部署又会被上一行修好、再被这一行弄坏。
       # alembic 是运行时依赖（不在 dev 组里），所以直接调它就够了。
+      #
+      # ⚠️ 这整段是 **双引号包着的 ssh 命令串**，里面不能出现反引号——
+      # 包括注释里。反引号在双引号内是**命令替换**，会在**本机**跑一遍，
+      # 然后把输出拼进远程命令里。踩过一次：注释里写了一句
+      # “uv run alembic”加反引号，结果本机真去 spawn 了一个不存在的 alembic。
       .venv/bin/alembic upgrade head 2>&1 | tail -2
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker
