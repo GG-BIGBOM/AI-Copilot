@@ -107,6 +107,7 @@ async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
     # `deps.citations` 里原有的是普通工具留下的（那些材料用户根本没看到），
     # 合并会让编号和正文对不上——点开 [1] 看到的是另一篇文档。
     deps.citations = [c.to_dict() for c in streamed.citations]
+    deps.private_hits = max(deps.private_hits, streamed.private_hits)
     deps.retrieved.append(streamed.context_text)
     return "已经把答案直接给用户了。不要复述、不要补充、不要总结，本轮到此结束。"
 
@@ -203,6 +204,7 @@ async def search_kb(ctx: RunContext[AgentDeps], query: str) -> str:
         return f"知识库里没有检索到与「{query}」相关的内容。"
 
     bundle = result.build_context()
+    deps.private_hits = max(deps.private_hits, result.private_count)
     renumbered = deps.merge_citations([c.to_dict() for c in result.citations])
 
     # 把本次检索的 [n] 换成本轮全局编号，否则一轮里检索两次会出现两个 [1]

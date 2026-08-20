@@ -1,0 +1,1224 @@
+{
+  "tag": "private-m11-final",
+  "ran_at": "2026-08-20T09:27:25+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "debb6533",
+    "chunk_count": 4572
+  },
+  "judge_model": "gemini-2.5-pro",
+  "metrics": {
+    "题数": 19,
+    "准确率": 94.7,
+    "检索命中率": 100.0,
+    "引用正确率": 100.0,
+    "幻觉率": 0.0,
+    "假阴性率": 7.7,
+    "无据陈述率": 0.0,
+    "分类准确率": {
+      "fact": 91.7,
+      "probe": 100.0,
+      "partial": 0.0,
+      "no_answer": 100.0
+    }
+  },
+  "cases": [
+    {
+      "id": "priv-fact-zhongtong-cap",
+      "kind": "fact",
+      "q": "星辰电商给中通配的日单量上限是多少？",
+      "answer": "星辰电商给中通配的日单量上限是 **800 单**。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9941
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.7532
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.6223
+        },
+        {
+          "n": 4,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.307
+        },
+        {
+          "n": 5,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1148
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9940627217292786,
+      "private_hits": 4,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从材料[1]中提取了星辰电商的中通日单量上限为800单。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2258
+    },
+    {
+      "id": "priv-fact-warehouse-scope",
+      "kind": "fact",
+      "q": "星辰电商的华南备货仓负责发哪些省份？",
+      "answer": "星辰电商的华南备货仓（编码 XC-HN-02）只发广东、广西、海南三省，其余地区一律由华东主仓发货。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9881
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.7653
+        },
+        {
+          "n": 3,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.2269
+        },
+        {
+          "n": 4,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.1421
+        },
+        {
+          "n": 5,
+          "title": "设置 · 就近仓库",
+          "heading": "3、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/egbpgt",
+          "score": 0.0073
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "设置 · 就近仓库"
+      ],
+      "top_score": 0.9880582690238953,
+      "private_hits": 2,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从参考材料[1]中提取了星辰电商华南备货仓负责发货的省份信息。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2175
+    },
+    {
+      "id": "priv-negation-combo-split",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单需要拆分吗？",
+      "answer": "星辰电商的组合装订单**不拆分**——组合装拆分策略设为**不启用**，组合装按整体发货，不拆。[1]\n\n材料里没有说明星辰电商是否启用了其他拆分条件（如按货品指定仓库拆分、按货品标签拆分等），这部分未提及。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9864
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9829
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品指定仓库拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.977
+        },
+        {
+          "n": 4,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "组合装大件拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9749
+        },
+        {
+          "n": 5,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品标签拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9666
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明"
+      ],
+      "top_score": 0.9863907098770142,
+      "private_hits": 1,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地根据参考材料[1]中关于星辰电商的配置约定，指出了其组合装订单不拆分。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1594
+    },
+    {
+      "id": "priv-multi-reconciliation",
+      "kind": "fact",
+      "q": "星辰电商的对账以什么为准？多大的差异需要人工复核？",
+      "answer": "星辰电商对账以**平台结算单**为准，不以 ERP 发货单为准 [1]。差异超过 **500 元**的单据挂起人工复核，500 元以内的直接入账 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.9977
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4923
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.4823
+        },
+        {
+          "n": 4,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.1955
+        },
+        {
+          "n": 5,
+          "title": "账款 · 平台对账",
+          "heading": "一．平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0511
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "账款 · 平台对账",
+        "账款 · 平台对账"
+      ],
+      "top_score": 0.9976796507835388,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了问题，且所有信息均能在参考材料[1]中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1913
+    },
+    {
+      "id": "priv-noanswer-not-in-fixture",
+      "kind": "no_answer",
+      "q": "星辰电商的退货入库要走哪几个审核节点？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 创建退换单以及销退入库流程",
+          "heading": "二、销退入库流程 › 1、退货流程-分步入库",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ib91lq",
+          "score": 0.6428
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 销退质检",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tq5z5p",
+          "score": 0.3205
+        },
+        {
+          "n": 3,
+          "title": "设置 · 出入库",
+          "heading": "12. 【销售退货入库需要质检】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.2994
+        },
+        {
+          "n": 4,
+          "title": "设置 · 出入库",
+          "heading": "21、【快速退货入库增加入库必须要输入【生产日期】的配置】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.1771
+        },
+        {
+          "n": 5,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1467
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 创建退换单以及销退入库流程",
+        "仓储 · 销退质检",
+        "设置 · 出入库",
+        "设置 · 出入库",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.6427761912345886,
+      "private_hits": 1,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1269
+    },
+    {
+      "id": "priv-probe-inventory-line",
+      "kind": "probe",
+      "q": "星辰的 SKU 库存低到多少会在采购建议里飘红？",
+      "answer": "星辰的 SKU 安全库存线统一为 **20 件**，低于此数在采购建议里飘红 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9931
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.7793
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0419
+        },
+        {
+          "n": 4,
+          "title": "设置 · 同步设置",
+          "heading": "9.【平台货品库存同步预警值】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg3k7xqwrdlrhipi",
+          "score": 0.0293
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 库存同步常见报错及解决方案",
+          "heading": "8、Q：库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ts8by7gundrlk7zr",
+          "score": 0.0207
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "设置 · 同步设置",
+        "📒常见问题库 · 库存同步常见报错及解决方案"
+      ],
+      "top_score": 0.9931390881538391,
+      "private_hits": 3,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地从材料[1]中提取了星辰电商的安全库存线为20件，低于此数会在采购建议中飘红的信息。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1885
+    },
+    {
+      "id": "priv-cross-zhongtong-b",
+      "kind": "fact",
+      "q": "远岸家居给中通配的日单量上限是多少？",
+      "answer": "远岸家居给中通配的日单量上限是 **1500 单**。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9947
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.7378
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2789
+        },
+        {
+          "n": 4,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.0815
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 分销常见问题",
+          "heading": "申请可调整的功能上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/zi7hxqgg3o90c7b8",
+          "score": 0.0353
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "📒常见问题库 · 分销常见问题"
+      ],
+      "top_score": 0.9947230815887451,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了问题，且与参考材料[1]中的信息“主力快递：中通，日单量上限 1500 单”完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2268
+    },
+    {
+      "id": "priv-cross-inventory-b",
+      "kind": "fact",
+      "q": "远岸家居的安全库存线是多少件？",
+      "answer": "远岸家居的安全库存线是 SKU 级别统一 **50 件**，低于此数在采购建议里飘红 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9832
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.6343
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2682
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9831550121307373,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了问题，且所有信息均能在参考材料[1]中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-stocktake-b",
+      "kind": "fact",
+      "q": "远岸家居每月几号做动碰盘点？",
+      "answer": "远岸家居每月 **25 号**做一次动碰盘点。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9878
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2435
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1266
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9878113865852356,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了问题，且信息完全来自于参考材料。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-waybill-a",
+      "kind": "fact",
+      "q": "星辰电商的面单模板用的是几联单？尺寸是多少？",
+      "answer": "星辰电商的面单模板统一用 **76×130 的三联单**，不使用二联单。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9942
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.5969
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1453
+        },
+        {
+          "n": 4,
+          "title": "设置 · 得物品牌直发电子面单模板设置",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/zenhk8o7640uv31q",
+          "score": 0.0704
+        },
+        {
+          "n": 5,
+          "title": "设置 · 得物品牌直发电子面单对接步骤",
+          "heading": "二、商家指定物流",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/btb6gps08iu2246k",
+          "score": 0.0618
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "设置 · 得物品牌直发电子面单模板设置",
+        "设置 · 得物品牌直发电子面单对接步骤"
+      ],
+      "top_score": 0.9941837191581726,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "出现了禁止内容：['二联']",
+      "reason": "答案准确回答了问题，并且所有信息均能在参考材料中找到对应来源。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2281
+    },
+    {
+      "id": "priv-cross-warehouse-b",
+      "kind": "fact",
+      "q": "远岸家居的西南备货仓负责发哪些省份？",
+      "answer": "远岸家居的西南备货仓（编码 YA-XN-02）只发四川、重庆、云南、贵州四省，其余地区一律由华北主仓发货。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9861
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.1157
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0851
+        },
+        {
+          "n": 4,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.0301
+        },
+        {
+          "n": 5,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.0156
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "销售 · JIT业务操作手册",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "销售 · JIT业务操作手册"
+      ],
+      "top_score": 0.9860601425170898,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确回答了问题，且所有信息均能在参考材料[1]中找到依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2333
+    },
+    {
+      "id": "priv-conflict-combo-split-a",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单按什么条件拆分？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9882
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品指定仓库拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9804
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按体积拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9783
+        },
+        {
+          "n": 4,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.9732
+        },
+        {
+          "n": 5,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9343
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 递交后处理流程解析",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9882285594940186,
+      "private_hits": 1,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": false,
+      "missing_facts": [
+        "不"
+      ],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 2308
+    },
+    {
+      "id": "priv-conflict-logistics-switch-a",
+      "kind": "fact",
+      "q": "星辰电商的中通到了日单量上限之后，系统会自动切到韵达吗？",
+      "answer": "不会。星辰电商超出中通日单量上限（800 单）时，**不自动切换快递**，由客服在订单界面手工改派 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.987
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9645
+        },
+        {
+          "n": 3,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.1018
+        },
+        {
+          "n": 4,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0817
+        },
+        {
+          "n": 5,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.0369
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9870109558105469,
+      "private_hits": 4,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案准确地指出星辰电商的系统在快递单量超限时不会自动切换，而是需要客服手动改派，这与参考材料[1]的描述完全一致。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2258
+    },
+    {
+      "id": "priv-conflict-reconcile-b",
+      "kind": "fact",
+      "q": "远岸家居的对账以什么为准？差异多少钱要人工复核？",
+      "answer": "远岸家居对账以 **ERP 发货单** 为准，不以平台结算单为准 [1]。差异超过 **200 元** 的单据挂起人工复核，200 元以内的直接入账 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9938
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.8375
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4887
+        },
+        {
+          "n": 4,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.1206
+        },
+        {
+          "n": 5,
+          "title": "设置 · 结算",
+          "heading": "7. 【按数量对账的店铺】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg6g768p4qheeuql",
+          "score": 0.0174
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "账款 · 平台对账",
+        "设置 · 结算"
+      ],
+      "top_score": 0.9938259720802307,
+      "private_hits": 3,
+      "subject_guard": true,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "出现了禁止内容：['平台结算单']",
+      "reason": "答案准确回答了对账基准和差异复核金额两个问题，且均有材料依据。",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1905
+    },
+    {
+      "id": "priv-noanswer-refund-window-b",
+      "kind": "no_answer",
+      "q": "远岸家居约定的售后退款时效是几天？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0607
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.0519
+        },
+        {
+          "n": 3,
+          "title": "销售 · 退换管理页面说明",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/rgylfuo6va997ms0",
+          "score": 0.0212
+        },
+        {
+          "n": 4,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.10微盟",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0134
+        },
+        {
+          "n": 5,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.5有赞",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0113
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "销售 · 退换管理页面说明",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程"
+      ],
+      "top_score": 0.060717154294252396,
+      "private_hits": 2,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1960
+    },
+    {
+      "id": "priv-noanswer-sms-vendor-a",
+      "kind": "no_answer",
+      "q": "星辰电商用的是哪家短信服务商？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0547
+        },
+        {
+          "n": 2,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 6、注意",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.025
+        },
+        {
+          "n": 3,
+          "title": "设置 · 短信策略",
+          "heading": "前言",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.0195
+        },
+        {
+          "n": 4,
+          "title": "事务 · 企业公告",
+          "heading": "3、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shiwu/ot63zf",
+          "score": 0.0115
+        },
+        {
+          "n": 5,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 5、短信相关功能",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.0097
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "设置 · 短信策略",
+        "设置 · 短信策略",
+        "事务 · 企业公告",
+        "设置 · 短信策略"
+      ],
+      "top_score": 0.05468810349702835,
+      "private_hits": 1,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2008
+    },
+    {
+      "id": "priv-noanswer-promo-plan-a",
+      "kind": "no_answer",
+      "q": "星辰电商的大促期间订单审核策略是怎么约定的？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4852
+        },
+        {
+          "n": 2,
+          "title": "设置 · 阿里-前n有礼（已下线）",
+          "heading": "一、功能使用流程 › 2、 新增活动策略界面，在该界面用户需要建立维护与平台后台相同的活动编码的策略（活动编码对应于商家后台的活动 ID 不可重复），添加需要赠送的活动商品及数量",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mrp7bi",
+          "score": 0.1604
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1429
+        },
+        {
+          "n": 4,
+          "title": "设置 · 短信策略",
+          "heading": "前言",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.1198
+        },
+        {
+          "n": 5,
+          "title": "销售 · 快速审核",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/gycqcbbuyazvz4zl",
+          "score": 0.0358
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "设置 · 阿里-前n有礼（已下线）",
+        "客户A-实施配置约定",
+        "设置 · 短信策略",
+        "销售 · 快速审核"
+      ],
+      "top_score": 0.48521479964256287,
+      "private_hits": 2,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2052
+    },
+    {
+      "id": "priv-noanswer-picking-mode-b",
+      "kind": "no_answer",
+      "q": "远岸家居的拣货模式用的是边拣边分还是先拣后分？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 拣货分组新增多区拣货（拣→分）",
+          "heading": "1、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lz2zuk",
+          "score": 0.9761
+        },
+        {
+          "n": 2,
+          "title": "设置 · 拣货分组设置说明",
+          "heading": "一、新建拣货分组",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/knzla9",
+          "score": 0.975
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 批量分拣",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tvygdl",
+          "score": 0.9624
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 批量分拣",
+          "heading": "二、操作步骤 › 先拣后分",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tvygdl",
+          "score": 0.9435
+        },
+        {
+          "n": 5,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.1446
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 拣货分组新增多区拣货（拣→分）",
+        "设置 · 拣货分组设置说明",
+        "仓储 · 批量分拣",
+        "仓储 · 批量分拣",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9760611057281494,
+      "private_hits": 1,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1396
+    },
+    {
+      "id": "priv-noanswer-invoice-a",
+      "kind": "no_answer",
+      "q": "星辰电商的发票是随货同行还是电子发票？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1104
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0554
+        },
+        {
+          "n": 3,
+          "title": "设置 · 有赞电子面单操作步骤",
+          "heading": "一、有赞商家后台开通电子面单",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/eg7g9vqu4qzm2oxq",
+          "score": 0.054
+        },
+        {
+          "n": 4,
+          "title": "账款 · 发票管理旗舰版操作手册",
+          "heading": "航信数电/全电发票-对接流程 › 第六步：手动/自动开具全电发票 › 确认开票",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/kgpktsz7gm7hgu2k",
+          "score": 0.0384
+        },
+        {
+          "n": 5,
+          "title": "平台事项 · 国补对接进度及功能支持情况",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/odvc2lofegausak5",
+          "score": 0.0212
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定",
+        "设置 · 有赞电子面单操作步骤",
+        "账款 · 发票管理旗舰版操作手册",
+        "平台事项 · 国补对接进度及功能支持情况"
+      ],
+      "top_score": 0.11040157824754715,
+      "private_hits": 2,
+      "subject_guard": true,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 2045
+    }
+  ]
+}

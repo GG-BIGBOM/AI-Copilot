@@ -97,6 +97,18 @@ def wanted_sources(case: dict) -> list[str]:
 # ---------- 数据结构 ----------
 
 
+def _guard_suffix(mode: str) -> str:
+    """主体约束那一段（M11 P3 第 3 步）追加在 system prompt 后面的文本。
+
+    ⚠️ **拿 `system_prompt_for` 算差值，不要自己抄一份。**
+    那段话只该有一个出处；抄一份的话，改了线上那份而评测还在用旧的，
+    评测就会一直报告一个早就不存在的系统。
+    """
+    from copilot.qa import system_prompt_for
+
+    return system_prompt_for(mode, subject_guard=True)[len(system_prompt_for(mode)) :]
+
+
 @dataclass
 class Config:
     top_k: int = 0  # 0 = 用 settings 里的默认值
@@ -141,8 +153,15 @@ class Config:
             "mode": self.mode,
             "answer_model": s.llm_deep_model if self.mode == "deep" else s.llm_model,
             # ⭐ prompt 指纹。没有它，「改了 prompt 重跑」和「什么都没改重跑」
-            # 存出来的 config 一模一样——半年后看对比表根本分不清哪轮是哪轮
-            "prompt_sha": hashlib.sha256(prompt_text.encode()).hexdigest()[:8],
+            # 存出来的 config 一模一样——半年后看对比表根本分不清哪轮是哪轮。
+            #
+            # ⚠️ **要把主体约束那一段也算进去**（M11 P3）。它是追加在 system prompt
+            # 后面的，不在 `prompt_text` 里——2026-08-20 那天连跑四轮私有库，
+            # v3 和 v4 只差主体约束里的一句话，结果两轮存出来的 sha 一模一样。
+            # 指纹漏掉了唯一变过的那个东西，等于没有指纹。
+            "prompt_sha": hashlib.sha256(
+                (prompt_text + _guard_suffix(self.mode)).encode()
+            ).hexdigest()[:8],
         }
 
 
@@ -156,6 +175,12 @@ class CaseResult:
     context: str = ""
     retrieved_titles: list[str] = field(default_factory=list)
     top_score: float = 0.0
+    # 这一轮召回里有几块来自私有库，以及要不要追加主体约束（M11 P3）。
+    # `private_hits` 是纯诊断用的一列：私有题答错时，先看它是 0（检索根本没捞到）
+    # 还是非 0（捞到了但模型没用）——两种失败的修法完全不同，
+    # 而只看答案文本，它们长得一模一样
+    private_hits: int = 0
+    subject_guard: bool = False
 
     # 确定性判定
     source_hit: bool | None = None  # 期望源是否出现在引用里（无期望源时为 None）
@@ -250,6 +275,7 @@ def retrieve_all(
         SiliconFlowEmbedder,
         SiliconFlowReranker,
     )
+    from copilot.qa import needs_subject_guard
     from copilot.retrieve import search
 
     r = cfg.resolved()
@@ -288,7 +314,12 @@ def retrieve_all(
                     context=bundle.text,
                     retrieved_titles=[c.title for c in res.citations],
                     top_score=res.citations[0].score if res.citations else 0.0,
+                    private_hits=res.private_count,
                 )
+                # M11 P3 第 3 步。**调的是线上那个函数**，不是抄一份判定逻辑——
+                # 抄一份的话，改了那边忘了改这边，评测会一直在报告一个
+                # 早就不存在的系统，而私有库这组题量的恰恰就是这条规则
+                cr.subject_guard = await needs_subject_guard(session, case["q"], user_id)
                 if wants := wanted_sources(case):
                     cr.source_hit = any(w in t for w in wants for t in cr.retrieved_titles)
                 out.append(cr)
@@ -318,6 +349,8 @@ def answer_all(
     # 允许换 prompt：A/B 时必须拿**同一份评测集**跑两个 prompt，
     # 否则指标的变化归不了因（见 eval/prompts.py 的说明）
     prompt = system_prompt or SYSTEM_PROMPT
+    # M11 P3 第 3 步的那一段附加约束（只加在标了 subject_guard 的题上）
+    guarded_suffix = _guard_suffix(mode)
 
     # httpx.Client 线程安全，一个实例够用
     if mode == "deep":
@@ -339,8 +372,9 @@ def answer_all(
             cr.answer = NO_ANSWER
         else:
             user_msg = USER_TEMPLATE.format(context=cr.context, question=cr.q)
+            system = prompt + guarded_suffix if cr.subject_guard else prompt
             messages = [
-                {"role": "system", "content": prompt},
+                {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
             ]
             try:
@@ -700,7 +734,12 @@ def print_report(
         "无据陈述率",
         "配图带出率",
     ):
-        v = metrics[k]
+        # ⚠️ 不是每一轮都有每一个指标。「配图带出率」的分母是标了 `procedural`
+        # 的题，而**私有库那组一道都没有**——照着固定清单直接取值会 KeyError，
+        # 而且是在指标都算完、报告打印到一半的时候崩，那一轮的 json 白跑。
+        # 2026-08-20 私有库跑到 19 题时撞上的。
+        if (v := metrics.get(k)) is None:
+            continue
         unit = "" if k == "题数" else "%"
         print(f"  {k:<12} {v}{unit}")
     # 难题单独打一行。**改动的效果先看这个数**：老题在 v3 上已经饱和，

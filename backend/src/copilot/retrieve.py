@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import anyio.to_thread
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -61,6 +61,36 @@ class RetrievedChunk:
     content: str
     citation: Citation
     images: list[dict] = field(default_factory=list)
+    # 这一块来自用户自己上传的文档（`owner_id` 非空）。
+    # ⭐ M11 P3 的全部要害在这一个布尔量上：在此之前，
+    # **模型看不到哪一块是私有的、哪一块是公共的**——两者在上下文里长得
+    # 一模一样（见 `build_context`）。看不见的东西没法判断，
+    # M9 那条「问题限定了主体时材料必须真的是讲这个主体的」铁律因此是**空的**。
+    private: bool = False
+
+
+def source_label(rc: RetrievedChunk) -> str:
+    """这一块在上下文里署什么名。**M11 P3 第 1 步，最便宜的那个假设。**
+
+        私有  →  [3] 来源：你的文档《客户A-实施配置约定》· 对账规则
+        公共  →  [3] 来源：公共知识库 · 流程中拆分条件说明
+
+    在此之前两者都是 `来源：标题 · 小节`，模型**根本看不出**哪一块是这个
+    客户自己的约定、哪一块是产品的通用说明。M9 往铁律里加的第 6 条
+    「问题限定了主体时，材料必须真的是讲这个主体的」因此是一条**空规则**——
+    它要求模型区分一件它看不见的事，那当然做不到。当时的结论是
+    「多半得动检索侧，让主体名参与过滤/加权」，那是个大改动、要重跑
+    公共库 55 题；而真实缺口可能只是上下文里少了六个字。
+    **先验证便宜的那个假设**——这就是那六个字。
+
+    ⚠️ 只改**送进模型的上下文**，不改 `Citation.label`：
+    页面上的来源清单仍然显示文档标题，用户不需要被提醒
+    「这篇是你自己传的」——他知道。
+    """
+    if rc.private:
+        heading = f" · {rc.citation.heading}" if rc.citation.heading else ""
+        return f"你的文档《{rc.citation.title}》{heading}"
+    return f"公共知识库 · {rc.citation.label}"
 
 
 @dataclass(slots=True)
@@ -88,6 +118,15 @@ class RetrievalResult:
     def citations(self) -> list[Citation]:
         return [c.citation for c in self.chunks]
 
+    @property
+    def private_count(self) -> int:
+        """这一轮召回里有几块来自用户自己的文档。
+
+        两个地方要用：`request_trace` 记一列（M11 P1），
+        以及 qa.py 判要不要加主体约束（M11 P3 第 3 步）。
+        """
+        return sum(1 for c in self.chunks if c.private)
+
     def build_context(self) -> ContextBundle:
         """拼上下文，同时把配图标记重新编号。
 
@@ -113,7 +152,7 @@ class RetrievalResult:
                 return f"[图{numbering[ident]}]"
 
             body = _IMG_MARK_RE.sub(renumber, rc.content)
-            parts.append(f"[{rc.citation.n}] 来源：{rc.citation.label}\n{body}")
+            parts.append(f"[{rc.citation.n}] 来源：{source_label(rc)}\n{body}")
 
         return ContextBundle(text="\n\n".join(parts), images=images)
 
@@ -122,15 +161,25 @@ class RetrievalResult:
         return self.build_context().text
 
 
-def _visibility_filter(user_id: uuid.UUID | None) -> ColumnElement[bool]:
+def _visibility_filter(
+    user_id: uuid.UUID | None, *, private_only: bool = False
+) -> ColumnElement[bool]:
     """可见性过滤——**全项目唯一一处**。
 
         owner_id IS NULL      公共库（语雀抓的），所有人可见
         owner_id = user_id    该用户自己上传的
 
     未登录（user_id 为 None）时只能看公共库。
+
+    `private_only=True` 只要这个人自己的块（M11 P3 的私有库召回名额要用）。
+    ⚠️ **它仍然是这一个函数**，不是第二处过滤。`Chunk.owner_id` 这个词
+    在全项目里只允许出现在这里——多一个调用方没关系，多一处**拼查询的地方**
+    就是把 A 的私有文档漏给 B，而且不会有任何报错。
+    未登录时它返回恒假：没有 user_id 就没有「他自己的块」这个概念。
     """
     public_only = Chunk.owner_id.is_(None)
+    if private_only:
+        return Chunk.owner_id == user_id if user_id is not None else false()
     if user_id is None:
         return public_only
     return public_only | (Chunk.owner_id == user_id)
@@ -165,6 +214,90 @@ def _verified_first(
     if not front:
         return picked
     return front + [p for p in picked if not promoted(p)]
+
+
+# 私有库单独召回几块（M11 P3）。
+#
+# 5 是这么定的：私有文档通常只有几块（评测夹具一篇 2 块），5 已经能把
+# 一份完整的实施约定整个带进来；再多就开始把不相关的用户文档塞进重排，
+# 而重排每多一条就多一份把正确答案挤下去的机会。
+# ⚠️ 这不是「多召回一点总没坏处」——它是**给私有块一次被评分的机会**，
+# 而不是让私有块变多。真正决定去留的仍然是重排分和阈值。
+PRIVATE_RECALL_K = 5
+
+# 私有块的保底名额（M11 P3 第 2 步）。
+#
+# ⚠️ **从 1 起步，别一上来给 2。** 名额是从公共块里挤出来的——给多了，
+# 一道本该由公共库回答的问题会因为用户传过一份不相干的文档而掉分。
+# 1 个名额已经能修 `priv-negation-combo-split`（私有文档被
+# 《流程中拆分条件说明》4 个块整个挤出 top-5），再往上加要拿 55 题的回归说话。
+PRIVATE_FLOOR = 1
+
+
+def _private_floor(
+    picked: list[tuple[Chunk, float]],
+    scored: list[tuple[Chunk, float]],
+    *,
+    floor: int = PRIVATE_FLOOR,
+) -> list[tuple[Chunk, float]]:
+    """保证 top-k 里至少留 `floor` 个**过了阈值**的私有块。
+
+    ⭐ 要修的是这种情形：用户问「我们的组合装要不要拆」，他自己的文档里
+    白纸黑字写着「不拆」，但公共库《流程中拆分条件说明》有 4 个块讲怎么拆，
+    语义上贴得更近，于是私有那块被整个挤出 top-5——模型手上只剩公共库的
+    通用流程，答出来的是一套和这家客户完全无关的说法，而且看着很专业。
+
+    ⚠️ **它只重排，不放行。** 候选只从 `scored`（已经过了阈值）里取，
+    低于门槛的私有块一个都捞不回来——否则「用户传了什么就答什么」，
+    防幻觉的第一道闸门等于对私有库单方面失效。
+
+    ⚠️ **绝不碰 `_visibility_filter`。** 那是全项目唯一的可见性收口，
+    这个函数拿到的 `scored` 早就过滤过了。这里只在**已经可见**的东西之间
+    调顺序——落点选在重排层（`_verified_first` 旁边）就是为了这一点。
+    """
+    if floor <= 0 or not picked:
+        return picked
+    have = sum(1 for c, _ in picked if c.owner_id is not None)
+    if have >= floor:
+        return picked
+
+    chosen = {c.id for c, _ in picked}
+    extra = [p for p in scored if p[0].owner_id is not None and p[0].id not in chosen][
+        : floor - have
+    ]
+    if not extra:
+        return picked  # 这一轮压根没召回私有块，没什么可保底的
+
+    # 名额总数不变：挤掉分数最低的**公共**块。
+    # 挤公共不挤私有是显然的，但「从最低分那头挤」也不是随便定的——
+    # 从最高分那头挤会把真正相关的那篇踢走，那就不是纠偏而是新的偏
+    keep = [p for p in picked if p[0].owner_id is not None]
+    public = [p for p in picked if p[0].owner_id is None]
+    public = public[: max(0, len(picked) - len(keep) - len(extra))]
+    merged = keep + public + extra
+    # 重新按分排。引用编号是按这个顺序发的，不排的话 [1] 可能是分最低的那块，
+    # 而用户点开溯源第一条看到的就该是最相关的那篇
+    merged.sort(key=lambda p: p[1], reverse=True)
+    return merged
+
+
+async def has_private_chunks(session: AsyncSession, user_id: uuid.UUID | None) -> bool:
+    """这个用户到底有没有传过东西。M11 P3 第 3 步的前置条件。
+
+    ⭐ **它的作用是给主体约束划一条不可能越过的边界。**
+    没传过任何文档的用户（包括评测公共库那 55 题走的 `user_id=None`），
+    这个函数恒为 False，于是那条约束**结构上不可能被触发**。
+    M9 的教训正在于此：那次改的是**全局**铁律，和铁律 3「有一部分就答一部分」
+    正面撞车，而铁律 3 是花整整一轮才调对的。这一次，凡是不涉及私有库的
+    请求，一个字都不会变。
+
+    查询本身是 `owner_id` 上的索引 + LIMIT 1，几乎免费；而且只在
+    「问题里有主体词」且「一个私有块都没召回」时才会走到这里。
+    """
+    if user_id is None:
+        return False
+    stmt = select(Chunk.id).where(Chunk.owner_id == user_id).limit(1)
+    return (await session.execute(stmt)).first() is not None
 
 
 async def search(
@@ -209,19 +342,64 @@ async def search(
         .limit(top_k)
     )
     candidates = list((await session.execute(stmt)).scalars())
+
+    # ⭐⭐ **私有库的召回名额（M11 P3）。这是量出来的，不是设计出来的。**
+    #
+    # `priv-negation-combo-split` 那道题实测长这样：混合池的 top-20 里
+    # **私有块一条都没有** —— 公共库《流程中拆分条件说明》那一篇自己就占了
+    # 好几个名额，加上另外几篇讲拆单的，20 个位置全被"讲拆分"的内容填满了。
+    #
+    # 这一点和 M11 定稿时的判断**相反**：当时写的是「私有文档被 4 个块整个挤出
+    # top-5」，以为发生在重排层，于是 P3 第 2 步（重排层的保底名额）应该能修。
+    # 实测证明挤掉它的是**向量召回**那一层——重排层根本没见过这块，
+    # 保底名额有再多名额也无从捞起。**修在看得见它的那一层。**
+    #
+    # 做法是再跑一次只打私有库的向量召回，把结果并进候选池。
+    # 代价：一次 SQL（embedding 复用同一个向量，不多花钱），私有库通常只有几块。
+    # 它**不放宽任何东西**：并进来的块照样过重排、照样过阈值，
+    # 只是获得了一次"被评分"的机会 —— 在此之前它连参赛资格都没有。
+    if user_id is not None:
+        private_stmt = (
+            select(Chunk)
+            .where(_visibility_filter(user_id, private_only=True))
+            .order_by(Chunk.embedding.cosine_distance(query_vec))
+            .limit(PRIVATE_RECALL_K)
+        )
+        seen = {c.id for c in candidates}
+        candidates += [
+            c for c in (await session.execute(private_stmt)).scalars() if c.id not in seen
+        ]
+
     if not candidates:
         return RetrievalResult(chunks=[])
 
     # 重排
     if reranker is not None:
+        # ⭐ **要全部 20 条的分，不是只要前 5 条。**
+        # 同一次 HTTP 调用、同一份 tokens，只是让它把剩下 15 条的分也返回来——
+        # 代价近乎零，换来的是 `_private_floor` 能看见「第 6 名是个私有块、
+        # 分数其实过了阈值」。只拿前 5 名的话，被挤出去的那块连同它的分数
+        # 一起消失了，保底名额根本无从判断该捞谁。
         ranked = await anyio.to_thread.run_sync(
-            partial(reranker.rerank, query, [c.content for c in candidates], top_k=rerank_k)
+            partial(
+                reranker.rerank, query, [c.content for c in candidates], top_k=len(candidates)
+            )
         )
-        picked = [(candidates[r.index], r.score) for r in ranked if r.score >= threshold]
+        scored = [(candidates[r.index], r.score) for r in ranked if r.score >= threshold]
+        # 按分降序排一次，别依赖服务端的返回顺序。
+        # ⚠️ 这一句同时保证了**行为和改动前完全一致**：分数降序时
+        # 「先取前 5 再滤阈值」和「先滤阈值再取前 5」是同一个结果
+        # （第 4 名不及格，第 5 名以后必然也不及格）
+        scored.sort(key=lambda p: p[1], reverse=True)
+        picked = scored[:rerank_k]
     else:
         # 没有重排器时退回向量顺序，分数用 1/(1+序号) 占位
-        picked = [(c, 1.0 / (i + 1)) for i, c in enumerate(candidates[:rerank_k])]
+        scored = [(c, 1.0 / (i + 1)) for i, c in enumerate(candidates)]
+        picked = scored[:rerank_k]
 
+    # 顺序有意义：先给私有块保底名额，再把人工订正提到最前面。
+    # 反过来的话，保底那一步会把刚提上来的订正又挤下去一位
+    picked = _private_floor(picked, scored)
     picked = _verified_first(picked)
 
     return RetrievalResult(
@@ -229,6 +407,7 @@ async def search(
             RetrievedChunk(
                 content=chunk.content,
                 images=list(chunk.images or []),
+                private=chunk.owner_id is not None,
                 citation=Citation(
                     n=i,
                     title=chunk.title,

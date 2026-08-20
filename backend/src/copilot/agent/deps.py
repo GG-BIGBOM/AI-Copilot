@@ -61,12 +61,24 @@ class AgentDeps:
     # 本轮累积的引用与配图，路由层在正文流完之后统一发
     citations: list[dict] = field(default_factory=list)
     images: list[dict] = field(default_factory=list)
+    # 本轮召回的块里有几块来自用户自己的文档。给 request_trace 记一列（M11 P1）。
+    # 一轮可能检索多次，取**最大值**而不是累加：这一列要回答的是
+    # 「私有文档到底冒没冒头」，累加会把同一份文档数好几遍
+    private_hits: int = 0
     # 本轮检索到的材料原文。两个用处，都不是可选的：
     #   1. 记 token 账要算它——**上下文才是大头**，只算问题和答案会漏掉八成
     #   2. 评测的判分器要拿它当「参考材料」，否则没法判答案有没有依据
     retrieved: list[str] = field(default_factory=list)
     # 本轮生成的下载地址（xlsx）
     download_url: str | None = None
+    # ⭐ 本轮调过哪些工具（原始工具名，不是中文标签）。
+    # **两个消费者共用这一份**：
+    #   1. runner 的硬防线——一个工具都没调却写出像知识库答案的东西，就拦下来
+    #   2. `request_trace.tools`——M11 验收标准第 8 条要能查出
+    #      「trace 里 0 条『一个工具都没调却答了 ERP 问题』」
+    # 原来它是 runner 里的一个局部变量，第 2 个消费者拿不到；
+    # 挪到 deps 上之后两边读的是同一份，不会出现「防线看到调了、台账写着没调」
+    used_tools: set[str] = field(default_factory=set)
 
     # ---------- 终结工具（M10）----------
     #

@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
-from copilot.retrieve import Citation, search
+from copilot.retrieve import Citation, has_private_chunks, search
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +154,120 @@ _TEMPLATE = """你是一名旺店通旗舰版 ERP 的实施顾问助手，只依
 6. 前面的对话记录**只用来理解这一轮在问什么**（比如「那不良品呢」指的是什么），
    **不是可以引用的材料**。回答的依据只能是本轮的参考材料——上一轮答过的话，
    这一轮材料里没有就还是没有。
+7. 材料每一条都标了来源：**「你的文档《X》」是提问者自己上传的**（他自己那家
+   公司/客户的专属约定），**「公共知识库」是产品的通用说明**。两者冲突时
+   **以「你的文档」为准**。
+   ⚠️ 「你的文档」可能有好几份，各讲一个主体（不同的客户）。**别把其中一份的
+   约定说成"通用做法"**——那只是另一家的约定。要提通用做法，只能引公共知识库。
 
 写法要求：
 {style}"""
+
+# ─────────────────────────────────────────────────────────
+# 有条件的主体约束（M11 P3 第 3 步）
+#
+# ⚠️ **触发条件限定死，这是这条规则能不能活下来的关键。**
+# M9 那次失败就是因为改的是**全局**铁律，和铁律 3「有一部分就答一部分」
+# 正面撞车——而铁律 3 是花整整一轮才调对的，假阴性率是 55 题的既有指标。
+#
+# 两个条件都满足才追加：
+#     1. 用户**确实有**私有文档（没传过东西的人永远不会触发）
+#     2. 问题里带第一人称或公司名（他在问「我们家」的事，不是问产品通用能力）
+# 于是公共库那 55 题（`user_id=None`）**结构上不可能**走到这里 ——
+# 这就是它和 M9 那条全局规则的根本区别。
+#
+# ⭐ **原来还有第三个条件「这一轮一个私有块都没召回」，2026-08-20 实测删掉了。**
+# 删的理由不是嫌它严，是它**和第 2 步互相拆台**：保底名额保证了至少有一个私有块
+# 进 top-k，于是「一个都没召回」这件事对有私有文档的用户几乎**永远不成立**，
+# 主体约束等于被自己的队友关掉了。实测两道题因此漏判：
+#   priv-noanswer-not-in-fixture  召回里第 5 条正是客户A 的文档（但它不讲退货），
+#                                 于是约束不触发，模型拿公共库的通用退货流程冒充
+#                                 星辰电商的专属约定
+#   priv-noanswer-invoice-a       同理，召回里有客户A 的两块（都不讲发票）
+# 真正该管的从来不是「有没有私有块」，是**这些私有块讲不讲他问的这个主体的这件事**——
+# 而那件事只有模型判得了。所以条件放宽、话说清楚，把判断交给它。
+# ─────────────────────────────────────────────────────────
+
+_SUBJECT_GUARD = """
+
+⚠️ 本轮补充（只对这一轮生效）：提问者问的是**某一方自己的专属约定**
+（他自己那家公司，或者他点名的某个客户），不是在问这个产品通常怎么用。所以：
+
+- 只有标着「你的文档《…》」、**并且确实在讲他问的这个主体**的材料，
+  才算是这个主体的约定。
+- 「公共知识库」讲的是产品的通用能力和默认流程，**不是任何一家的约定**。
+  不要拿它冒充某一家的专属约定。
+- 「你的文档」里**讲的是别的主体**的那几篇，是**别人**的约定，
+  同样不能拿来回答这一个——两家在同一个字段上给不同的值是常态。
+- 如果没有任何一条材料在讲他问的这个主体的这件事，就按铁律 3 的第二种情形办：
+  **只回复这一句**「知识库暂无此内容。」——不要罗列材料里都写了些什么，
+  也不要解释为什么没有。
+
+材料里确实讲到了这个主体的这件事时照常答，这一条不是让你少答。
+
+⚠️ 如果他这一问其实**不针对某一方**（问的是这个产品本身怎么用、某个功能在哪配），
+那这一整条不适用，照常按上面的铁律回答。
+——判断触发条件的是一个关键词规则，它会认错；**认错时以你看到的问题为准**。"""
+
+# 第一人称 + 公司名。**两类都要有**：
+#   「我们的组合装要拆吗」      —— 第一人称，没提公司名
+#   「星辰电商的对账以什么为准」 —— 提了公司名，没有第一人称
+_FIRST_PERSON = ("我们", "我司", "我方", "咱们", "我的", "本公司", "本店", "我这边")
+# 「星辰电商」「XX 公司」这类。**故意只认带后缀的**：
+# 不带后缀的专有名词（「星辰」）和普通词分不开，认了就会把
+# 「京东电子面单怎么配」里的「京东」也当成主体，那是产品支持的平台，不是客户。
+#
+# ⚠️ **这张后缀表天生是不全的，别指望补全它。**
+# 2026-08-20 实测漏过一次：「远岸**家居**」不在表里，于是
+# `priv-noanswer-picking-mode-b` 那一轮没加约束，模型给了一句
+# 「材料里没有…的配置信息」——意思是对的，但不是那句兜底话术，
+# 于是页面上会是「没有」底下挂着五条来源。
+#
+# 漏判的代价是**这一轮回到 M11 之前的行为**（不是出错），误判的代价才是
+# 把假阴性率顶上去。所以这张表宁可长一点：多认一个后缀，最坏结果是给一道
+# 本来就答得出的题加了一段用不上的约束。下面这些是按「实施顾问的客户名单
+# 长什么样」列的，不是穷举。
+#
+# ⚠️⚠️ 加后缀前先问一句：**这个词会不会出现在一句正常的 ERP 产品问题里？**
+# 「物流」「仓储」「品牌」都被我加过又删掉——「怎么设置物流单量限制」里
+# 「怎么设置」+「物流」正好凑成一个假的公司名，而那类问题恰恰是最常问的。
+# 留下的这些都是**只会出现在公司名里**的行业词。
+_SUBJECT_SUFFIX_RE = re.compile(
+    r"[一-龥A-Za-z0-9]{2,8}("
+    r"电商|公司|集团|科技|商贸|实业|贸易|旗舰店|专营店|专卖店|供应链|"
+    r"家居|家纺|家具|服饰|鞋业|箱包|珠宝|生鲜|医药|母婴|日化|美妆|建材"
+    r")"
+)
+
+
+def asks_about_subject(question: str) -> bool:
+    """这句话是在问「某一方自己的约定」吗。
+
+    宁可漏判不可误判：漏判只是这一轮没加约束（回到 M11 之前的行为），
+    误判则是给一道正常的公共库问题套上「没讲这个主体就说不知道」，
+    那会直接把假阴性率顶上去。
+    """
+    return any(w in question for w in _FIRST_PERSON) or bool(
+        _SUBJECT_SUFFIX_RE.search(question)
+    )
+
+
+async def needs_subject_guard(
+    session: AsyncSession,
+    question: str,
+    user_id: uuid.UUID | None,
+) -> bool:
+    """这一轮要不要追加主体约束。两个条件都满足才要。
+
+    ⭐ **单独拆出来是给评测用的**，同 `small_talk_kind`：
+    `eval/run.py` 不走 `ask_stream`（它分两阶段跑，检索一次、生成一次），
+    自己抄一份判定逻辑的话，改了这边忘了改那边，评测会一直报告一个
+    早就不存在的系统——而私有库那组题量的恰恰就是这条规则。
+
+    ⚠️ 顺序按代价排：正则免费，查库放后面。没有私有文档的用户（包括
+    公共库评测那 55 题的 `user_id=None`）在第一个条件上就短路了。
+    """
+    return asks_about_subject(question) and await has_private_chunks(session, user_id)
 
 # ─────────────────────────────────────────────────────────
 # 两档回答风格
@@ -190,9 +301,15 @@ ANSWER_STYLES = {"fast": _STYLE_FAST, "deep": _STYLE_DEEP}
 DEFAULT_MODE = "fast"
 
 
-def system_prompt_for(mode: str = DEFAULT_MODE) -> str:
-    """按档位拼出 system prompt。认不出来的档位一律退回简答档。"""
-    return _TEMPLATE.format(style=ANSWER_STYLES.get(mode, _STYLE_FAST))
+def system_prompt_for(mode: str = DEFAULT_MODE, *, subject_guard: bool = False) -> str:
+    """按档位拼出 system prompt。认不出来的档位一律退回简答档。
+
+    `subject_guard` 只由 `ask_stream` 在三个条件同时成立时置 True，
+    见 `_SUBJECT_GUARD` 上面那段注释。**调用方不要自己开这个开关**——
+    它一旦变成常开，就又是 M9 那条和铁律 3 打架的全局规则了。
+    """
+    prompt = _TEMPLATE.format(style=ANSWER_STYLES.get(mode, _STYLE_FAST))
+    return prompt + _SUBJECT_GUARD if subject_guard else prompt
 
 
 # 简答档的完整 prompt。评测脚本 import 的是这个名字，别删
@@ -327,6 +444,11 @@ class StreamedAnswer:
     # 送进模型的上下文原文。调用方用它记 token 用量——
     # token 的大头在这里，不在答案里（5 块材料约 2500 字）
     context_text: str = ""
+    # 这一轮召回的块里有几块来自用户自己的文档。
+    # 给 `request_trace` 记一列（M11 P1）——**这一列是 P3 有没有生效的唯一证据**：
+    # 私有题答错时，先看这里是 0（检索就没捞到）还是非 0（捞到了但模型没用），
+    # 两种失败的修法完全不同，只看答案文本分不出来
+    private_hits: int = 0
 
 
 async def ask_stream(
@@ -369,8 +491,14 @@ async def ask_stream(
         return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     context = result.build_context()
+
+    # M11 P3 第 3 步。判据抽在 `needs_subject_guard` 里，评测走的是同一个函数
+    guard = await needs_subject_guard(session, question, user_id)
+    if guard:
+        logger.info("本轮追加主体约束：q=%r", question[:60])
+
     messages = [
-        {"role": "system", "content": system_prompt_for(mode)},
+        {"role": "system", "content": system_prompt_for(mode, subject_guard=guard)},
         *_history_messages(history),
         {
             "role": "user",
@@ -382,6 +510,7 @@ async def ask_stream(
         citations=result.citations,
         images=context.images,
         context_text=context.text,
+        private_hits=result.private_count,
     )
 
 
