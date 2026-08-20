@@ -1978,7 +1978,8 @@ parts.append(f"[{rc.citation.n}] 来源：{rc.citation.label}\n{body}")
 
 #### P4 — Agent 白名单上线（观察期，不占工期）
 
-- [ ] 先把 `guard.py` + runner 历史截断那笔提交（**灰度的前置硬防线**）
+- [x] 先把 `guard.py` + runner 历史截断那笔提交（**灰度的前置硬防线**）
+      ✅ `ca6fc82`（2026-08-20，M11 定稿前就已完成）
 - [ ] `AGENT_ALLOW_EMAILS`：自己 + 1 个熟人，真实用一周
 - [ ] 本机 `AGENT_ENABLED=true` 手工压 **20 段真实多轮对话**——
       不是评测题，重点是追问、改口、说错名词
