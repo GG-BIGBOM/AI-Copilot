@@ -1,0 +1,36 @@
+[Unit]
+Description=Copilot 每日备份：Postgres + uploads（由 copilot-backup.timer 触发）
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+# ⚠️ **必须 root，不能是 copilot。** 脚本里要 `sudo -u postgres pg_dump`，
+# 而 copilot 是个 nologin 的系统账号、不在 sudoers 里。
+# 想让它跑在低权限下，就得给 copilot 配一条 pg 的复制权限 + sudoers 例外，
+# 那是为了洁癖增加两处配置 —— 而这个进程一天只活 20 秒，且不监听任何端口。
+User=root
+WorkingDirectory=/opt/copilot
+Environment=COPILOT_ROOT=/opt/copilot
+Environment=COPILOT_BACKUP_DIR=/var/backups/copilot
+
+ExecStart=/bin/bash /opt/copilot/deploy/backup.sh
+
+# 4570 块的库 dump 出来几十 MB，正常十几秒。半小时还没完一定是卡住了
+TimeoutStartSec=1800
+
+# ⭐ 内存压到 200M。备份**永远不该是把生产挤死的那个进程**：
+# pg_dump 自己几乎不吃内存（它是流式的），tar 也是；真吃到 200M
+# 说明有什么不对，那就让它自己被杀掉、留下 FAILED 标记，
+# 而不是把正在答题的 API 一起拖下水。
+MemoryMax=200M
+# 备份跑的时候用户可能正在提问。IO 和 CPU 都让开
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+[Install]
+# 故意**没有** WantedBy —— 它是 oneshot，由 timer 触发。
+# enable 一个没有 [Install] 的单元会直接报错，所以这一段留着但为空注释。
+# （对照 copilot-sync.service：那个连 [Install] 段都没写，deploy.sh 里
+#  也特意注明了只 enable timer。这里保持同一个规矩。）

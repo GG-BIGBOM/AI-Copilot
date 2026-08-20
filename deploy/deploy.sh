@@ -45,20 +45,32 @@ tar -czf - --exclude='.gitkeep' corrections \
   | $SSH "rm -rf $APP_DIR/corrections && tar -xzf - -C $APP_DIR \
           && chown -R copilot:copilot $APP_DIR/corrections"
 
-echo "==> [5/7] 同步 systemd 单元文件"
+echo "==> [5/7] 同步 systemd 单元 + 运维脚本"
 # M5 时这两个文件是手动 scp 上去的，结果 M6 加 worker 才发现「服务器上的单元
 # 文件和仓库里的可能不一致」没人守着。放进部署流程，仓库即事实。
 #
-# ⭐ 只 enable timer，**不 enable copilot-sync.service**：它是 oneshot，
-# 由 timer 触发；单元里故意没写 [Install]，enable 它会直接报错。
+# ⭐ 只 enable timer，**不 enable copilot-sync.service / copilot-backup.service**：
+# 它们是 oneshot，由各自的 timer 触发；单元里故意没写 [Install]（或写了空的），
+# enable 它会直接报错。
 tar -czf - -C deploy copilot-api.service copilot-worker.service \
                      copilot-sync.service copilot-sync.timer \
+                     copilot-backup.service copilot-backup.timer \
   | $SSH "tar -xzf - -C /etc/systemd/system \
           && systemctl daemon-reload \
           && systemctl enable copilot-api copilot-worker >/dev/null \
-          && systemctl enable --now copilot-sync.timer >/dev/null"
+          && systemctl enable --now copilot-sync.timer >/dev/null \
+          && systemctl enable --now copilot-backup.timer >/dev/null"
 # timer 要 `--now`：光 enable 只建了开机自启的符号链接，**这次不会跑起来**，
 # `systemctl is-active` 会一直是 inactive，而那看起来像装失败了
+
+# ⭐ backup.sh 要推到服务器上，因为 copilot-backup.service 是去执行
+# `/opt/copilot/deploy/backup.sh` 的。**单元文件和它要跑的脚本必须一起推**——
+# 只推单元不推脚本的话，timer 到点了就报 203/EXEC，而那条错误只在 journal 里，
+# 没有任何外部症状：站好好的，备份一份都没有。
+tar -czf - -C . deploy/backup.sh \
+  | $SSH "mkdir -p $APP_DIR/deploy && tar -xzf - -C $APP_DIR \
+          && chmod +x $APP_DIR/deploy/backup.sh \
+          && mkdir -p /var/backups/copilot"
 
 echo "==> [6/7] 推送前端产物"
 # 先解到 .new 再整目录替换：避免用户正好在传输中途刷到半个站
@@ -142,4 +154,29 @@ for path in /api/health / /chat/ /documents/; do
     printf "  %-14s %s\n" "$path" "$code"
     [ "$code" = "200" ] || { echo "  ↑ 这条没过，部署未通过验收"; exit 1; }
 done
+
+echo "==> 备份体检"
+# ⭐ **这是这个项目唯一会被人真的读到的备份告警渠道。**
+# 服务器上没有邮件、没有 Sentry，备份任务悄悄失败三周也不会有任何外部症状——
+# 站好好的、答案照常出、你每天还在往本机拉「备份」。所以把检查挂在
+# **每次上线都会看的那段输出**里：LAST_OK 超过 48 小时就把这次部署判为不通过。
+#
+# 为什么是 48 小时不是 24：timer 有最多 5 分钟随机延迟，而上线常常发生在
+# 刚过整点的时候。卡 24 小时会周期性地误报，而**误报几次之后这条检查就没人看了**。
+AGE=$($SSH "if [ -f /var/backups/copilot/LAST_OK ]; then
+                echo \$(( (\$(date -u +%s) - \$(date -u -d \"\$(cat /var/backups/copilot/LAST_OK)\" +%s)) / 3600 ))
+            else echo -1; fi")
+COUNT=$($SSH "ls -1 /var/backups/copilot/kb-*.dump 2>/dev/null | wc -l")
+if [ "$AGE" = "-1" ]; then
+    echo "  ⚠️ 还没有成功过一次备份。timer 刚装上的话，今晚 04:10（北京）会跑第一次；"
+    echo "     不想等就手工来一次：ssh 上去 systemctl start copilot-backup.service"
+elif [ "$AGE" -gt 48 ]; then
+    echo "  ⚠️ 最近一次成功备份是 ${AGE} 小时前 —— 备份多半已经坏了"
+    $SSH "systemctl status copilot-backup.timer --no-pager | head -5" || true
+    echo "  ↑ 部署未通过验收（站是好的，但 R8 又回来了）"
+    exit 1
+else
+    echo "  上次备份 ${AGE} 小时前，现存 ${COUNT} 份"
+fi
+
 echo "完成：https://liushun666.cn/"
