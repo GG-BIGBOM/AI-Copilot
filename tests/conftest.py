@@ -119,8 +119,18 @@ def fake_providers(monkeypatch, maker):
 
     chat 路由在流里自己开会话（StreamingResponse 的响应体在依赖退出之后才被消费），
     所以这里得连 `SessionLocal` 一起换掉，否则流里那部分会打到真实连接池上。
+
+    ⚠️ **`trace` 那个模块也有自己的 `SessionLocal`，同样要换**（M11 P1）。
+    它是**故意**自己开会话的（流里那个 session 可能已经因为取消而半死），
+    代价就是这里要多换一处。漏了的话，症状是这样的：
+    答案照常出来、测试也不报错，只有 journal 里多一行
+    「写 request_trace 失败：Event loop is closed」——因为它打到了
+    上一个用例留下的、事件循环已经关掉的真实连接池上。
+    台账那边刻意「失败只记日志」，于是这个漏接线**不会让任何用例变红**，
+    只会让所有关于 trace 的断言查不到行。
     """
     from copilot.api import providers
+    from copilot.api import trace as trace_module
     from copilot.api.routes import chat as chat_module
 
     llm = FakeLLM("先绑定物流账号[1]，再打印面单。")
@@ -128,6 +138,7 @@ def fake_providers(monkeypatch, maker):
     monkeypatch.setattr(providers, "get_reranker", TopOneReranker)
     monkeypatch.setattr(providers, "get_llm", lambda: llm)
     monkeypatch.setattr(chat_module, "SessionLocal", maker)
+    monkeypatch.setattr(trace_module, "SessionLocal", maker)
     return llm
 
 

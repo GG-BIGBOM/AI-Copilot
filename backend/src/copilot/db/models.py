@@ -19,12 +19,14 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -200,6 +202,108 @@ class TokenUsage(Base):
     requests: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RequestTrace(Base):
+    """一次问答的全链路记录，一条请求一行。M11 P1。
+
+    ⭐ **它存在的理由是「灰度观察」这四个字今天是空的。**
+    `.env.example` 里写的观察项是「journal 里 Agent 路径的报错，以及答非所问 /
+    该查没查的反馈」——后半句在 journal 里**根本查不到**：没有任何地方记录
+    这一轮调了哪些工具、检索到几块、rerank 最高分多少。观察手段不存在的话，
+    灰度跑一周得到的只有一句「好像没报错」，那不叫观察，那叫等。
+
+    所以监控是灰度的**硬依赖**，不是配套的锦上添花，它必须先于 P4 上线。
+
+    ⚠️ **👍👎 也写在这张表上，不另建 feedback 表**（M11 P2，这一节唯一一个
+    真正的设计决定）。分两张表且不关联的话，一个 👎 就只是个计数器——
+    你复现不了当时检索到了什么、调了什么工具、rerank 打了多少分。
+    合成一张表，点开一条差评能直接看到全链路，
+    「用户差评 → 找失败原因 → 加进评测集」这个闭环才转得起来。
+    分表的代价不是多写一次 join，是**这个闭环根本转不动**。
+
+    ⚠️ **写入失败绝不能影响回答。** 见 `api/trace.py`：整条落库包在
+    try 里，失败只记一行日志。台账记漏一次的代价，远小于「答案已经生成好了、
+    却因为写台账报错而在用户面前变成一句报错」。
+    """
+
+    __tablename__ = "request_trace"
+
+    # ⭐ id 在**流开始之前**就生成好，随 `data-trace` 片段发给前端，
+    # 行本身到这一轮结束才写。前端点 👎 时手上已经有这个 id 了——
+    # 否则前端要等到流结束才知道该给哪一行打分，而用户恰恰是
+    # 看到烂答案的第一秒就想点那个按钮。
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # journal 里那串 X-Request-Id。用户截图报错时，凭它能把这一行和
+    # `journalctl` 里的完整堆栈对上——两边各存一半信息，靠这个字段缝合
+    request_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+
+    # 人走了台账要留着（SET NULL）：统计和复盘看的是「系统那天表现如何」，
+    # 不该因为某个账号被删就凭空少掉一段历史
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 这一行对应的那条回答。
+    # ⚠️ **不加外键**：消息删了 trace 要留着（同 user_id 的理由），
+    # 而 ondelete=SET NULL 会让「哪条回答被踩了」这个信息也跟着没掉。
+    # 代价是这里可能指向一条已经不存在的消息，读的时候当它不存在即可
+    message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    # direct | agent | canned —— 这一轮走的哪条路。灰度期间最该看的一列
+    route: Mapped[str] = mapped_column(String(16), index=True)
+    mode: Mapped[str] = mapped_column(String(8), default="fast")  # fast | deep
+    question: Mapped[str] = mapped_column(Text)
+    # Agent 这一轮调过的工具，中文标签：["检索知识库", "收集需求"]。
+    # 直路恒为空数组——**空数组和 NULL 在这里意义不同**：
+    # 空数组 = 这条路本来就不调工具；NULL = 不知道（老数据）
+    tools: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
+
+    # 检索到几块、rerank 最高分多少。
+    # ⭐ 这两列合起来才是「该查没查 / 答非所问」的判据：
+    # chunk_count=0 说明压根没召回；top_score 很低说明召回了但都不相关。
+    # 只看答案文本是分不出这两种失败的，而它们的修法完全不同
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    top_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 检索结果里有没有私有块。M11 P3 的主体纠偏就是奔着这一列去的
+    private_hits: Mapped[int] = mapped_column(Integer, default=0)
+
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 首字时间。**和总时间必须分开记**：详解档的推理模型首字要 8~60 秒，
+    # 而用户感知到的「卡」几乎全在首字之前。只记总时间的话，
+    # 「答得慢」和「等得久」这两件事在表里长得一模一样
+    ttfb_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    answer_chars: Mapped[int] = mapped_column(Integer, default=0)
+    # 模型说了「知识库暂无此内容」。拒答率是幻觉率的对偶指标，
+    # 只看幻觉率会把「什么都不敢答」的退化调成满分
+    no_answer: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ===== 👍👎（M11 P2）=====
+    # up | down。NULL = 没人点过——三个字段都可空是刻意的：
+    # 绝大多数行永远不会有反馈，默认值不该假装「有一个中性评价」
+    feedback: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    # 点👎时选的原因：wrong | incomplete | should_know | bad_source | unclear | no_image
+    feedback_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    __table_args__ = (
+        # 「最近的差评」是这张表最主要的查法，给它一个专门的索引。
+        # 部分索引：99% 的行 feedback 是 NULL，全量索引等于白占空间
+        Index(
+            "ix_request_trace_feedback_recent",
+            "created_at",
+            postgresql_where=text("feedback IS NOT NULL"),
+        ),
     )
 
 

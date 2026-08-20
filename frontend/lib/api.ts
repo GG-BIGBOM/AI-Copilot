@@ -109,7 +109,35 @@ export type StoredMessage = {
   /** 正文里 [图1] 的对照表。没有它，历史消息里的图号就成了裸标记 */
   images: { n: number; url: string }[] | null;
   created_at: string;
+  /**
+   * 这条回答对应的追踪记录（M11 P2）。👍👎 打给它。
+   *
+   * ⚠️ **历史消息也要有**：trace id 平时是随 SSE 发过来的，刷新一次就没了。
+   * 而用户很常见的行为恰恰是回头翻历史、看到一条当时没细看的烂答案才想点踩。
+   */
+  trace_id: string | null;
+  /** 已经点过的赞/踩。刷新后按钮要保持按下的样子，否则用户会以为没点上 */
+  feedback: FeedbackVote | null;
 };
+
+export type FeedbackVote = "up" | "down";
+
+/**
+ * 点👎时可以选的原因。**是枚举不是自由文本**：
+ * 自由文本收上来的是「不好」「不对」这类没有信息量的话，而这六个选项
+ * 每一个都直接对应一种排查方向——「知识库明明有」查检索、「答错了」查生成、
+ * 「缺少截图」查配图带出率。
+ */
+export const FEEDBACK_REASONS = [
+  { value: "wrong", label: "答错了" },
+  { value: "incomplete", label: "没答到重点" },
+  { value: "should_know", label: "知识库明明有" },
+  { value: "bad_source", label: "来源不对" },
+  { value: "unclear", label: "步骤不清楚" },
+  { value: "no_image", label: "缺少截图" },
+] as const;
+
+export type FeedbackReason = (typeof FEEDBACK_REASONS)[number]["value"];
 
 export class ApiError extends Error {
   constructor(
@@ -285,6 +313,24 @@ export const api = {
 
   deleteCorrection: (id: string) =>
     request<void>(`/api/corrections/${id}`, { method: "DELETE" }),
+
+  /**
+   * 给某一轮问答点赞/点踩（M11 P2）。
+   *
+   * 写的是 `request_trace` 那张表的两列，**不是独立的 feedback 表**——
+   * 这样点开一条差评能直接看到当时检索到几块、调了什么工具、rerank 多少分。
+   * 分表的话一个 👎 就只是个计数器，「差评 → 找原因 → 补评测题」这个闭环
+   * 根本转不动。
+   */
+  sendFeedback: (body: {
+    traceId: string;
+    vote: FeedbackVote;
+    reason?: FeedbackReason;
+  }) =>
+    request<{ trace_id: string; vote: FeedbackVote }>("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   documents: () => request<DocumentSummary[]>("/api/documents"),
 

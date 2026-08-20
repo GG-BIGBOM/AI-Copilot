@@ -14,11 +14,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from copilot.api import logging_setup, providers
+from copilot.api import logging_setup, providers, ratelimit
 from copilot.api.routes import auth as auth_routes
 from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import corrections as corrections_routes
 from copilot.api.routes import docs as docs_routes
+from copilot.api.routes import feedback as feedback_routes
 from copilot.api.routes import invites as invites_routes
 from copilot.api.routes import verified as verified_routes
 from copilot.auth.security import ensure_production_ready
@@ -56,6 +57,13 @@ def create_app() -> FastAPI:
     # request id 要先挂，CORS 后挂——这样 CORS 在最外层，
     # 连中间件自己抛出的 500 都会被加上 CORS 头，否则浏览器只报一句
     # "CORS error"，真正的错误信息看不到（本地开发时尤其坑）
+    #
+    # 三层从内到外：限流 → request id → CORS。
+    # ⭐ 限流在最内层是有意的：被 429 掉的请求**也要**带上 X-Request-Id
+    # （靠外面那层加）和 CORS 头（靠最外层加）。反过来的话，
+    # 前端收到的 429 会因为缺 CORS 头而变成一句 "CORS error"，
+    # 用户看到的是「网站坏了」而不是「你点太快了」。
+    ratelimit.install(app)
     logging_setup.install(app)
 
     # 本地开发前端在 3000、后端在 8000，跨源。
@@ -75,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(corrections_routes.router)
     app.include_router(invites_routes.router)
     app.include_router(verified_routes.router)
+    app.include_router(feedback_routes.router)
 
     # 镜像下来的语雀配图。
     # ⚠️ 线上由 **nginx** 直接发（`location /images/ { alias .../data/images/; }`），

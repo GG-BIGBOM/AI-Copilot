@@ -539,7 +539,9 @@ async def test_bucketed_user_takes_the_agent_for_a_plain_question(maker, two_use
     from copilot.api.routes.chat import _use_agent
 
     (alice_id, _), _, _ = two_users
-    user = SimpleNamespace(id=alice_id)
+    # `email` 不能省：M11 P4 之后 `_use_agent` 第一件事就是查白名单。
+    # 给一个绝不会在 `AGENT_ALLOW_EMAILS` 里的地址，这样这道题量的仍然是**分桶**
+    user = SimpleNamespace(id=alice_id, email="not-on-the-allowlist@test.local")
     async with maker() as s:
         _settings(monkeypatch, agent_enabled=False, agent_rollout=1.0)
         assert await _use_agent(s, user, "电子面单怎么设置", None) is True

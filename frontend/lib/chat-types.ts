@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 
-import type { Citation } from "@/lib/api";
+import type { Citation, FeedbackVote } from "@/lib/api";
 
 /**
  * 后端自定义的两种数据片段。名字要和 FastAPI 那边 `stream.data_part(name, ...)`
@@ -15,6 +15,19 @@ export type CopilotDataParts = {
   images: { images: AnswerImage[] };
   /** M7：Agent 导出的 xlsx。url 是根相对路径，用时拼 API_BASE */
   download: { url: string; name: string };
+  /**
+   * M11 P2：这一轮在 `request_trace` 里的行号，👍👎 打给它。
+   *
+   * ⭐ **它在正文之前就发**，和引用相反。理由是用户点踩是在读到烂答案的
+   * 第一秒，那时候流还没结束——等结束再发，那一秒就没有按钮可点。
+   * 这不违反「说不知道就不挂来源」：一个 id 不构成「答案有依据」的暗示。
+   *
+   * `vote` **后端流里不发**，只有从历史还原的消息才带（那时它来自
+   * `StoredMessage.feedback`）。放同一个片段里是为了让前端只有一个
+   * 「这条消息的反馈状态」的入口——分成两个片段，迟早会出现
+   * 「有 id 没 vote」或「有 vote 没 id」的组合，而那是按钮亮不亮的 bug。
+   */
+  trace: { id: string; vote?: FeedbackVote | null };
 };
 
 /** 答案正文里 `[图1]` 的编号 → 图片地址。地址是根相对路径，用时拼 API_BASE。 */
@@ -66,6 +79,24 @@ export function messageImages(message: CopilotUIMessage): AnswerImage[] {
     if (part.type === "data-images") return part.data.images;
   }
   return [];
+}
+
+/**
+ * M11 P2：这条回答在 `request_trace` 里的行号，以及已经点过的赞/踩。
+ *
+ * 两条来路在这里汇合：**这一次流出来的**消息带的是后端发的 `data-trace` 片段；
+ * **从历史还原的**消息由 `toUIMessage` 用 `StoredMessage.trace_id / feedback`
+ * 拼一个同名片段出来。汇成一个入口，渲染那边就只有一种情况要处理。
+ */
+export function messageTrace(
+  message: CopilotUIMessage,
+): { id: string; vote: FeedbackVote | null } | null {
+  for (const part of message.parts) {
+    if (part.type === "data-trace") {
+      return { id: part.data.id, vote: part.data.vote ?? null };
+    }
+  }
+  return null;
 }
 
 /** M7：这条消息有没有可下载的方案（xlsx）。 */

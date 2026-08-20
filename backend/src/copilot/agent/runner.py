@@ -166,8 +166,10 @@ async def run_agent_stream(
     # Agent 自己写的正文，先攒着（见文件头）
     drafted: list[str] = []
     answer: list[str] = []
-    # 本轮调过哪些工具。硬防线要用——见下面那段注释
-    used_tools: set[str] = set()
+    # 本轮调过哪些工具。硬防线要用——见下面那段注释。
+    # ⚠️ **挂在 deps 上，不是局部变量**：路由层要拿它写 request_trace
+    # （M11 P1）。两边读同一份，才不会出现「防线看到调了、台账写着没调」
+    used_tools: set[str] = deps.used_tools
     failure: Exception | None = None
 
     def so_far() -> str:

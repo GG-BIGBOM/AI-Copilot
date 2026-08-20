@@ -452,7 +452,9 @@ async def test_small_talk_does_not_hijack_an_agent_conversation(
         s.add(Conversation(id=conv_id, user_id=logged_in, title="出方案", profile={}))
         await s.commit()
 
-    async def stub(_user_id, _question, _client_id, _mode=None):
+    # `_draft` 是 M11 P1 加的第 5 个参数（那一轮的 request_trace 草稿）。
+    # 假的生产者也得收下它，否则路由层一调就是 TypeError → 500
+    async def stub(_user_id, _question, _client_id, _mode=None, _draft=None):
         yield "data: {\"type\":\"text-delta\",\"id\":\"t\",\"delta\":\"AGENT\"}\n\n"
 
     monkeypatch.setattr(chat_module, "_agent_stream", stub)

@@ -31,7 +31,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import anyio
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import iterate_in_threadpool
@@ -46,9 +46,10 @@ from copilot.api.schemas import (
     ConversationOut,
     MessageOut,
 )
+from copilot.api.trace import TraceDraft
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
-from copilot.db.models import Conversation, Message
+from copilot.db.models import Conversation, Message, RequestTrace
 from copilot.db.session import SessionLocal
 from copilot.qa import DEFAULT_MODE, HISTORY_TURNS, ask_stream, is_no_answer, small_talk_reply
 
@@ -196,8 +197,13 @@ class _AnswerWriter:
 
 
 async def _chat_stream(
-    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
+    user_id: uuid.UUID,
+    question: str,
+    client_id: str | None,
+    mode: str = DEFAULT_MODE,
+    draft: TraceDraft | None = None,
 ) -> AsyncIterator[str]:
+    draft = draft or TraceDraft(user_id=user_id, question=question, route="direct", mode=mode)
     message_id = stream.new_id("msg")
     text_id = stream.new_id("txt")
     text_open = False
@@ -217,6 +223,10 @@ async def _chat_stream(
 
             # 前端据此知道这轮落在哪条会话上（服务端可能没沿用它传来的 id）
             yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
+            draft.conversation_id = conv.id
+            # ⭐ trace id **在正文之前**发。前端点 👎 是在读到烂答案的第一秒，
+            # 那时候流可能还没结束——等结束再发，那一秒就没有按钮可点
+            yield stream.data_part("trace", {"id": str(draft.id)})
 
             streamed = await ask_stream(
                 session,
@@ -238,6 +248,9 @@ async def _chat_stream(
 
             text_stream = streamed.stream
             citations = streamed.citations
+            draft.retrieval(citations)
+            draft.private_hits = streamed.private_hits
+            draft.model = getattr(providers.get_llm_for(mode), "model", None)
 
             buf: list[str] = []
             writer = _AnswerWriter(session, conv.id)
@@ -267,13 +280,19 @@ async def _chat_stream(
                     if not text_open:
                         yield stream.text_start(text_id)
                         text_open = True
+                    draft.first_token()  # 只认第一次，见 TraceDraft.first_token
                     buf.append(piece)
                     yield stream.text_delta(text_id, piece)
                     if writer.due:
                         await writer.write("".join(buf), final=False)
-            except (asyncio.CancelledError, GeneratorExit):
+            except (asyncio.CancelledError, GeneratorExit) as exc:
                 # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0
                 await writer.interrupted("".join(buf))
+                # ⭐ 被打断的这一轮**也要记账**。用户点停止本身就是一种反馈
+                # （多半是答得不对或者太慢），而这恰恰是最该留下记录的一轮
+                draft.failed(exc)
+                draft.answer_chars = len("".join(buf))
+                await draft.save()
                 raise
             if reason_open:
                 yield stream.reasoning_end(reason_id)
@@ -294,19 +313,27 @@ async def _chat_stream(
 
             # 记账。算的是「送进去的 + 吐出来的」——**上下文才是大头**
             # （5 块材料约 2500 字，答案往往只有它的三成）
-            await usage.record(
-                session,
-                user_id,
-                usage.estimate_tokens(streamed.context_text, question, answer),
-            )
+            tokens = usage.estimate_tokens(streamed.context_text, question, answer)
+            await usage.record(session, user_id, tokens)
 
-    except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
+            draft.tokens = tokens
+            draft.answer_chars = len(answer)
+            draft.no_answer = not shown
+            draft.message_id = writer.row.id if writer.row is not None else None
+
+    except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("聊天流出错：user=%s question=%r", user_id, question[:80])
+        draft.failed(exc)
         if reason_open:
             yield stream.reasoning_end(reason_id)
         if text_open:
             yield stream.text_end(text_id)
         yield stream.error(GENERIC_ERROR)
+
+    # ⚠️ 在 `finish` 之前落库，但**不挡着流**：这是一条 INSERT，
+    # 失败了也只是记一行日志（见 trace.py 第 1 条）。放在 try 之外是因为
+    # 出错那一支也要写——只记成功的请求，等于把最该看的那一半扔了
+    await draft.save()
 
     yield stream.finish_step()
     yield stream.finish()
@@ -314,7 +341,11 @@ async def _chat_stream(
 
 
 async def _agent_stream(
-    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
+    user_id: uuid.UUID,
+    question: str,
+    client_id: str | None,
+    mode: str = DEFAULT_MODE,
+    draft: TraceDraft | None = None,
 ) -> AsyncIterator[str]:
     """M7 的 Agent 路径。默认不走这条（`agent_enabled`）。
 
@@ -333,6 +364,7 @@ async def _agent_stream(
     from copilot.agent.deps import AgentDeps
     from copilot.agent.runner import run_agent_stream, to_message_history
 
+    draft = draft or TraceDraft(user_id=user_id, question=question, route="agent", mode=mode)
     message_id = stream.new_id("msg")
     yield stream.start(message_id)
     yield stream.start_step()
@@ -349,6 +381,8 @@ async def _agent_stream(
             await session.commit()
 
             yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
+            draft.conversation_id = conv.id
+            yield stream.data_part("trace", {"id": str(draft.id)})
 
             deps = AgentDeps(
                 session=session,
@@ -371,14 +405,20 @@ async def _agent_stream(
                 async for part, so_far in run_agent_stream(
                     question, deps, to_message_history(history)
                 ):
+                    if so_far and not answer:
+                        draft.first_token()
                     answer = so_far
                     yield part
                     # 和直路同一套边流边落库（M10 P2）。Agent 路径原来没有，
                     # 点停止刷新页面就只剩一个提问
                     if writer.due:
                         await writer.write(answer, final=False)
-            except (asyncio.CancelledError, GeneratorExit):
+            except (asyncio.CancelledError, GeneratorExit) as exc:
                 await writer.interrupted(answer)
+                draft.failed(exc)
+                draft.tools = sorted(deps.used_tools)
+                draft.answer_chars = len(answer)
+                await draft.save()
                 raise
 
             # 配图兜底。`answer_kb` 走的是终结工具，它在正文**之前**就把图发了
@@ -413,15 +453,26 @@ async def _agent_stream(
 
             # ⚠️ 要把检索到的材料算进去。只算问题和答案会漏掉八成——
             # Agent 一轮可能检索好几次，那些材料每一份都进了模型的上下文
-            await usage.record(
-                session,
-                user_id,
-                usage.estimate_tokens(deps.context_text, question, answer),
-            )
+            tokens = usage.estimate_tokens(deps.context_text, question, answer)
+            await usage.record(session, user_id, tokens)
 
-    except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
+            # ⭐ `tools` 是这条路**独有**的那一列，也是灰度期间最该盯的一列：
+            # 空数组 + 一段像模像样的 ERP 答案 = 越过工具直答，
+            # 那正是 `ca6fc82` 那道硬防线要拦的东西。验收标准第 8 条查的就是它
+            draft.tools = sorted(deps.used_tools)
+            draft.retrieval(deps.citations)
+            draft.private_hits = deps.private_hits
+            draft.tokens = tokens
+            draft.answer_chars = len(answer)
+            draft.no_answer = not shown
+            draft.message_id = writer.row.id if writer.row is not None else None
+
+    except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("Agent 流出错：user=%s question=%r", user_id, question[:80])
+        draft.failed(exc)
         yield stream.error(GENERIC_ERROR)
+
+    await draft.save()
 
     yield stream.finish_step()
     yield stream.finish()
@@ -429,7 +480,11 @@ async def _agent_stream(
 
 
 async def _canned_stream(
-    user_id: uuid.UUID, question: str, client_id: str | None, mode: str = DEFAULT_MODE
+    user_id: uuid.UUID,
+    question: str,
+    client_id: str | None,
+    mode: str = DEFAULT_MODE,
+    draft: TraceDraft | None = None,
 ) -> AsyncIterator[str]:
     """招呼 / 道谢 / 告别 / 问能力——固定回复，**一次模型调用都不花**（M10 P2）。
 
@@ -441,6 +496,7 @@ async def _canned_stream(
 
     `mode` 收下不用：固定回复没有简答/详解之分。
     """
+    draft = draft or TraceDraft(user_id=user_id, question=question, route="canned", mode=mode)
     reply = small_talk_reply(question) or ""
     message_id = stream.new_id("msg")
     text_id = stream.new_id("txt")
@@ -454,19 +510,34 @@ async def _canned_stream(
             await session.commit()
 
             yield stream.data_part("conversation", {"id": str(conv.id), "title": conv.title})
+            draft.conversation_id = conv.id
+            yield stream.data_part("trace", {"id": str(draft.id)})
             yield stream.text_start(text_id)
+            draft.first_token()
             yield stream.text_delta(text_id, reply)
             yield stream.text_end(text_id)
 
             # 不挂引用：固定回复没有出处，挂了就是假的
-            await _AnswerWriter(session, conv.id).write(reply, final=True)
+            writer = _AnswerWriter(session, conv.id)
+            await writer.write(reply, final=True)
             # tokens 记 0——一个字都没送进模型。但请求数要记，否则运维看到的
             # 请求量会凭空少掉一截
             await usage.record(session, user_id, 0)
 
-    except Exception:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
+            # ⭐ 寒暄也记一行。**它是这张表里最便宜也最有用的一类样本**：
+            # 「有多少提问其实只是打招呼」这件事，除了这里没有别处能看出来；
+            # 而且它一次模型调用都不花——如果哪天这一类的占比很高，
+            # 说明该做的是引导用户怎么提问，不是继续调模型
+            draft.answer_chars = len(reply)
+            draft.model = None  # 一个字都没送进模型
+            draft.message_id = writer.row.id if writer.row is not None else None
+
+    except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("寒暄流出错：user=%s question=%r", user_id, question[:80])
+        draft.failed(exc)
         yield stream.error(GENERIC_ERROR)
+
+    await draft.save()
 
     yield stream.finish_step()
     yield stream.finish()
@@ -487,6 +558,21 @@ AGENT_TRIGGERS = (
     "实施配置",
     "配置检查表",
 )
+
+
+def in_agent_allowlist(email: str) -> bool:
+    """这个人在 Agent 白名单里吗（M11 P4）。
+
+    ⭐ **白名单先于百分比灰度，因为 n=3 上的百分比是自欺欺人。**
+    线上只有 3 个真实账号，而分桶按 user_id 稳定哈希：`AGENT_ROLLOUT=0.2`
+    最可能的结果是一个人都没进桶，0.5 也不过是掷三次硬币。
+    观察不到样本的灰度不叫灰度，叫等。
+
+    所以先在 `.env` 里点名两个人（自己 + 1 个熟人），真实用一周，
+    看 `request_trace` 里这两个人的行：有没有「一个工具都没调却答了 ERP 问题」、
+    有没有报错、首字时间掉了多少。**这一周的观察对象是那张表，不是感觉。**
+    """
+    return bool(email) and email.lower() in get_settings().agent_allow_email_set
 
 
 def in_agent_bucket(user_id: uuid.UUID) -> bool:
@@ -521,10 +607,13 @@ def in_agent_bucket(user_id: uuid.UUID) -> bool:
 async def _use_agent(session: AsyncSession, user, question: str, client_id: str | None) -> bool:
     """这一轮走 Agent 还是走直路。
 
-    三个入口，第一个是 M10 加的：
+    四个入口，前两个分别是 M11 和 M10 加的：
 
+      -1. **这个用户在白名单里**（`AGENT_ALLOW_EMAILS`）—— M11 P4。
+          n=3 的线上不做百分比灰度，改成点名，理由见 `in_agent_allowlist`。
       0. **这个用户在灰度桶里** —— 那就一律走 Agent，普通问答也走。
          这是 M10 的目标形态：路由交给模型，而不是关键词表。
+         （用户到 20+ 之前这条实际上不会命中，`AGENT_ROLLOUT` 默认是 0。）
       1. 问题里出现意图词（「帮我出个实施方案」）
       2. **这条会话已经在走 Agent 了**（`profile is not None`）。这条不能少——
          少了它，用户答完第一个追问，第二轮就被路由回直路，
@@ -543,6 +632,10 @@ async def _use_agent(session: AsyncSession, user, question: str, client_id: str 
     > 知识库里有没有这份文档，却被送进需求收集流程（路由评测 `routing-before`
     > 里那 2 道错题）。灰度桶里的用户不受这个影响——模型分得清。
     """
+    # M11 P4：白名单先判。它排在哈希分桶**前面**是因为白名单是「点名」，
+    # 而分桶是「碰运气」——被点到名的人不该再被一次哈希掷回直路
+    if in_agent_allowlist(user.email):
+        return True
     if in_agent_bucket(user.id):
         return True
     if any(kw in question for kw in AGENT_TRIGGERS):
@@ -558,7 +651,9 @@ async def _use_agent(session: AsyncSession, user, question: str, client_id: str 
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> StreamingResponse:
+async def chat(
+    body: ChatRequest, request: Request, user: CurrentUser, session: SessionDep
+) -> StreamingResponse:
     """提问，流式返回答案与引用。未登录 401，超出当日配额 429。
 
     ⭐ 配额检查必须在 `StreamingResponse` **之前**。流一旦开始，
@@ -581,11 +676,27 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
     # Agent 问完「要对接哪些平台？」，用户回一句「好的」——那个「好的」在
     # 寒暄表里，短路掉就变成「不客气，还有别的问题随时问」，流程当场断掉。
     if not use_agent and small_talk_reply(question) is not None:
-        producer = _canned_stream
+        producer, route = _canned_stream, "canned"
+    elif use_agent:
+        producer, route = _agent_stream, "agent"
     else:
-        producer = _agent_stream if use_agent else _chat_stream
+        producer, route = _chat_stream, "direct"
+
+    # ⭐ 台账在这里就建好，因为**路由是在这里决定的**——
+    # 「这一轮走的哪条路」是灰度期间最该看的一列，而只有这个函数知道答案。
+    # 生产者不该自己猜自己是谁。
+    #
+    # `request_id` 从中间件挂上来的 `request.state` 取。用户截图报错时，
+    # 凭这一列能把台账里的这一行和 journal 里的完整堆栈缝起来
+    draft = TraceDraft(
+        user_id=user.id,
+        question=question,
+        route=route,
+        mode=body.mode,
+        request_id=getattr(request.state, "request_id", None),
+    )
     return StreamingResponse(
-        producer(user.id, question, body.id, body.mode),
+        producer(user.id, question, body.id, body.mode, draft),
         media_type="text/event-stream",
         headers=stream.SSE_HEADERS,
     )
@@ -640,18 +751,32 @@ async def list_conversations(
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
 async def list_messages(
     conversation_id: uuid.UUID, user: CurrentUser, session: SessionDep
-) -> list[Message]:
+) -> list[MessageOut]:
     conv = await session.get(Conversation, conversation_id)
     # 别人的会话一律当成不存在，不用 403——403 等于告诉对方"这个 id 是有效的"
     if conv is None or conv.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在")
 
+    # ⭐ LEFT JOIN 上 `request_trace`，把 trace id 和已有的赞/踩带出来（M11 P2）。
+    # 不带的话，👍👎 只在「答案刚生成出来的那一次」可用——trace id 是随 SSE
+    # 发给前端的，刷新一次就没了。而用户很常见的行为恰恰是回头翻历史、
+    # 看到一条当时没细看的烂答案，那时候才想点踩。
+    #
+    # 用 outerjoin 不用子查询：一次扫描，且 `message_id` 上没有唯一约束时
+    # 也不会因为多行而报错（重复的极少，取到哪一条都能复现同一轮）。
     stmt = (
-        select(Message)
+        select(Message, RequestTrace.id, RequestTrace.feedback)
+        .outerjoin(RequestTrace, RequestTrace.message_id == Message.id)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at, Message.id)
     )
-    return list((await session.execute(stmt)).scalars())
+    out: list[MessageOut] = []
+    for msg, trace_id, feedback in (await session.execute(stmt)).all():
+        row = MessageOut.model_validate(msg)
+        row.trace_id = trace_id
+        row.feedback = feedback
+        out.append(row)
+    return out
 
 
 @router.post("/conversations/bulk-delete", response_model=BulkDeleteResult)

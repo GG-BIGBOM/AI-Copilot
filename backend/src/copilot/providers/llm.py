@@ -42,6 +42,16 @@ class ChatLLM:
             timeout=httpx.Timeout(180.0, connect=15.0),
         )
 
+    @property
+    def model(self) -> str:
+        """这个实例实际会调哪个模型。
+
+        给 `request_trace` 记一列用（M11 P1）。**这一列不是装饰**：
+        简答档走 DeepSeek、详解档走 Kimi，两边的速度和失败模式完全不同，
+        表里不记模型的话，「今天怎么这么慢」根本归不了因。
+        """
+        return self._model
+
     def close(self) -> None:
         self._client.close()
 

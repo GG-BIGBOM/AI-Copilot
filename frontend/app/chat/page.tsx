@@ -22,6 +22,13 @@ function toUIMessage(m: StoredMessage): CopilotUIMessage {
   if (m.images?.length) {
     parts.push({ type: "data-images", data: { images: m.images } });
   }
+  // M11 P2：把 trace id 和已点过的赞/踩塞成一个和流里同名的片段，
+  // 这样翻历史时 👍👎 照样能点、点过的那一侧照样亮着。
+  // 没有它的话，反馈就只在「答案刚生成出来的那一次」可用——
+  // 而用户回头看到一条烂答案才想点踩，是最常见的情形
+  if (m.trace_id) {
+    parts.push({ type: "data-trace", data: { id: m.trace_id, vote: m.feedback } });
+  }
   return { id: m.id, role: m.role === "assistant" ? "assistant" : "user", parts };
 }
 

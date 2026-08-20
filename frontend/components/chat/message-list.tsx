@@ -28,6 +28,7 @@ import {
   messageReasoning,
   messageText,
   messageTools,
+  messageTrace,
   type CopilotUIMessage,
 } from "@/lib/chat-types";
 
@@ -147,6 +148,8 @@ function Message({
   // M7：Agent 的工具调用过程与方案下载。普通问答走直路，这两样都是空的
   const tools = messageTools(message);
   const download = messageDownload(message);
+  // M11 P2：这一轮的 trace id + 已经点过的赞/踩。没有就不显示那两个按钮
+  const trace = messageTrace(message);
 
   /* ─── 用户消息：右对齐半气泡 ─── */
   if (message.role === "user") {
@@ -191,7 +194,13 @@ function Message({
           {download && <DownloadCard url={download.url} name={download.name} />}
           <Citations citations={citations} />
           {!isStreaming && (
-            <MessageActions text={text} question={question} onRegenerate={onRegenerate} />
+            <MessageActions
+              text={text}
+              question={question}
+              traceId={trace?.id}
+              initialVote={trace?.vote}
+              onRegenerate={onRegenerate}
+            />
           )}
         </div>
       </div>

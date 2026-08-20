@@ -154,7 +154,44 @@ class MessageOut(BaseModel):
     images: list | None = None
     created_at: datetime
 
+    # M11 P2：这条回答对应的 trace，以及已经点过的赞/踩。
+    #
+    # ⭐ **不加这两个字段的话，👍👎 只在「刚生成出来的那一次」可用。**
+    # trace id 是随 SSE 发给前端的，刷新页面就没了——而用户很常见的行为是
+    # 回头翻历史、看到一条当时没细看的烂答案，那时候才想点踩。
+    # 这两个字段由 `list_messages` 用一次 LEFT JOIN 填上，
+    # 代价是历史列表多一次小表 join，换的是「反馈这件事对历史消息也成立」。
+    trace_id: uuid.UUID | None = None
+    feedback: str | None = None  # up | down | None
+
     model_config = {"from_attributes": True}
+
+
+class FeedbackIn(BaseModel):
+    """一次 👍 / 👎。
+
+    `reason` 只在 👎 时有意义，且是**枚举而不是自由文本**：
+    自由文本收上来的是「不好」「不对」这种没有信息量的话，
+    而这几个选项每一个都直接对应一种排查方向——
+    「知识库明明有」查检索，「答错了」查生成，「缺少截图」查配图带出率。
+    """
+
+    trace_id: uuid.UUID = Field(alias="traceId")
+    vote: Literal["up", "down"]
+    reason: (
+        Literal["wrong", "incomplete", "should_know", "bad_source", "unclear", "no_image"] | None
+    ) = None
+
+    model_config = {"populate_by_name": True}
+
+
+class FeedbackOut(BaseModel):
+    # 出参一律 snake_case，和 `MessageOut` / `UserOut` 保持一致
+    # （前端读的就是 `created_at` / `is_admin` 这套）。
+    # 入参那边用 camelCase 别名是历史约定（`inviteCode`），两边不统一，
+    # 但**统一它要动前端所有类型定义**，不值当为一个新接口去改
+    trace_id: uuid.UUID
+    vote: str
 
 
 class DocumentOut(BaseModel):
