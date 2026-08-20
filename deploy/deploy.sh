@@ -99,7 +99,13 @@ $SSH "set -e
       export PATH=/root/.local/bin:\$PATH COPILOT_ROOT=$APP_DIR
       cd $APP_DIR
       uv sync --no-dev --extra parse --extra agent 2>&1 | tail -2
-      uv run alembic upgrade head 2>&1 | tail -2
+      # ⚠️ **迁移用 .venv/bin/alembic，不能用 `uv run alembic`。**
+      # `uv run` 会先把环境同步成 pyproject 的默认样子——带 dev 组、**不带 extra**，
+      # 正好把上一行刚装好的 parse/agent 卸掉。表现极其难查：部署脚本全绿、
+      # 网站也正常，只有「上传文档」和「出方案」两条路悄悄坏掉，
+      # 而且下次部署又会被上一行修好、再被这一行弄坏。
+      # alembic 是运行时依赖（不在 dev 组里），所以直接调它就够了。
+      .venv/bin/alembic upgrade head 2>&1 | tail -2
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker
       systemctl is-active copilot-worker copilot-sync.timer
