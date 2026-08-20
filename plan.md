@@ -2185,13 +2185,28 @@ procedural 从 6 题扩到 **20 题以上**，配图带出率才有分辨率
 | # | 结果 |
 |---|---|
 | [1] | ✅ **在生产备份上真演练过**：21M 的 dump 在 `kb_drill_*` 里恢复出 3 用户 / 750 文档 / 4572 块，向量检索跑通 |
-| [2] | ✅ `tests/test_ratelimit.py` —— 打满 20 次拿到 429，带 `Retry-After` 和 `X-Request-Id` |
+| [2] | ✅ `tests/test_ratelimit.py`，**并且在线上真打了一遍**：`20×401 → 429`，`Retry-After: 300`，journal 里记的是真实公网 IP（`39.182.9.206`）而不是 `127.0.0.1` —— 这一条只有打线上才验得了，见下 |
 | [3] | ✅ `tests/test_trace_feedback.py::test_trace_row_has_the_whole_chain` |
 | [4] | ✅ `tests/test_trace_feedback.py::test_thumbs_down_links_back_to_the_whole_chain` |
 | [5] | ⚠️ **幻觉率 0% 达标；准确率 94.7%（18/19），差一道** —— 差的那一道有记录，见 P3「三处先量再改」第 3 条 |
 | [6] | ✅ **55 题 98.2%，正好持平 M9 基线，一步没掉**（`m11-public-final`） |
 | [7] | ✅ **配图带出率 83.3%，持平基线** —— 但这是**撤掉 P5 之后**才回来的，见 P5 那一节 |
 | [8] | ⬜ 要人真用一周才谈得上，机制已就位 |
+
+##### ⚠️ 限流有一条**只有打线上才验得了**的失败模式
+
+单测全绿不等于线上真在限流。nginx 反代之后 `request.client.host`
+恒等于 `127.0.0.1`，而 `127.0.0.1` 在豁免名单里（那是为了不误伤评测脚本）——
+**XFF 读错的话，线上的限流会静默失效**，全站共用一个永远被豁免的计数器，
+测试里一个字都看不出来。
+
+所以上线后对着公网打了一遍：
+
+```
+20×401 → 429    Retry-After: 300    X-Request-Id: 3fc0ad774cc3
+journal: WARNING [copilot.api.ratelimit] 限流 39.182.9.206 /api/auth/login（20 次 / 300 秒）
+                                              ↑ 真实公网 IP，不是 127.0.0.1
+```
 
 ##### 公共库回归（61 题，最终 prompt，`m11-public-final`）
 
