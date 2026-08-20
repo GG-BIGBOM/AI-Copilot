@@ -266,3 +266,89 @@ def test_usage_limits_are_tighter_for_plain_questions():
     plan = usage_limits(plan_flow=True)
     assert qa.request_limit < plan.request_limit
     assert qa.tool_calls_limit < plan.tool_calls_limit
+
+
+# ---------- 8：每个注册的工具都要有中文标签 ----------
+
+
+def test_every_registered_tool_has_a_label():
+    """⭐ 加了工具忘了加标签，前端就把 `my_documents` 原样显示给用户。
+
+    这条是补的——`whoami` / `my_documents` 上线时就漏了标签，靠人记不住。
+    """
+    from copilot.agent.agent import TOOLS
+    from copilot.agent.runner import TOOL_LABELS
+
+    missing = [t.__name__ for t in TOOLS if t.__name__ not in TOOL_LABELS]
+    assert not missing, f"这些工具没有中文标签：{missing}"
+
+
+# ---------- 9：越过工具直答的硬防线 ----------
+
+
+def test_guard_catches_answers_that_should_have_been_retrieved():
+    """带 [n] 标记、或够长且含界面路径特征的，都算越线。"""
+    from copilot.agent.guard import looks_like_kb_answer
+
+    assert looks_like_kb_answer("方式1：勾选残次品入库[4]")
+    assert looks_like_kb_answer("按 [图2] 操作")
+    assert looks_like_kb_answer(
+        "进入【设置】-【仓库管理】页面，点击新增，勾选残次品入库，"
+        "然后在弹出的输入框里填写单号并保存，这样就完成了整个配置流程"
+    )
+
+
+def test_guard_does_not_touch_follow_up_questions():
+    """⚠️ 宁可漏判不可误伤：把一句正常追问替换成兜底话术，多轮收集会当场卡死。"""
+    from copilot.agent.guard import looks_like_kb_answer
+
+    assert not looks_like_kb_answer("您要对接哪些电商平台？（如淘宝、拼多多、抖音）")
+    assert not looks_like_kb_answer("现在是 2026年08月19日 15:32，星期三（北京时间）")
+    assert not looks_like_kb_answer("你好，我是旺店通旗舰版 ERP 的知识库助手。")
+    assert not looks_like_kb_answer("")
+
+
+async def test_bypassed_answer_is_replaced_with_the_fallback(maker):
+    """⭐ 没调终结工具、却写出一段像知识库答案的东西 —— 拦下换成兜底话术。
+
+    实测撞到过：追问「那不良品呢」时 Agent 拿上一轮留在历史里的答案编了一段，
+    带着 [3][4] 标记，而页面上 0 条引用可点（见 guard.py 文件头）。
+    """
+    from copilot.qa import NO_ANSWER
+
+    bogus = "残次品入库有两种方式：1. 进入【仓库管理】点击入库单 [3]；2. 勾选残次品 [4]。"
+    async with maker() as s:
+        chunks, answer = await drain("那不良品呢", _deps(s), scripted(bogus))
+
+    assert text_of(chunks) == NO_ANSWER
+    assert answer == NO_ANSWER
+    assert "残次品" not in text_of(chunks)
+
+
+async def test_history_strips_citation_marks_and_truncates(maker):
+    """历史是用来听懂这一句在问什么的，不是当材料用的。"""
+    from copilot.agent.runner import HISTORY_ANSWER_LIMIT, to_message_history
+
+    long_answer = "进入【仓库管理】[1]，点击提交 [图2]。" + "补" * 800
+    msgs = to_message_history([("user", "退货入库怎么操作"), ("assistant", long_answer)])
+    kept = msgs[1].parts[0].content
+    assert "[1]" not in kept and "[图2]" not in kept, "编号在新一轮里无效，抄过去会指错来源"
+    assert len(kept) == HISTORY_ANSWER_LIMIT
+    assert msgs[0].parts[0].content == "退货入库怎么操作", "用户那半边原样保留"
+
+
+async def test_guard_does_not_fire_when_a_tool_did_run(maker):
+    """⚠️ 误伤检查：`generate_plan` 之后那段方案摘要带着界面路径，
+    长得和越线的一模一样——但它有据，据在刚跑完的那个工具里。
+
+    少了「这一轮一个工具都没调」这个前提，整条出方案流程会变成
+    「知识库暂无此内容」。
+    """
+    summary = "已生成《实施配置方案》，共 15 项：[必做] 设置–基本设置–店铺 → 创建 5 个店铺并授权"
+    async with maker() as s:
+        chunks, answer = await drain(
+            "帮我出一份实施方案", _deps(s), scripted(call("current_time"), summary)
+        )
+
+    assert text_of(chunks) == summary, "调过工具的那一轮不该被硬防线碰"
+    assert answer == summary

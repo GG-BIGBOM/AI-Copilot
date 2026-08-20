@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 
 import anyio
@@ -58,7 +59,9 @@ from pydantic_ai.messages import (
 
 from copilot.agent.agent import build_agent, usage_limits
 from copilot.agent.deps import AgentDeps
+from copilot.agent.guard import looks_like_kb_answer
 from copilot.api import stream
+from copilot.qa import NO_ANSWER
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,8 @@ logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "answer_kb": "查知识库",
     "current_time": "查当前时间",
+    "whoami": "自我介绍",
+    "my_documents": "查我的文档",
     "search_kb": "检索知识库",
     "save_requirement": "记录需求",
     "generate_plan": "生成配置方案",
@@ -76,6 +81,12 @@ TOOL_LABELS = {
 # 事件与工具正文汇进同一个 channel 的缓冲大小。满了之后写入方（工具）会被
 # 挡住等消费者——那正是我们要的背压：前端读得慢时不该在内存里堆无限多的字
 _CHANNEL_SIZE = 256
+
+# 历史里单条助手回答带进上下文的长度上限。和直路的 `_HISTORY_CHAR_LIMIT`
+# 是同一个数量级、同一个理由：够听懂上下文就行，不该够"照着答"
+HISTORY_ANSWER_LIMIT = 400
+# 历史里要抹掉的引用与配图标记
+_MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
 
 
 def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | ModelResponse]:
@@ -87,7 +98,12 @@ def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | Model
 
     只带 user / assistant 的**正文**，不带工具调用记录：工具结果往往很长
     （一次检索几千字），全带上会让上下文迅速撑爆，而对「接着聊」没有帮助。
-    """
+
+    ⚠️ **助手那半边要截断、还要抹掉 `[n]` 和 `[图n]`。** 上一轮那段几百字的
+    答案原样带进来，模型看着它就够"答"下一句了，于是跳过检索——实测撞到过
+    （见 guard.py 文件头）。而那些编号在新一轮里根本无效：`citations` 是
+    每轮重建的，抄过去的 `[3]` 指向的是上一轮的来源。
+    历史的用处是**听懂这一句在问什么**，不是当材料用。"""
     out: list[ModelRequest | ModelResponse] = []
     for role, content in rows:
         text = (content or "").strip()
@@ -96,7 +112,8 @@ def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | Model
         if role == "user":
             out.append(ModelRequest(parts=[UserPromptPart(content=text)]))
         elif role == "assistant":
-            out.append(ModelResponse(parts=[TextPart(content=text)]))
+            trimmed = _MARK_RE.sub("", text)[:HISTORY_ANSWER_LIMIT]
+            out.append(ModelResponse(parts=[TextPart(content=trimmed)]))
     return out
 
 
@@ -149,6 +166,8 @@ async def run_agent_stream(
     # Agent 自己写的正文，先攒着（见文件头）
     drafted: list[str] = []
     answer: list[str] = []
+    # 本轮调过哪些工具。硬防线要用——见下面那段注释
+    used_tools: set[str] = set()
     failure: Exception | None = None
 
     def so_far() -> str:
@@ -173,7 +192,7 @@ async def run_agent_stream(
                 break
 
             else:
-                for part in _translate(payload, drafted):
+                for part in _translate(payload, drafted, used_tools):
                     yield part, so_far()
 
     finally:
@@ -189,6 +208,19 @@ async def run_agent_stream(
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。
     if deps.final_answer is None and (text := "".join(drafted).strip()):
+        # ⭐ **硬防线**：这一轮**一个工具都没调**，却写出了一段像知识库答案的
+        # 东西——那只可能是编的、或者是从上一轮的历史里抄的
+        # （见 guard.py 文件头的实测）。换成兜底话术：宁可什么都不说，
+        # 也不给一段无据可查的 ERP 操作步骤。
+        #
+        # ⚠️ `used_tools` 这个前提不能省。`generate_plan` 之后 Agent 会写一段
+        # 带界面路径的方案摘要，长得和越线的一模一样，但它有据——据在刚跑完的
+        # 那个工具里。少了这个判断，整条出方案流程会变成「知识库暂无此内容」。
+        if not used_tools and looks_like_kb_answer(text):
+            logger.warning(
+                "越过工具直答，已拦下：question=%r answer=%r", deps.question[:60], text[:120]
+            )
+            text = NO_ANSWER
         tid = stream.new_id("txt")
         yield stream.text_start(tid), so_far()
         answer.append(text)
@@ -196,10 +228,11 @@ async def run_agent_stream(
         yield stream.text_end(tid), so_far()
 
 
-def _translate(event: object, drafted: list[str]) -> list[str]:
+def _translate(event: object, drafted: list[str], used_tools: set[str] | None = None) -> list[str]:
     """一个 Pydantic AI 事件 → 零到多个 SSE 片段。
 
-    Agent 自己的正文不在返回值里——它进 `drafted`，由调用方决定要不要发。
+    Agent 自己的正文不在返回值里——它进 `drafted`，由调用方决定要不要发；
+    调过的工具名记进 `used_tools`，硬防线要用。
     """
     out: list[str] = []
 
@@ -218,6 +251,8 @@ def _translate(event: object, drafted: list[str]) -> list[str]:
     elif isinstance(event, FunctionToolCallEvent):
         part = event.part
         if isinstance(part, ToolCallPart):
+            if used_tools is not None:
+                used_tools.add(part.tool_name)
             name = TOOL_LABELS.get(part.tool_name, part.tool_name)
             cid = part.tool_call_id
             out.append(stream.tool_input_start(cid, name))
