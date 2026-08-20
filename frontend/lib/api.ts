@@ -96,7 +96,10 @@ export type UploadResult = {
 };
 
 /** 解析还没结束的状态。有这类文档在，列表就要继续轮询。 */
-export const DOC_IN_PROGRESS: DocumentSummary["status"][] = ["pending", "running"];
+export const DOC_IN_PROGRESS: DocumentSummary["status"][] = [
+  "pending",
+  "running",
+];
 
 export type StoredMessage = {
   id: string;
@@ -125,8 +128,15 @@ function readDetail(body: unknown, fallback: string): string {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
     const msgs = detail
-      .map((d) => (typeof d === "object" && d !== null ? (d as { msg?: string }).msg : null))
-      .filter((m): m is string => Boolean(m));
+      .map((d) =>
+        typeof d === "object" && d !== null
+          ? (d as { msg?: string }).msg
+          : null,
+      )
+      .filter((m): m is string => Boolean(m))
+      // 后端自定义校验抛 ValueError 时，Pydantic 会在我们写的中文前面拼一句
+      // `Value error, `。那是给开发者看的，不该出现在用户眼前
+      .map((m) => m.replace(/^Value error,\s*/, ""));
     if (msgs.length) return msgs.join("；");
   }
   return fallback;
@@ -152,7 +162,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* 错误体不是 JSON 就算了，用兜底话术 */
     }
-    throw new ApiError(readDetail(body, `请求失败（HTTP ${res.status}）`), res.status);
+    throw new ApiError(
+      readDetail(body, `请求失败（HTTP ${res.status}）`),
+      res.status,
+    );
   }
 
   if (res.status === 204) return undefined as T;
@@ -171,7 +184,11 @@ async function upload(path: string, file: File): Promise<UploadResult> {
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", body: form });
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
   } catch {
     throw new ApiError("连不上服务器，请确认后端已启动。", 0);
   }
@@ -184,7 +201,10 @@ async function upload(path: string, file: File): Promise<UploadResult> {
       /* 413 之类可能根本不是 JSON（nginx 自己挡下的） */
     }
     throw new ApiError(
-      readDetail(body, res.status === 413 ? "文件太大了。" : `上传失败（HTTP ${res.status}）`),
+      readDetail(
+        body,
+        res.status === 413 ? "文件太大了。" : `上传失败（HTTP ${res.status}）`,
+      ),
       res.status,
     );
   }
@@ -193,10 +213,16 @@ async function upload(path: string, file: File): Promise<UploadResult> {
 
 export const api = {
   register: (body: { email: string; password: string; inviteCode: string }) =>
-    request<User>("/api/auth/register", { method: "POST", body: JSON.stringify(body) }),
+    request<User>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   login: (body: { email: string; password: string }) =>
-    request<User>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+    request<User>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
@@ -204,7 +230,8 @@ export const api = {
 
   conversations: () => request<ConversationSummary[]>("/api/conversations"),
 
-  messages: (id: string) => request<StoredMessage[]>(`/api/conversations/${id}/messages`),
+  messages: (id: string) =>
+    request<StoredMessage[]>(`/api/conversations/${id}/messages`),
 
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
@@ -222,15 +249,22 @@ export const api = {
   invites: () => request<InviteState>("/api/invites"),
 
   createInvites: (count: number) =>
-    request<InviteState>("/api/invites", { method: "POST", body: JSON.stringify({ count }) }),
+    request<InviteState>("/api/invites", {
+      method: "POST",
+      body: JSON.stringify({ count }),
+    }),
 
   verified: () => request<Verified[]>("/api/verified"),
 
   /** 订正一条答案。服务端**当场**把它写进索引，所以回执里的 `applied` 才是真话。 */
   saveVerified: (body: { question: string; answer: string }) =>
-    request<VerifiedSaved>("/api/verified", { method: "POST", body: JSON.stringify(body) }),
+    request<VerifiedSaved>("/api/verified", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
-  deleteVerified: (id: string) => request<void>(`/api/verified/${id}`, { method: "DELETE" }),
+  deleteVerified: (id: string) =>
+    request<void>(`/api/verified/${id}`, { method: "DELETE" }),
 
   corrections: () => request<Correction[]>("/api/corrections"),
 
@@ -238,8 +272,16 @@ export const api = {
    * 写一条勘误。服务端会**当场**把那一篇重新入库，所以回执里的 `applied`
    * 才是「现在提问会不会用上」——只看 201 会骗人。
    */
-  saveCorrection: (body: { target_url: string; title: string; reason: string; body: string }) =>
-    request<CorrectionSaved>("/api/corrections", { method: "POST", body: JSON.stringify(body) }),
+  saveCorrection: (body: {
+    target_url: string;
+    title: string;
+    reason: string;
+    body: string;
+  }) =>
+    request<CorrectionSaved>("/api/corrections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   deleteCorrection: (id: string) =>
     request<void>(`/api/corrections/${id}`, { method: "DELETE" }),
@@ -248,5 +290,6 @@ export const api = {
 
   uploadDocument: (file: File) => upload("/api/documents", file),
 
-  deleteDocument: (id: string) => request<void>(`/api/documents/${id}`, { method: "DELETE" }),
+  deleteDocument: (id: string) =>
+    request<void>(`/api/documents/${id}`, { method: "DELETE" }),
 };

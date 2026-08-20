@@ -237,6 +237,11 @@ class CorrectionSaved(BaseModel):
     note: str
 
 
+# 提问至少要这么长才当得了订正的键。**前后端要一致**——前端靠它在打开
+# 对话框那一刻就把话说清楚，后端靠它兜底。
+MIN_VERIFIED_QUESTION = 2
+
+
 class VerifiedIn(BaseModel):
     """一条答案订正：这个问题，以后照这个答。
 
@@ -244,8 +249,19 @@ class VerifiedIn(BaseModel):
     再要一段理由只会让人放弃填写。多一个必填框，就少一半的人会用。
     """
 
-    question: str = Field(min_length=2, max_length=1024)
+    question: str = Field(max_length=1024)
     answer: str = Field(min_length=1)
+
+    @field_validator("question")
+    @classmethod
+    def _check_question(cls, v: str) -> str:
+        # ⚠️ 报错文案必须是**人话**。这里用 min_length= 的话，用户看到的是
+        # Pydantic 的英文默认文案 `String should have at least 2 characters`,
+        # 而且是在他写完整段答案、点了保存之后才看到——线上真踩过。
+        v = " ".join(v.split())
+        if len(v) < MIN_VERIFIED_QUESTION:
+            raise ValueError("这句提问太短，当不了订正的依据。换一句问清楚点的再改。")
+        return v
 
 
 class VerifiedOut(BaseModel):

@@ -197,3 +197,31 @@ def test_no_verified_is_left_untouched():
     a, b = FakeChunk("a", False), FakeChunk("b", False)
     pairs = [(a, 0.9), (b, 0.8)]
     assert _verified_first(pairs) == pairs
+
+
+async def test_too_short_question_is_refused_in_chinese(api_client, author, fake_providers):
+    """⭐ 拒绝要说人话。
+
+    线上真踩过：用户问了一句「1」，答案是「知识库暂无此内容」，他点了
+    「答错了，我来改」，写完整段答案点保存，界面弹出一行
+    `String should have at least 2 characters`——Pydantic 的英文默认文案。
+
+    两处都错了：报错是英文的，而且是在他白写一遍之后才出现。
+    英文这半边在这里钉住，「提前说」那半边在前端（打开对话框就讲清楚）。
+    """
+    r = await api_client.post("/api/verified", json=_payload(question="1"))
+    assert r.status_code == 422
+    msg = str(r.json()["detail"])
+    assert "太短" in msg, f"报错还是英文的：{msg}"
+    assert "String should have" not in msg
+
+
+async def test_question_key_ignores_stray_whitespace(api_client, author, fake_providers, maker):
+    """两次订正只是空格不同，应该是同一条——否则同一个问题会留下两条打架的答案。"""
+    await api_client.post("/api/verified", json=_payload())
+    r = await api_client.post("/api/verified", json=_payload(question=f"  {QUESTION}  "))
+    assert r.status_code == 201, r.text
+
+    async with maker() as s:
+        rows = list((await s.execute(select(VerifiedAnswer))).scalars())
+    assert len(rows) == 1, "空格不同被当成了两个问题"

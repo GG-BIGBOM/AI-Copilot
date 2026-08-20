@@ -76,36 +76,62 @@ export function VerifyDialog({
   }
 
   const unchanged = draft.trim() === answer.trim();
+  // ⚠️ 和后端 `MIN_VERIFIED_QUESTION` 保持一致。**在这儿拦，不是在保存时拦**：
+  // 让人写完整段答案、点了保存才说"这题不能改"，比一开始就说糟得多
+  const tooShort = question.trim().length < 2;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/25 transition-opacity duration-150 data-starting-style:opacity-0 data-ending-style:opacity-0" />
-        <Dialog.Popup className={POPUP} style={{ boxShadow: "var(--shadow-floating)" }}>
+        <Dialog.Popup
+          className={POPUP}
+          style={{ boxShadow: "var(--shadow-floating)" }}
+        >
           <Dialog.Title className="text-base font-semibold text-foreground">
             改成正确的答案
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-            改完保存，下次问到
-            <span className="mx-1 rounded-sm bg-surface-muted px-1.5 py-0.5 font-medium text-foreground">
-              {question.length > 40 ? `${question.slice(0, 40)}…` : question}
-            </span>
-            这类问题，就照你改的答。
+            {tooShort ? (
+              <>
+                这一轮的提问只有
+                <span className="mx-1 rounded-sm bg-surface-muted px-1.5 py-0.5 font-medium text-foreground">
+                  {question.trim() || "空"}
+                </span>
+                ——太短了，当不了订正的依据。订正是按
+                <span className="font-medium text-foreground">问题</span>
+                存的，下次要靠这句话把你的答案找回来。换一句问清楚点的，再来改。
+              </>
+            ) : (
+              <>
+                改完保存，下次问到
+                <span className="mx-1 rounded-sm bg-surface-muted px-1.5 py-0.5 font-medium text-foreground">
+                  {question.length > 40
+                    ? `${question.slice(0, 40)}…`
+                    : question}
+                </span>
+                这类问题，就照你改的答。
+              </>
+            )}
           </Dialog.Description>
 
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            className="mt-4 min-h-[16rem] flex-1 resize-none rounded-lg border border-border bg-surface-subtle px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
-            aria-label="正确的答案"
-          />
+          {!tooShort && (
+            <>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                spellCheck={false}
+                className="mt-4 min-h-[16rem] flex-1 resize-none rounded-lg border border-border bg-surface-subtle px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
+                aria-label="正确的答案"
+              />
 
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            支持 Markdown。这条订正对
-            <span className="font-medium text-foreground">所有人</span>
-            生效，也随时可以撤销。
-          </p>
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                支持 Markdown。这条订正对
+                <span className="font-medium text-foreground">所有人</span>
+                生效，也随时可以撤销。
+              </p>
+            </>
+          )}
 
           {error && (
             <p className="mt-3 text-[13px] text-destructive" role="alert">
@@ -113,7 +139,10 @@ export function VerifyDialog({
             </p>
           )}
           {done && (
-            <p className="mt-3 flex items-center gap-1.5 text-[13px] text-success" role="status">
+            <p
+              className="mt-3 flex items-center gap-1.5 text-[13px] text-success"
+              role="status"
+            >
               <Check className="size-3.5" />
               {done}
             </p>
@@ -121,12 +150,17 @@ export function VerifyDialog({
 
           <div className="mt-4 flex items-center justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              取消
+              {tooShort ? "知道了" : "取消"}
             </Button>
-            <Button onClick={save} disabled={busy || unchanged || !draft.trim()}>
-              {busy && <Loader2 className="size-3.5 animate-spin" />}
-              {unchanged ? "还没有改动" : "保存并生效"}
-            </Button>
+            {!tooShort && (
+              <Button
+                onClick={save}
+                disabled={busy || unchanged || !draft.trim()}
+              >
+                {busy && <Loader2 className="size-3.5 animate-spin" />}
+                {unchanged ? "还没有改动" : "保存并生效"}
+              </Button>
+            )}
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
