@@ -1,5 +1,32 @@
 # 知识库 Agent — 2026 主流栈实施方案
 
+## NOW
+
+- **M13 P12：Agent 白名单真实观察。** 仪器已就位：
+  `copilot quality-report --route agent --days 7`；本机没有最近 7 天 Agent 数据，
+  线上只读检查被本机 SSH 私钥 ACL 挡住，尚不能给 P13 放行。
+- **20 组人工多轮验收尚未实际跑过。** 清单已在
+  `eval/manual_conversations.md`，不能把“写完清单”当成“验收通过”。
+
+## NEXT
+
+1. 用可用的生产只读访问跑最近 7 天 Agent 报告，逐条处理 tool bypass、差评和错误。
+2. 按清单完成 20 组真实多轮验收并记录结果。
+3. 两份证据都过门禁后，才开始 P13：先 tag / 备份 / 全量评测，再删旧直路，
+   删除后重跑完整评测并继续观察。
+
+## LATER
+
+- 只有线上数据证明 router 显著拉高首字时间，才把 trace 再拆成
+  router / retrieval / rerank / generation 四段；现在不先做缓存或并行化。
+
+## DONE
+
+- M13 P0–P11：判分器三态、风险边界、procedural 20 题、人工多轮清单、
+  `answer_source`、保留清理、删除生命周期、邀请码、ZIP 防护、质量报告和延迟指标。
+- M13 P14：README / ARCHITECTURE / EVALUATION / OPERATIONS / DECISIONS 已从历史台账拆出。
+- M13 P13 **不在 DONE**：真实灰度门禁尚未通过，旧路按要求保留。
+
 ## Context
 
 ### 为什么重来
@@ -2972,6 +2999,30 @@ Windows OpenSSH 因私钥 ACL 过宽拒绝加载密钥；没有修改私钥权�
 因此这次**没有删除任何旧路代码**。继续保留双路是门禁要求，不是遗漏；
 等上述两份证据齐全且没有严重 blocker，再单独做 baseline / 数据库备份 / 删除 /
 全量评测 / 上线后复测。
+
+---
+
+#### P14 — 文档整理　✅ **2026-08-21**
+
+保留 `plan.md` 的全部历史，不再让它同时承担入口文档、架构说明、评测手册和
+运维手册四种职责。新增并按真实代码审校：
+
+```text
+README.md          项目、主要能力、本地运行、测试、部署入口
+ARCHITECTURE.md    前端 / FastAPI / RAG / Agent / 终结工具 / Postgres / worker / 隔离 / 流式
+EVALUATION.md      五套验收、三态判分、baseline、A/B 与 UNRELIABLE 规则
+OPERATIONS.md      部署、备份恢复、systemd、日志、trace、限流、报告与事故检查表
+DECISIONS.md       14 条已经付过代价的架构决策
+```
+
+`plan.md` 顶部增加 NOW / NEXT / LATER / DONE，后续不需要翻三千行历史才能知道
+今天卡在哪里。文档里的本地链接全部做了存在性检查；审校时还抓到一处真实命令名
+写错：`copilot corrections export` 已改成代码里的 `copilot corrections-export`。
+
+这一步只改文档，**没有部署，也没有把 P12/P13 写成已完成**。
+
+验收：`uv run pytest` **462 passed**（2 条测试密钥长度 warning）；
+`uv run ruff check` **All checks passed**。本阶段没有前端改动，因此没有重复跑前端构建。
 
 ---
 
