@@ -72,14 +72,23 @@ class User(Base):
 
 
 class InviteCode(Base):
-    """邀请码。注册必须带，且一次性作废。"""
+    """邀请码。注册必须带，且一次性作废。
+
+    ⚠️⚠️ **「用过没有」的判据是 `used_at`，不是 `used_by`（M13 P8）。**
+    `used_by` 是 `ON DELETE SET NULL`，人删号了它会被数据库清空——
+    按它判的话，删一个用户就能把他用过的码放回池子里，而邀请制是这个站
+    唯一的准入闸门。核销逻辑见 `auth/invites.py` 文件头。
+    """
 
     __tablename__ = "invite_codes"
 
     code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    # 谁用的。**人走了这一列会被清空**，这是刻意的：账号没了，「谁用的」
+    # 本来就该跟着消失。要守住的是「这个码不能再用」，那件事由 used_at 守
     used_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # ⭐ 什么时候被消费的。**一旦写上就永不清除**——它是「这个码作废了」的唯一凭据
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -280,6 +289,24 @@ class RequestTrace(Base):
     # 模型说了「知识库暂无此内容」。拒答率是幻觉率的对偶指标，
     # 只看幻觉率会把「什么都不敢答」的退化调成满分
     no_answer: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ⭐⭐ 这一轮的答案**是从哪来的**（M13 P5）。
+    #     kb                这一句一句都指着材料（正文里有 [n]）
+    #     general_knowledge 答了，但一个来源编号都没标 —— M12 放开的那条路
+    #     canned            写死的寒暄回复，一次模型调用都没花
+    #     tool              Agent 走的是别的工具（出方案、查文档、导出）
+    #     no_answer         「知识库暂无此内容」
+    #
+    # **为什么要单独一列，而不是以后从 `tools` 反推。**
+    # M12 把红线从「知识的来源」挪到了「错了会不会伤到人」，于是
+    # 「这个答案有没有出处」第一次变成了一件**正常且允许**的事——
+    # 而它同时也是最需要盯着的一件事。反推是推不出来的：直路的 `tools`
+    # 恒为空数组，Agent 的 `answer_kb` 既可能引材料也可能拒答，
+    # 两条路上「常识答的」和「查库答的」在现有每一列上都长得一模一样。
+    #
+    # 老数据是 NULL —— **不要给它一个默认值**：NULL 表示「那时候还没有这一列」，
+    # 填成 'kb' 会让半年前的统计凭空多出一批查库答案
+    answer_source: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
 
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

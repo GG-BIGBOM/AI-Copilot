@@ -291,7 +291,8 @@ async def _chat_stream(
                 # ⭐ 被打断的这一轮**也要记账**。用户点停止本身就是一种反馈
                 # （多半是答得不对或者太慢），而这恰恰是最该留下记录的一轮
                 draft.failed(exc)
-                draft.answer_chars = len("".join(buf))
+                draft.answer = "".join(buf)
+                draft.answer_chars = len(draft.answer)
                 await draft.save()
                 raise
             if reason_open:
@@ -318,6 +319,7 @@ async def _chat_stream(
 
             draft.tokens = tokens
             draft.answer_chars = len(answer)
+            draft.answer = answer  # 只为判 answer_source，不落库（见 TraceDraft.answer）
             draft.no_answer = not shown
             draft.message_id = writer.row.id if writer.row is not None else None
 
@@ -417,6 +419,7 @@ async def _agent_stream(
                 await writer.interrupted(answer)
                 draft.failed(exc)
                 draft.tools = sorted(deps.used_tools)
+                draft.answer = answer
                 draft.answer_chars = len(answer)
                 await draft.save()
                 raise
@@ -463,6 +466,7 @@ async def _agent_stream(
             draft.retrieval(deps.citations)
             draft.private_hits = deps.private_hits
             draft.tokens = tokens
+            draft.answer = answer
             draft.answer_chars = len(answer)
             draft.no_answer = not shown
             draft.message_id = writer.row.id if writer.row is not None else None

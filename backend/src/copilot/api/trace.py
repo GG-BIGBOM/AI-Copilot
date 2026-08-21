@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -50,6 +51,57 @@ logger = logging.getLogger(__name__)
 # 属于隐私面更大、价值更小的一段
 QUESTION_LIMIT = 2000
 ERROR_LIMIT = 500
+
+# 答案里的来源编号 `[1]`。和 qa.py / guard.py 用的是同一个形状
+_CITE_RE = re.compile(r"\[\d{1,2}\]")
+
+# 终结工具：它的返回**就是**给用户的最终答案（今天只有这一个）。
+# 别的工具跑完之后 Agent 还要自己写一段，那一段的来源另算
+_TERMINAL_TOOLS = {"answer_kb"}
+
+KB = "kb"
+GENERAL = "general_knowledge"
+CANNED = "canned"
+TOOL = "tool"
+NO_ANSWER = "no_answer"
+
+
+def classify_answer_source(
+    *, route: str, tools: list[str], answer: str, no_answer: bool
+) -> str:
+    """这一轮的答案**是从哪来的**（M13 P5）。
+
+    ⭐ **为什么这件事必须当场判定，不能以后从别的列反推。**
+    M12 之后「答了但没有出处」第一次变成一件正常且允许的事（行业常识），
+    它同时也是最需要盯着的一件事。而现有的每一列都分不出它：
+
+        直路的 `tools` 恒为空数组      → 反推不出
+        `chunk_count` 只说检索到了几块  → 检索到了不等于用了
+        `answer_kb` 既可能引材料也可能拒答
+
+    判据按可靠性排序，**先定死的先判**：
+
+        1. canned    路由就写在那里，没有歧义
+        2. no_answer 兜底话术，调用方已经用 `is_no_answer` 判过了
+        3. tool      Agent 这一轮只跑了非终结工具（出方案 / 查文档 / 报时间），
+                     那段正文是围着工具结果写的，既不是材料也不是常识
+        4. kb        正文里有 `[n]` —— M12 的规矩是「[n] 只属于材料里的内容」，
+                     所以有编号就等于它在指着材料说话
+        5. general_knowledge  剩下的：答了、没标一个来源编号
+
+    ⚠️ **第 4 条会有边界情形：答案确实来自材料、但模型忘了标 [n]。**
+    那种会被记成 general_knowledge。这不是漏洞而是取舍——「没标来源」本身
+    就是个问题（用户没法溯源，评测里那一条叫引用正确率），
+    与其猜它心里想的是什么，不如让这一列如实反映**用户看到的样子**。
+    """
+    if route == "canned":
+        return CANNED
+    if no_answer:
+        return NO_ANSWER
+    used = set(tools or [])
+    if used and not (used & _TERMINAL_TOOLS):
+        return TOOL
+    return KB if _CITE_RE.search(answer or "") else GENERAL
 
 
 @dataclass
@@ -80,6 +132,9 @@ class TraceDraft:
     tokens: int = 0
     answer_chars: int = 0
     no_answer: bool = False
+    # 答案正文。**只用来判 `answer_source`，不落库**——正文已经在 messages 表里
+    # 有一份了，台账再存一份等于把每一条回答存两遍
+    answer: str = ""
     ok: bool = True
     error: str | None = None
 
@@ -151,6 +206,12 @@ class TraceDraft:
                             tokens=self.tokens,
                             answer_chars=self.answer_chars,
                             no_answer=self.no_answer,
+                            answer_source=classify_answer_source(
+                                route=self.route,
+                                tools=self.tools,
+                                answer=self.answer,
+                                no_answer=self.no_answer,
+                            ),
                             ok=self.ok,
                             error=self.error,
                             created_at=datetime.now(UTC),
