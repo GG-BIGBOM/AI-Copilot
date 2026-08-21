@@ -94,6 +94,77 @@ async def test_invite_code_is_single_use(api_client, invite):
     assert second.status_code == 400, "同一个邀请码注册出了第二个账号"
 
 
+async def test_invite_code_stays_consumed_after_user_deletion(api_client, invite, maker):
+    """⭐⭐ **删掉用户之后，他用过的邀请码不能复活**（M13 P8）。
+
+    `invite_codes.used_by` 是 `ON DELETE SET NULL` —— 删号时数据库会把它清空。
+    在 M13 之前，「这个码用过没有」判的正是 `used_by IS NULL`，于是：
+
+        用邀请码注册  →  used_by = 那个人
+        删掉那个人    →  used_by 被置回 NULL
+        同一个码      →  又能注册了
+
+    一次性的邀请码因为删号而复活，而邀请制是这个站唯一的准入闸门。
+    本机库里当时就有 1 个这样的码（16 条有 used_at，只有 15 条有 used_by）。
+
+    判据换成 `used_at` 之后，`used_by` 被清空不再影响任何事。
+    """
+    first = await api_client.post(
+        "/api/auth/register",
+        json={"email": _email(), "password": PASSWORD, "inviteCode": invite},
+    )
+    assert first.status_code == 201
+    user_id = uuid.UUID(first.json()["id"])
+
+    # 直接删这个用户 —— 数据库会把 used_by 置空（ON DELETE SET NULL）
+    async with maker() as s:
+        await s.execute(delete(User).where(User.id == user_id))
+        await s.commit()
+
+    async with maker() as s:
+        row = (
+            await s.execute(select(InviteCode).where(InviteCode.code == invite))
+        ).scalar_one()
+        assert row.used_by is None, "外键就是 SET NULL，这一列被清空是预期行为"
+        assert row.used_at is not None, "**这一列一旦写上就不能被清除**，它才是作废的凭据"
+
+    again = await api_client.post(
+        "/api/auth/register",
+        json={"email": _email(), "password": PASSWORD, "inviteCode": invite},
+    )
+    assert again.status_code == 400, "删掉用户之后，他用过的邀请码又能注册了"
+
+
+async def test_consumed_code_not_offered_as_available(api_client, invite, maker):
+    """⚠️ 核销的判据换了，**列表和计数也要跟着换**——否则管理员会看到一批
+    已经作废的码还挂在「未使用」里，把它们发出去，对方注册全部失败。
+    """
+    from copilot.auth.invites import count_unused_codes, list_unused_codes
+
+    async with maker() as s:
+        before = await count_unused_codes(s)
+        assert invite in await list_unused_codes(s, limit=200)
+
+    r = await api_client.post(
+        "/api/auth/register",
+        json={"email": _email(), "password": PASSWORD, "inviteCode": invite},
+    )
+    assert r.status_code == 201
+    user_id = uuid.UUID(r.json()["id"])
+
+    async with maker() as s:
+        assert await count_unused_codes(s) == before - 1
+        assert invite not in await list_unused_codes(s, limit=200)
+
+    # 删号之后仍然不算「未使用」
+    async with maker() as s:
+        await s.execute(delete(User).where(User.id == user_id))
+        await s.commit()
+    async with maker() as s:
+        assert await count_unused_codes(s) == before - 1, "删号把作废的码放回了可用池"
+        assert invite not in await list_unused_codes(s, limit=200)
+
+
 async def test_registration_requires_valid_invite(api_client, maker):
     email = _email()
     r = await api_client.post(
