@@ -25,8 +25,12 @@ from __future__ import annotations
 
 import io
 import re
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from pathlib import Path
+
+from copilot.ingest.zipguard import UnsafeArchive, check_zip_safety
 
 # docx 的样式名在中文版 Word 里是「标题 1」，英文版是 "Heading 1"。
 # 两种都认，否则中文用户传上来的文档一个标题都识别不出。
@@ -111,6 +115,15 @@ def parse_docx(path: Path) -> ParsedUpload:
     except ImportError as e:  # pragma: no cover - 环境缺 extra 时才走到
         raise ParseError("服务端缺少 docx 解析组件（pip install '.[parse]'）") from e
 
+    # ⚠️ **先过 ZIP 安全检查，再交给 python-docx**（M13 P9）。
+    # .docx 本质是 ZIP，20MB 的上传上限管不住它解压出来有多大；
+    # 而 worker 只有一个进程、`MemoryMax=400M`，一份炸弹就能把它拖死。
+    # 顺序不能反：python-docx 一旦开始读，炸弹就已经在里面了
+    try:
+        check_zip_safety(path, kind="Word")
+    except UnsafeArchive as e:
+        raise ParseError(str(e)) from e
+
     try:
         document = docx.Document(str(path))
     except Exception as e:  # noqa: BLE001 - python-docx 抛的异常类型很杂
@@ -154,6 +167,12 @@ def parse_pptx(path: Path) -> ParsedUpload:
         from pptx import Presentation
     except ImportError as e:  # pragma: no cover
         raise ParseError("服务端缺少 pptx 解析组件（pip install '.[parse]'）") from e
+
+    # 同 parse_docx：.pptx 也是 ZIP，先过安全检查（M13 P9）
+    try:
+        check_zip_safety(path, kind="PPT")
+    except UnsafeArchive as e:
+        raise ParseError(str(e)) from e
 
     try:
         prs = Presentation(str(path))
@@ -364,12 +383,63 @@ VISION_PARSERS = {
 }
 
 
+# 本机解析的时间上限（秒）。M13 P9。
+#
+# ⭐ **它要挡的不是慢，是「永远不结束」。** worker 只有一个进程、解析是同步的
+# CPU 活（故意没丢线程池，见 jobs/worker.py 文件头）——一份损坏或者刁钻构造的
+# 文件让 python-docx 转不出来，后面所有人的上传就一直停在「解析中」，
+# 而页面上没有任何异常提示。
+#
+# 120 秒是量出来的余量：本机实测一份 20MB（上传上限）的 pptx 走完
+# 解析 + 转 Markdown 在个位数秒。留一个数量级以上，正常文档碰不到它。
+PARSER_TIMEOUT = 120.0
+
+# 超时时给用户看的话。**不要把 Python 的堆栈或者 `TimeoutError` 露出去**：
+# 这句会原样存进 `documents.error`，显示在他的知识库页面上
+_TIMEOUT_MESSAGE = "文件解析时间过长，可能文件损坏或内容异常。请检查文件后重新上传。"
+
+
+def _run_with_timeout(fn, *args, timeout: float | None = None, **kwargs) -> ParsedUpload:
+    """跑一个同步解析器，超时就放弃。
+
+    ⚠️ **诚实地说清楚这一道的边界：Python 杀不掉一个正在跑的线程。**
+    超时之后这里立刻返回（任务被判失败、队列继续往下走、用户看到一句人话），
+    但那条线程**还在后台烧 CPU**，直到它自己跑完或者进程被换掉。
+
+    所以这一道的作用是**把「无限期卡住」降级成「一次失败」**，不是真的回收
+    资源。真正兜住资源的是另外两道，它们都已经在位：
+        `zipguard` —— 绝大多数病态输入在解析开始之前就被挡掉了
+        systemd `MemoryMax=400M` + `Restart=always` —— 真吃爆了被收走的是
+        worker，网站还在，而且它会自己起来
+
+    `shutdown(wait=False)`：不等那条线程，否则这里就白超时了。
+    """
+    # ⚠️ **在调用时才读 `PARSER_TIMEOUT`，不能把它写成默认参数值。**
+    # 默认参数在 import 时求值一次就定死了——之后无论是测试 monkeypatch
+    # 还是以后改成从配置读，改的都是一个再也没人看的模块变量，
+    # 而超时依旧按 import 那一刻的数字走。这种失效是完全静默的。
+    timeout = PARSER_TIMEOUT if timeout is None else timeout
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="parse")
+    try:
+        return pool.submit(fn, *args, **kwargs).result(timeout=timeout)
+    except FutureTimeout as e:
+        raise ParseError(_TIMEOUT_MESSAGE) from e
+    finally:
+        pool.shutdown(wait=False)
+
+
 def parse_upload(path: Path, suffix: str | None = None, vision=None) -> ParsedUpload:
     """按扩展名解析。
 
     `suffix` 可显式指定——落盘名是 uuid，但后缀保留，一般不用传。
     `vision` 是读图客户端，只有图片和扫描件 PDF 用得上；传 None 时
     图片会得到一句「服务端没有配置图片解析」，而不是一个 AttributeError。
+
+    ⚠️ **超时只套在本机解析那几个上，不套视觉那条路**（M13 P9）。
+    视觉路是网络调用：一份 20 页的扫描件要逐页发给 Kimi，一页几秒，
+    一份合法文件就能超过 120 秒。拿本机 CPU 的口径去卡它，
+    只会把「正常但慢」判成「文件损坏」。那条路自己有 httpx 的超时，
+    还有 `vision_pdf_max_pages` 这道花钱的闸门。
     """
     ext = (suffix or path.suffix).lower()
     if ext in VISION_PARSERS:
@@ -378,5 +448,6 @@ def parse_upload(path: Path, suffix: str | None = None, vision=None) -> ParsedUp
     if parser is None:
         raise ParseError(f"不支持的文件类型：{ext or '（无扩展名）'}")
     if parser is parse_pdf:
+        # 扫描件 PDF 会走进视觉那条路，同样不能卡本机口径
         return parse_pdf(path, vision=vision)
-    return parser(path)
+    return _run_with_timeout(parser, path)
