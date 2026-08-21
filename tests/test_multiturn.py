@@ -309,6 +309,15 @@ def test_unknown_mode_falls_back_to_fast():
     assert system_prompt_for("没听说过的档位") == system_prompt_for("fast")
 
 
+def test_definition_question_rule_keeps_exact_user_term():
+    """概念题须先定义原词，不能用召回到的子功能偷换概念。"""
+    from copilot.qa import system_prompt_for
+
+    prompt = system_prompt_for("fast", general=True)
+    assert "第一句先用通俗的一句话定义" in prompt
+    assert "共享面单" in prompt and "电子面单" in prompt
+
+
 async def test_mode_selects_prompt_and_model(
     api_client, logged_in, public_chunk, fake_providers, monkeypatch
 ):

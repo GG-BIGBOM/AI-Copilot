@@ -90,6 +90,9 @@ HISTORY_ANSWER_LIMIT = 400
 # 历史里要抹掉的引用与配图标记
 _MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
 _EARLIEST_HISTORY_RE = re.compile(r"(第一个|最开始|一开始).{0,8}(问题|问的|说的)")
+_TRUNCATED_REFERENCE_RE = re.compile(
+    r"(那个功能|这个功能|该功能|那项功能|刚才那个|它(?:在哪|怎么|如何))"
+)
 _EXPORT_RE = re.compile(r"(?:导出|下载|excel|xlsx)", re.IGNORECASE)
 
 
@@ -240,20 +243,35 @@ async def run_agent_stream(
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。
     if deps.final_answer is None and (text := "".join(drafted).strip()):
+        truncated_reference = deps.history_truncated and _TRUNCATED_REFERENCE_RE.search(
+            deps.question
+        )
         if deps.history_truncated and _EARLIEST_HISTORY_RE.search(deps.question):
             # 当前窗口的第一条不等于整段会话第一条。让模型猜会制造一段看似确定的
             # 假记忆；这里用结构化状态直接说明边界。
             text = "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"
+        elif truncated_reference:
+            # 历史已经被裁掉时，「那个功能」没有可靠的指代对象。此时继续用这几个
+            # 字检索，只会随机命中一个功能并把它冒充成用户所指的对象。
+            text = (
+                "当前上下文只保留最近几轮，我无法确认“那个功能”具体指什么。"
+                "请直接说出功能名称，我再帮你查配置位置。"
+            )
 
         # ⭐ 模型漏调 `answer_kb` 时不要只会拒答。线上 20 组多轮验收里，
         # 「那个要先审核吗」「再说详细点」等追问都在这里变成了无工具拒答。
         # 对非方案流，把这类结果结构化地送回**现有的同一条直路**；不是让
         # Agent 自己补写，也不是再造一套检索。
-        should_retrieve = not used_tools and not deps.profile.filled() and (
-            text == NO_ANSWER
-            or asks_about_subject(deps.question)
-            or looks_like_kb_answer(
-                text, operational_only=get_settings().allow_general_knowledge
+        should_retrieve = (
+            not truncated_reference
+            and not used_tools
+            and not deps.profile.filled()
+            and (
+                text == NO_ANSWER
+                or asks_about_subject(deps.question)
+                or looks_like_kb_answer(
+                    text, operational_only=get_settings().allow_general_knowledge
+                )
             )
         )
         if should_retrieve:

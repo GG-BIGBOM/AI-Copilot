@@ -497,6 +497,21 @@ async def test_truncated_history_never_invents_the_first_question(maker):
     assert "订单审核" not in answer
 
 
+async def test_truncated_history_asks_to_resolve_vague_reference(maker):
+    """指代对象已被窗口裁掉时，不得拿「那个功能」随机检索一个答案。"""
+    async with maker() as s:
+        deps = _deps(s, history_truncated=True)
+        chunks, answer = await drain(
+            "那个功能在哪配置来着？",
+            deps,
+            scripted("可以在【设置】-【系统设置】中配置。"),
+        )
+
+    assert "无法确认“那个功能”" in text_of(chunks)
+    assert "请直接说出功能名称" in answer
+    assert deps.used_tools == set()
+
+
 async def test_guard_does_not_fire_when_a_tool_did_run(maker):
     """⚠️ 误伤检查：`generate_plan` 之后那段方案摘要带着界面路径，
     长得和越线的一模一样——但它有据，据在刚跑完的那个工具里。
