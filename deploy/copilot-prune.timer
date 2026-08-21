@@ -1,0 +1,21 @@
+[Unit]
+Description=每天清理一次过期的 request_trace
+# timer 和它触发的 service 同名（copilot-prune），systemd 自动配对
+
+[Timer]
+# 每天 UTC 21:10 = 北京时间次日 05:10。
+#
+# ⭐ **排在 copilot-backup.timer（UTC 20:10）之后一小时。** 顺序是刻意的：
+# **先备份，再删**。反过来的话，某一天的清理出了错（删多了、条件写反了），
+# 当天的备份里已经没有那些行了 —— 而台账不可再生，恢复不回来。
+# 一小时的间隔够 dump 跑完（实测十几秒），也够人在早上发现问题。
+OnCalendar=*-*-* 21:10:00 UTC
+
+# 关机错过就补跑。错过几天不致命（只是台账多留几天），
+# 但一直不跑的话磁盘会慢慢涨，而这台机器只有 40G
+Persistent=true
+
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

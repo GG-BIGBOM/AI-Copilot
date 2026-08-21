@@ -595,9 +595,6 @@ async def _worker(poll: float, once: bool) -> None:
         close_all()
 
 
-if __name__ == "__main__":
-    app()
-
 
 @app.command(name="corrections-export")
 def corrections_export(
@@ -710,3 +707,395 @@ async def _admin(email: str, revoke: bool) -> None:
 
     verb = "取消了" if revoke else "设为"
     typer.secho(f"{email} 已{verb}管理员。", fg=typer.colors.GREEN)
+
+
+# ─────────────────────────────────────────────────────────
+# 数据保留（M13 P6）
+#
+# ⚠️ **「定期删 N 天前的数据」不是一条保留策略，是一句愿望。**
+# 真要能执行，得先回答清楚：哪一类留多久、为什么是这个数、谁来跑、
+# 跑错了怎么办。下面这张表就是那几个答案。
+#
+#     普通 trace     30 天   够看清「最近一个月系统表现如何」，也够排查上周的问题。
+#                            再久的价值急剧下降——一条两个月前的普通问答，
+#                            没人会去翻它，而它占的是同一块 40G 磁盘
+#     踩过的 trace   90 天   ⭐ 这一类是**评测集的原料**：「用户差评 → 找失败原因 →
+#                            加进评测集」这个闭环有时要跨好几周才走完
+#                            （见 db/models.py 里 RequestTrace 的注释）。
+#                            30 天删掉，等于把还没来得及消化的失败样本扔了
+#     出错的 trace   90 天   同理：`ok=false` 的行是排查线上事故的原始材料，
+#                            而事故复盘常常发生在事发很久以后
+#
+# 聊天记录不在这里删。用户自己删会话时，业务数据当场就删干净了
+# （见 routes/chat.py 的 delete_conversation）；trace 是**另一层**，
+# 刻意不跟着删——它记的是「系统那天表现如何」，不是「他说过什么」。
+# 这一点在 OPERATIONS.md 里也写着，别处的判断要以那两处为准。
+# ─────────────────────────────────────────────────────────
+
+# 普通请求台账保留天数
+TRACE_RETENTION_DAYS = 30
+# 带 👎 的、以及出错的那些，留久一点
+TRACE_KEEP_LONGER_DAYS = 90
+
+
+@app.command(name="prune-traces")
+def prune_traces(
+    apply: bool = typer.Option(False, "--apply", help="真的删。默认只看不动"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="预演。这本来就是默认行为，写出来只是为了脚本里能说清楚"
+    ),
+    days: int = typer.Option(
+        TRACE_RETENTION_DAYS, "--days", help=f"普通台账保留天数（默认 {TRACE_RETENTION_DAYS}）"
+    ),
+    keep_days: int = typer.Option(
+        TRACE_KEEP_LONGER_DAYS,
+        "--keep-days",
+        help=f"差评 / 出错的台账保留天数（默认 {TRACE_KEEP_LONGER_DAYS}）",
+    ),
+) -> None:
+    """按保留策略清理 `request_trace`。**默认只预演，不删。**
+
+    ⭐ **默认 dry-run 不是谨慎，是因为这条命令要挂进 systemd timer 每天跑。**
+    一个默认就删的命令，配错一个参数就是每天悄悄多删一批，
+    而台账没了是**不可再生**的——它记的是当时那一轮的检索链路，重跑不出来。
+    所以真删必须显式写 `--apply`。
+
+        copilot prune-traces              # 看看会删多少
+        copilot prune-traces --apply      # 真删
+    """
+    import asyncio
+
+    # ⚠️ 两个开关同时给 = 意图不明，**直接报错，不要替他猜**。
+    # 猜「听保守的那个」看起来更友好，代价是 timer 里一条写错的命令
+    # 会安安静静地每天什么都不做，而你以为它在清理——
+    # 半年后磁盘满了才发现。报错至少会被 systemd 记成失败。
+    if apply and dry_run:
+        typer.secho(
+            "--apply 和 --dry-run 不能同时给。要删就只写 --apply，要预演就都不写。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    asyncio.run(_prune_traces(apply=apply, days=days, keep_days=keep_days))
+
+
+async def _prune_traces(*, apply: bool, days: int, keep_days: int, maker=None) -> None:
+    """`maker` 是给测试用的会话工厂，和 `jobs/worker.run_once` 同一个套路。
+
+    测试里每个用例跑在各自的事件循环上，而模块级的 `SessionLocal` 绑着一个
+    共享连接池——借它写就会撞上「Event loop is closed」。留一个注入口比
+    monkeypatch 模块变量干净：调用方看得见这件事，而不是靠夹具在背后换掉它。
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete, func, or_, select
+
+    from copilot.db.models import RequestTrace
+    from copilot.db.session import SessionLocal
+
+    maker = maker or SessionLocal
+
+    now = datetime.now(UTC)
+    plain_before = now - timedelta(days=days)
+    kept_before = now - timedelta(days=keep_days)
+
+    # ⚠️ **一条 WHERE 就把三类都表达完，不要分三次删。**
+    # 分三次的话，「普通那次」的条件必须显式排除掉差评和出错的行；
+    # 漏写一个否定条件，就会在第一步把该留 90 天的行删掉，
+    # 而那一步跑完之后没有任何办法知道它删过什么。
+    # ⚠️⚠️ **`coalesce` 这一层不能省——少了它，这条命令什么都不会删，而且不报错。**
+    #
+    # SQL 的三值逻辑：`feedback` 是 NULL 时（389 行里有 376 行都是），
+    # `feedback = 'down'` 的结果不是 false 而是 **NULL**；
+    # `NULL OR false` 还是 NULL；再取反 `NOT NULL` **仍然是 NULL**，
+    # 于是那一行既不满足「留久一点」也不满足「普通到期」，两边都落空。
+    #
+    # 2026-08-21 实测这三句的差别：
+    #     where feedback is null                                    389
+    #     where not (feedback = 'down' or ok = false)                  0   ← 全被 NULL 吃掉
+    #     where not (coalesce(feedback,'') = 'down' or ok = false)    376
+    #
+    # 失效的样子是最坏的一种：timer 每天照常跑、日志每天写「到期 0 行」，
+    # 而磁盘一直在涨。等有人发现，已经是几个月以后了。
+    keeps_longer = or_(
+        func.coalesce(RequestTrace.feedback, "") == "down", RequestTrace.ok.is_(False)
+    )
+    doomed = or_(
+        (RequestTrace.created_at < plain_before) & ~keeps_longer,
+        (RequestTrace.created_at < kept_before) & keeps_longer,
+    )
+
+    async with maker() as session:
+        total = await session.scalar(select(func.count(RequestTrace.id)))
+        n_doomed = await session.scalar(
+            select(func.count(RequestTrace.id)).where(doomed)
+        )
+        n_down = await session.scalar(
+            select(func.count(RequestTrace.id)).where(doomed, RequestTrace.feedback == "down")
+        )
+        n_err = await session.scalar(
+            select(func.count(RequestTrace.id)).where(doomed, RequestTrace.ok.is_(False))
+        )
+        oldest = await session.scalar(select(func.min(RequestTrace.created_at)))
+
+        typer.echo(f"台账共 {total} 行，最早一行 {oldest or '（空表）'}")
+        typer.echo(f"保留策略：普通 {days} 天，差评 / 出错 {keep_days} 天")
+        typer.echo(
+            f"到期 {n_doomed} 行（其中差评 {n_down}、出错 {n_err}），"
+            f"留下 {total - n_doomed} 行"
+        )
+
+        if not n_doomed:
+            typer.secho("没有到期的台账，不用清。", fg=typer.colors.GREEN)
+            return
+        if not apply:
+            typer.secho("这是预演，什么都没删。确认无误后加 --apply。", fg=typer.colors.YELLOW)
+            return
+
+        await session.execute(delete(RequestTrace).where(doomed))
+        await session.commit()
+        left = await session.scalar(select(func.count(RequestTrace.id)))
+        typer.secho(f"已删 {n_doomed} 行，现存 {left} 行。", fg=typer.colors.GREEN)
+
+
+# ─────────────────────────────────────────────────────────
+# 周质量报告（M13 P10）
+#
+# ⭐ **不做后台 Dashboard，先做这条命令。** 理由和 M11 P2 不给反馈做页面
+# 是同一条：线上 3 个真实账号，一周产不出几十条数据。一个页面要前端路由、
+# 权限、图表库和一份长期维护，而这条命令十分钟能写完、一秒能跑完，
+# 且**它回答的问题和页面完全一样**。
+#
+# 真正的判据是「这些问题现在有没有答案」：
+#     最近 7 天出了多少问题？多少来自知识库、多少来自常识、多少是拒答？
+#     有没有越过工具乱答 ERP？有多少差评？p95 首字延迟是多少？
+# 有答案，就不需要页面。
+# ─────────────────────────────────────────────────────────
+
+
+@app.command(name="quality-report")
+def quality_report(
+    days: int = typer.Option(7, "--days", help="统计最近几天（默认 7）"),
+    user: str = typer.Option(
+        "", "--user", metavar="EMAIL", help="只看某个人的（默认全站）"
+    ),
+    route: str = typer.Option(
+        "", "--route", help="只看某条路：direct | agent | canned（默认全部）"
+    ),
+) -> None:
+    """最近 N 天的质量与成本概览。默认 7 天。
+
+        copilot quality-report
+        copilot quality-report --days 30
+        copilot quality-report --user someone@example.com
+        copilot quality-report --route agent --days 7     # ⭐ 灰度观察就看这一条
+
+    `--user` 是给「某个人说慢 / 说答不准」那种排查用的：全站的 p95 被
+    大多数正常请求压着，一个人的糟糕体验在里面看不出来。
+
+    ⭐ **`--route agent` 是 M13 P12 的灰度观察入口。** 删掉旧直路之前要看的
+    那一串数字（Agent 请求数、tools 为空、越过工具直答、常识回答、拒答、
+    差评、出错、p95 首字）全在这一份报告里，只是把范围收到 Agent 那条路上。
+    """
+    import asyncio
+
+    if route and route not in ("direct", "agent", "canned"):
+        typer.secho(f"没有这条路：{route}（可选 direct / agent / canned）", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    asyncio.run(_quality_report(days, email=user or None, route=route or None))
+
+
+def _pct(num: int, den: int) -> str:
+    return f"{100.0 * num / den:.1f}%" if den else "—"
+
+
+def _percentile(values: list[int], q: float) -> int | None:
+    """第 q 百分位（q 取 0.5 / 0.95）。
+
+    ⚠️ **自己算，不引 numpy。** 这台机器上装 numpy 是为了一个百分位
+    多背 20MB 依赖；而且样本量常常是两位数，这时候「用哪种插值法」
+    的差别远小于样本本身的随机性。
+    最近邻取法，向下取整：n=20 时 p95 就是第 19 个（0 起数），
+    也就是「第二慢的那一次」——对这个量级的数据，这是能给出的最诚实的答案。
+    """
+    if not values:
+        return None
+    ordered = sorted(values)
+    idx = min(int(q * len(ordered)), len(ordered) - 1)
+    return ordered[idx]
+
+
+def _latency_line(label: str, values: list[int]) -> str:
+    p50, p95 = _percentile(values, 0.5), _percentile(values, 0.95)
+    if p50 is None:
+        return f"  {label:<22} —"
+    return f"  {label:<22} p50 {p50:>6} ms    p95 {p95:>6} ms    （{len(values)} 次）"
+
+
+async def _quality_report(
+    days: int, *, email: str | None = None, route: str | None = None, maker=None, user_id=None
+) -> None:
+    """`maker` / `user_id` 是注入口，同 `_prune_traces`：
+    测试要用自己的会话工厂（每个用例一个事件循环），也要把统计范围
+    限定在自己造的那几行上——否则它量的是开发库里攒下的全部历史。
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import func, select
+
+    from copilot.api import trace as trace_mod
+    from copilot.db.models import RequestTrace, User
+    from copilot.db.session import SessionLocal
+
+    maker = maker or SessionLocal
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    async with maker() as session:
+        if email:
+            user_id = await session.scalar(select(User.id).where(User.email == email.lower()))
+            if user_id is None:
+                typer.secho(f"库里没有这个用户：{email}", fg=typer.colors.RED)
+                raise typer.Exit(code=1)
+
+        stmt = select(RequestTrace).where(RequestTrace.created_at >= since)
+        if user_id is not None:
+            stmt = stmt.where(RequestTrace.user_id == user_id)
+        if route is not None:
+            stmt = stmt.where(RequestTrace.route == route)
+        rows = list((await session.execute(stmt)).scalars())
+
+        typer.echo("=" * 66)
+        scope = f"　只看 {email}" if email else ""
+        scope += f"　只看 {route} 路" if route else ""
+        typer.echo(f"  最近 {days} 天　{since:%Y-%m-%d %H:%M} UTC 起{scope}")
+        typer.echo("=" * 66)
+
+        if not rows:
+            typer.secho("这段时间一条请求都没有。", fg=typer.colors.YELLOW)
+            return
+
+        total = len(rows)
+        users = len({r.user_id for r in rows if r.user_id is not None})
+        typer.echo(f"  提问数                 {total}")
+        typer.echo(f"  活跃用户               {users}")
+        typer.echo("")
+
+        # ---- 答案来源（M13 P5 的那一列）----
+        #
+        # ⚠️ **老数据是 NULL**（那时候还没有这一列），单独列出来。
+        # 把它并进任何一类都会让那一类凭空变大，而这份报告的用途
+        # 恰恰是判断「常识兜底放开之后，到底有多少回答没有出处」
+        by_source: dict[str, int] = {}
+        for r in rows:
+            key = r.answer_source or "（M13 之前的老数据）"
+            by_source[key] = by_source.get(key, 0) + 1
+        label = {
+            trace_mod.KB: "知识库回答",
+            trace_mod.GENERAL: "常识回答（无出处）",
+            trace_mod.NO_ANSWER: "拒答",
+            trace_mod.CANNED: "寒暄（0 成本）",
+            trace_mod.TOOL: "工具（出方案/查文档）",
+        }
+        typer.echo("  答案来源")
+        for key in (*label, "（M13 之前的老数据）"):
+            if n := by_source.get(key):
+                typer.echo(f"    {label.get(key, key):<22} {n:>5}   {_pct(n, total)}")
+        typer.echo("")
+
+        # ---- 反馈 ----
+        up = sum(r.feedback == "up" for r in rows)
+        down = sum(r.feedback == "down" for r in rows)
+        typer.echo(f"  👍                     {up}")
+        typer.echo(f"  👎                     {down}")
+        # 分母是**被评价过的**，不是全部请求：绝大多数轮次没人点过，
+        # 拿总数当分母只会得到一个恒定接近 0、看不出变化的数
+        typer.echo(
+            f"  差评率                 {_pct(down, up + down)}"
+            f"　（分母 = 被评价过的 {up + down} 轮）"
+        )
+        typer.echo("")
+
+        # ---- 越过工具直答：M11 验收标准第 8 条 ----
+        #
+        # Agent 这一轮**一个工具都没调**，却给出了一段有出处样子的答案。
+        # `agent/guard.py` 那道硬防线拦的就是它；这里数的是**漏过去的**。
+        # ⚠️ 只看 Agent 路：直路的 tools 恒为空数组，混进来会把每一条直路
+        # 都算成违规
+        bypass = [
+            r
+            for r in rows
+            if r.route == "agent" and not (r.tools or []) and not r.no_answer
+            and r.answer_source in (trace_mod.KB, trace_mod.GENERAL)
+        ]
+        errors = [r for r in rows if not r.ok]
+        color = typer.colors.RED if bypass else typer.colors.GREEN
+        # ⭐ Agent 路上 `tools` 为空的轮次单独列一行（M13 P12 的灰度观察项）。
+        # 它**不等于**违规：追问「你有哪些平台？」和寒暄都不该调工具。
+        # 违规的是「tools 为空 + 写出了一段有出处样子的答案」，也就是下一行。
+        # 两个数分开看，才分得出「Agent 在正常追问」和「Agent 在越线」
+        agent_rows = [r for r in rows if r.route == "agent"]
+        if agent_rows:
+            no_tool = [r for r in agent_rows if not (r.tools or [])]
+            typer.echo(f"  Agent 轮次             {len(agent_rows)}")
+            typer.echo(
+                f"    其中 tools 为空       {len(no_tool)}"
+                "   （追问 / 寒暄是正常的，不等于违规）"
+            )
+        typer.secho(f"  越过工具直答           {len(bypass)}", fg=color)
+        typer.echo(f"  出错                   {len(errors)}   {_pct(len(errors), total)}")
+        if bypass:
+            typer.echo("    （这几轮值得逐条看）")
+            for r in bypass[:5]:
+                typer.echo(f"      {r.id}  {r.question[:40]}")
+        typer.echo("")
+
+        # ---- 延迟：M13 P11 ----
+        #
+        # ⚠️ 寒暄那条路不算进去。它一次模型调用都不花、首字是毫秒级的，
+        # 混进来会把 p50 拉到看不出问题——而这两个数字存在的意义
+        # 就是回答「用户等了多久」
+        real = [r for r in rows if r.route != "canned"]
+        typer.echo("  延迟（不含寒暄）")
+        typer.echo(_latency_line("首字 TTFB", [r.ttfb_ms for r in real if r.ttfb_ms]))
+        typer.echo(_latency_line("总时长", [r.total_ms for r in real if r.total_ms]))
+        typer.echo("")
+
+        # ---- token ----
+        #
+        # ⚠️ **只有一个总数，没有 input / output 的拆分。**
+        # `usage.estimate_tokens` 是按字符数估的（连上下文一起算），
+        # 它压根不区分进出。要拆就得解析流式响应末尾的 usage 字段——
+        # 那是另一件事，而且这份报告的用途（看量级、看趋势）不需要它。
+        # **宁可少报一个数，也不要报一个编出来的拆分。**
+        tokens = sum(r.tokens for r in rows)
+        answered = [r for r in rows if r.route != "canned"]
+        typer.echo(f"  token 合计             {tokens}")
+        if answered:
+            typer.echo(f"  平均 token / 回答      {tokens // len(answered)}　（不含寒暄）")
+
+        # 成本：**没有可靠的价格配置就不印。**
+        # 硬编码一个单价，半年后模型换了、价格调了，报告会一本正经地
+        # 给出一个错的成本——那比不给更糟，因为它看起来像真的。
+        typer.echo("")
+        typer.secho(
+            "  成本未估算：没有配置 token 单价。硬编码一个价格会在换模型/调价后"
+            "静静地给出错数字。", fg=typer.colors.BRIGHT_BLACK,
+        )
+
+        # ---- 台账健康度 ----
+        oldest = await session.scalar(select(func.min(RequestTrace.created_at)))
+        all_rows = await session.scalar(select(func.count(RequestTrace.id)))
+        typer.echo("")
+        typer.echo(f"  台账共 {all_rows} 行，最早 {oldest:%Y-%m-%d}　"
+                   f"（保留策略见 copilot prune-traces）")
+
+
+# ⚠️ **这一段必须留在文件最末尾。**
+# 它原来在文件中间（`worker` 和 `corrections-export` 之间），
+# 于是 `python -m copilot.cli <后面那些命令>` 一律报 "No such command"——
+# 模块自上而下执行到这里就把 app() 跑了，下面的 `@app.command` 还没注册。
+# 装出来的 `copilot` 入口点不受影响（它是 import 完整个模块再调 app），
+# 所以这个坑只在用 `python -m` 的时候才踩得到，找起来相当费劲。
+if __name__ == "__main__":
+    app()

@@ -55,11 +55,13 @@ echo "==> [5/7] 同步 systemd 单元 + 运维脚本"
 tar -czf - -C deploy copilot-api.service copilot-worker.service \
                      copilot-sync.service copilot-sync.timer \
                      copilot-backup.service copilot-backup.timer \
+                     copilot-prune.service copilot-prune.timer \
   | $SSH "tar -xzf - -C /etc/systemd/system \
           && systemctl daemon-reload \
           && systemctl enable copilot-api copilot-worker >/dev/null \
           && systemctl enable --now copilot-sync.timer >/dev/null \
-          && systemctl enable --now copilot-backup.timer >/dev/null"
+          && systemctl enable --now copilot-backup.timer >/dev/null \
+          && systemctl enable --now copilot-prune.timer >/dev/null"
 # timer 要 `--now`：光 enable 只建了开机自启的符号链接，**这次不会跑起来**，
 # `systemctl is-active` 会一直是 inactive，而那看起来像装失败了
 

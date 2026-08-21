@@ -1,0 +1,38 @@
+[Unit]
+Description=Copilot 台账保留清理：request_trace（由 copilot-prune.timer 触发）
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+# ⚠️ 跑在 copilot 下，不是 root。它只需要连自己的数据库，
+# 不像 backup.sh 要 `sudo -u postgres pg_dump`
+User=copilot
+Group=copilot
+WorkingDirectory=/opt/copilot
+Environment=COPILOT_ROOT=/opt/copilot
+Environment=HOME=/tmp
+
+# ⭐⭐ **`--apply` 必须显式写在这里。** CLI 默认是预演，正是为了
+# 「配错一个参数就每天悄悄多删一批」不可能发生 —— 台账不可再生，
+# 它记的是当时那一轮的检索链路，重跑不出来。
+# 保留天数用 CLI 的默认值（普通 30 天 / 差评与出错 90 天），
+# 那两个数和它们的理由写在 cli.py 里，只有一个出处。
+ExecStart=/opt/copilot/.venv/bin/copilot prune-traces --apply
+
+# 一条 DELETE，正常一秒内。五分钟还没完说明库出问题了
+TimeoutStartSec=300
+
+# 清理**永远不该是把生产挤死的那个进程**。同 backup.service 的理由
+MemoryMax=200M
+CPUWeight=20
+IOWeight=20
+Nice=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+# 故意没有 WantedBy —— oneshot，由 timer 触发。同 copilot-backup.service
