@@ -570,6 +570,9 @@ AGENT_TRIGGERS = (
     "实施配置",
     "配置检查表",
 )
+# 白名单用户的普通问答也走 Agent，所以“是否给方案工具余量”不能只复用上面的
+# 路由词。这里补明确的动作短语，覆盖「我已经给齐信息，帮我出方案」这类首轮请求。
+PLAN_ACTION_TRIGGERS = ("出方案", "做方案", "生成方案", "整理方案")
 
 
 def _needs_plan_limits(conv: Conversation, question: str) -> bool:
@@ -578,8 +581,9 @@ def _needs_plan_limits(conv: Conversation, question: str) -> bool:
     `profile` 有字段说明已经在收集；标题带方案词说明第一轮只追问、还没落字段；
     当前问题带方案词则覆盖“一句话给齐七项”的首轮场景。
     """
+    triggers = AGENT_TRIGGERS + PLAN_ACTION_TRIGGERS
     return bool(conv.profile) or any(
-        trigger in question or trigger in conv.title for trigger in AGENT_TRIGGERS
+        trigger in question or trigger in conv.title for trigger in triggers
     )
 
 

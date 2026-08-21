@@ -403,6 +403,12 @@ async def test_plan_request_uses_agent(maker, two_users):
     ("profile", "title", "question", "expected"),
     [
         (None, "普通问答", "帮我出一个实施方案", True),
+        (
+            None,
+            "普通问答",
+            "我有淘宝拼多多抖音三个平台，一共 12 个店，没有特殊业务，帮我出方案",
+            True,
+        ),
         ({}, "帮我出一个实施方案", "淘宝、拼多多", True),
         ({"platforms": "淘宝"}, "普通问答", "一共 5 个店", True),
         ({}, "普通问答", "电子面单怎么设置", False),
