@@ -252,6 +252,28 @@ async def save_requirement(ctx: RunContext[AgentDeps], field: str, value: str) -
     if not value:
         return f"`{field}` 的值是空的，没有记录。"
 
+    current = getattr(ctx.deps.profile, field)
+    correction_markers = (
+        "说错",
+        "改成",
+        "更正",
+        "不是",
+        "应为",
+        "应该是",
+        "调整为",
+        "更新为",
+    )
+    explicit_correction = any(marker in ctx.deps.question for marker in correction_markers)
+    if current and current != value and not explicit_correction:
+        # 模型有时会把「自营，一个仓」里的“自营”误写到 platforms，覆盖前面
+        # 已确认的「淘宝、拼多多」。没有明确更正语气时，已填字段只读；让模型
+        # 转去记录真正缺失的字段，避免一轮误判污染整条会话。
+        label = REQUIREMENT_FIELDS[field][0]
+        return (
+            f"`{field}`（{label}）已记录为「{current}」，用户本轮没有明确要求修改，"
+            "因此未覆盖。请记录本轮对应的其他缺失字段。"
+        )
+
     setattr(ctx.deps.profile, field, value[:200])
     label = REQUIREMENT_FIELDS[field][0]
     gaps = ctx.deps.profile.missing()

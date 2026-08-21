@@ -268,6 +268,26 @@ def test_usage_limits_are_tighter_for_plain_questions():
     assert qa.tool_calls_limit < plan.tool_calls_limit
 
 
+async def test_runner_uses_plan_limits_before_profile_is_filled(maker, monkeypatch):
+    """首轮完整方案请求在任何 save_requirement 运行前就必须拿到方案限额。"""
+    from copilot.agent import runner as runner_module
+
+    seen: list[bool] = []
+    original = runner_module.usage_limits
+
+    def capture(*, plan_flow=False):
+        seen.append(plan_flow)
+        return original(plan_flow=plan_flow)
+
+    monkeypatch.setattr(runner_module, "usage_limits", capture)
+    async with maker() as s:
+        await drain(
+            "帮我出实施方案", _deps(s, plan_flow=True), scripted("请告诉我平台。")
+        )
+
+    assert seen == [True]
+
+
 # ---------- 8：每个注册的工具都要有中文标签 ----------
 
 

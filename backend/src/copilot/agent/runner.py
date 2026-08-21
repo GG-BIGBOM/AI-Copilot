@@ -152,7 +152,7 @@ async def run_agent_stream(
                 question,
                 deps=deps,
                 message_history=history or None,
-                usage_limits=usage_limits(plan_flow=bool(deps.profile.filled())),
+                usage_limits=usage_limits(plan_flow=deps.plan_flow or bool(deps.profile.filled())),
             ) as events:
                 async for event in events:
                     await send.send(("event", event))

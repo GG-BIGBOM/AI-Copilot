@@ -277,6 +277,37 @@ async def test_save_requirement_announces_completion(maker, two_users):
     assert deps.profile.missing() == []
 
 
+async def test_save_requirement_does_not_silently_overwrite_existing_field(
+    maker, two_users
+):
+    """仓库模式里的“自营”不能污染已经确认的平台。"""
+    (alice_id, _), _, _ = two_users
+    async with maker() as s:
+        deps = _deps(
+            s,
+            alice_id,
+            profile=Requirement(platforms="淘宝、拼多多"),
+            question="自营，一个仓",
+        )
+        out = await save_requirement(ctx(deps), "platforms", "自营")
+    assert deps.profile.platforms == "淘宝、拼多多"
+    assert "未覆盖" in out
+
+
+async def test_save_requirement_allows_explicit_correction(maker, two_users):
+    """用户明确纠正时仍可更新，不能把 G6 的正常改口一起锁死。"""
+    (alice_id, _), _, _ = two_users
+    async with maker() as s:
+        deps = _deps(
+            s,
+            alice_id,
+            profile=Requirement(shop_count="5 个店"),
+            question="刚才说错了，是 8 个",
+        )
+        await save_requirement(ctx(deps), "shop_count", "8 个店")
+    assert deps.profile.shop_count == "8 个店"
+
+
 async def test_generate_plan_refuses_when_too_little_known(maker, two_users):
     """信息缺太多时硬生成，只会得到一份写满「按需配置」的废纸。"""
     (alice_id, _), _, _ = two_users
@@ -366,6 +397,22 @@ async def test_plan_request_uses_agent(maker, two_users):
     async with maker() as s:
         user = await s.get(User, alice_id)
         assert await _use_agent(s, user, "帮我出一个实施配置方案", None) is True
+
+
+@pytest.mark.parametrize(
+    ("profile", "title", "question", "expected"),
+    [
+        (None, "普通问答", "帮我出一个实施方案", True),
+        ({}, "帮我出一个实施方案", "淘宝、拼多多", True),
+        ({"platforms": "淘宝"}, "普通问答", "一共 5 个店", True),
+        ({}, "普通问答", "电子面单怎么设置", False),
+    ],
+)
+def test_plan_tool_limits_follow_real_flow(profile, title, question, expected):
+    from copilot.api.routes.chat import _needs_plan_limits
+
+    conv = SimpleNamespace(profile=profile, title=title)
+    assert _needs_plan_limits(conv, question) is expected
 
 
 @pytest.mark.parametrize(

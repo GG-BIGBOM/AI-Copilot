@@ -50,6 +50,10 @@ class AgentDeps:
     # True 表示更早的消息因 HISTORY_TURNS 上限被省略。模型必须知道这件事，
     # 否则问「第一个问题是什么」时会把当前窗口第一条冒充整段会话第一条。
     history_truncated: bool = False
+    # True 表示本轮属于实施方案收集流程。不能只看 `profile.filled()`：用户可能在
+    # 第一轮一句话给齐 7 项，此时模型尚未调用工具，profile 仍是空的；若仍套用
+    # 普通问答的 3 次工具上限，会在保存到第 4 项时整轮失败。
+    plan_flow: bool = False
     mode: str = DEFAULT_MODE
     # ⭐ 用户这一轮的**原话**。`answer_kb` 拿它去检索，而不是让模型自己写检索词。
     # M7 的准确率掉 12 个点，第一条成因就是「检索词漂移」——模型把

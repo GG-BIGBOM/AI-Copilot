@@ -404,6 +404,7 @@ async def _agent_stream(
                 llm=providers.get_llm_for(mode),
                 history=history,
                 history_truncated=(history_total or 0) > len(history),
+                plan_flow=_needs_plan_limits(conv, question),
                 mode=mode,
                 profile=Requirement(**(conv.profile or {})),
                 checklist=Checklist(**conv.checklist) if conv.checklist else None,
@@ -569,6 +570,17 @@ AGENT_TRIGGERS = (
     "实施配置",
     "配置检查表",
 )
+
+
+def _needs_plan_limits(conv: Conversation, question: str) -> bool:
+    """方案收集需要较高工具限额，普通白名单问答仍保持紧限额。
+
+    `profile` 有字段说明已经在收集；标题带方案词说明第一轮只追问、还没落字段；
+    当前问题带方案词则覆盖“一句话给齐七项”的首轮场景。
+    """
+    return bool(conv.profile) or any(
+        trigger in question or trigger in conv.title for trigger in AGENT_TRIGGERS
+    )
 
 
 def in_agent_allowlist(email: str) -> bool:
