@@ -39,6 +39,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import anyio
 from pydantic_ai import (
@@ -89,6 +90,7 @@ HISTORY_ANSWER_LIMIT = 400
 # 历史里要抹掉的引用与配图标记
 _MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
 _EARLIEST_HISTORY_RE = re.compile(r"(第一个|最开始|一开始).{0,8}(问题|问的|说的)")
+_EXPORT_RE = re.compile(r"(?:导出|下载|excel|xlsx)", re.IGNORECASE)
 
 
 def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | ModelResponse]:
@@ -208,6 +210,32 @@ async def run_agent_stream(
 
     if failure is not None:
         raise failure
+
+    # 方案字段齐全后的收尾不再交给模型碰运气。线上 G5 出现过 profile 已经完整，
+    # 模型却在「导出来」这轮继续调 save_requirement，随后口头声称还缺四项。
+    # 这里仍复用现有的 generate_plan / export_excel，只把“何时调用”结构化。
+    export_requested = bool(_EXPORT_RE.search(deps.question))
+    needs_plan = not deps.profile.missing() and deps.checklist is None
+    needs_export = export_requested and deps.download_url is None
+    if needs_plan or (needs_export and deps.checklist is not None):
+        from copilot.agent.tools import export_excel, generate_plan
+
+        ctx = SimpleNamespace(deps=deps)
+        replies: list[str] = []
+        if needs_plan:
+            used_tools.add("generate_plan")
+            replies.append(await generate_plan(ctx))
+        if export_requested and deps.checklist is not None and deps.download_url is None:
+            used_tools.add("export_excel")
+            replies.append(await export_excel(ctx))
+
+        replacement = "\n\n".join(replies)
+        tid = stream.new_id("txt")
+        yield stream.text_start(tid), so_far()
+        answer.append(replacement)
+        yield stream.text_delta(tid, replacement), so_far()
+        yield stream.text_end(tid), so_far()
+        return
 
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。

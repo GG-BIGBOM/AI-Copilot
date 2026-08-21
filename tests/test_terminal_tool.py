@@ -332,6 +332,76 @@ def test_pure_continue_may_ask_the_next_plan_question_without_a_tool():
     assert plan_turn_requires_tool(deps, tool_calls=0) is False
 
 
+async def test_complete_profile_structurally_generates_plan(maker, monkeypatch):
+    """最后一项保存后即使模型继续追问，也必须进入现有方案生成工具。"""
+    from copilot.agent import tools as tools_module
+    from copilot.agent.checklist import Checklist, Requirement
+
+    async def fake_generate(ctx):
+        ctx.deps.checklist = Checklist(title="测试方案", summary="完整", items=[])
+        return "已生成《测试方案》。"
+
+    monkeypatch.setattr(tools_module, "generate_plan", fake_generate)
+    profile = Requirement(
+        platforms="淘宝、拼多多",
+        shop_count="5 个店",
+        warehouse_mode="自营",
+        warehouse_count="1 个仓",
+        daily_orders="平峰 500 单，大促 2000 单",
+        logistics="中通、顺丰",
+    )
+    async with maker() as s:
+        deps = _deps(s, plan_flow=True, profile=profile)
+        _chunks, answer = await drain(
+            "没有特殊业务",
+            deps,
+            scripted(
+                call("save_requirement", field="specials", value="无特殊业务"),
+                "请再告诉我平台和店铺。",
+            ),
+        )
+
+    assert answer == "已生成《测试方案》。"
+    assert deps.checklist is not None
+    assert "generate_plan" in deps.used_tools
+
+
+async def test_export_intent_structurally_exports_existing_plan(maker, monkeypatch):
+    """“导出来”不能再被模型带回需求收集，完整方案直接走现有导出工具。"""
+    from copilot.agent import tools as tools_module
+    from copilot.agent.checklist import Checklist, Requirement
+
+    async def fake_export(ctx):
+        ctx.deps.download_url = f"/api/conversations/{ctx.deps.conversation_id}/export"
+        return "已导出 xlsx，页面上会出现下载按钮。"
+
+    monkeypatch.setattr(tools_module, "export_excel", fake_export)
+    profile = Requirement(
+        platforms="淘宝、拼多多",
+        shop_count="5 个店",
+        warehouse_mode="自营",
+        warehouse_count="1 个仓",
+        daily_orders="平峰 500 单，大促 2000 单",
+        logistics="中通、顺丰",
+        specials="无特殊业务",
+    )
+    checklist = Checklist(title="测试方案", summary="完整", items=[])
+    async with maker() as s:
+        deps = _deps(s, plan_flow=True, profile=profile, checklist=checklist)
+        _chunks, answer = await drain(
+            "导出来",
+            deps,
+            scripted(
+                call("save_requirement", field="specials", value="无特殊业务"),
+                "还缺平台和店铺。",
+            ),
+        )
+
+    assert answer == "已导出 xlsx，页面上会出现下载按钮。"
+    assert deps.download_url is not None
+    assert "export_excel" in deps.used_tools
+
+
 # ---------- 8：每个注册的工具都要有中文标签 ----------
 
 
