@@ -22,9 +22,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import delete
 
-from copilot.cli import _percentile, _pct, _quality_report
+from copilot.cli import _pct, _percentile, _quality_report
 from copilot.db.models import RequestTrace
-
 
 # ─────────────────────────────────────────────────────────
 # 纯函数
@@ -158,6 +157,46 @@ async def test_canned_is_excluded_from_latency(seeded, capsys, maker, logged_in)
     ttfb_line = next(line for line in out.splitlines() if "首字 TTFB" in line)
     assert "8000" in ttfb_line, "20 条 1ms 的寒暄把真实的 8 秒首字冲没了"
     assert "（1 次）" in ttfb_line
+
+
+async def test_agent_route_filter_excludes_direct_rows(seeded, capsys, maker, logged_in):
+    """P12 的灰度报告只能统计 Agent 路，不能混入旧直路。"""
+
+    await seeded(route="direct", answer_source="kb", tools=[])
+    await seeded(
+        route="agent",
+        answer_source="general_knowledge",
+        tools=["answer_kb"],
+        ttfb_ms=1200,
+    )
+
+    await _quality_report(7, route="agent", maker=maker, user_id=logged_in)
+    out = capsys.readouterr().out
+
+    assert "只看 agent 路" in out
+    assert "提问数                 1" in out
+    assert "Agent 轮次             1" in out
+    assert "常识回答（无出处）" in out
+    assert "知识库回答" not in out
+
+
+async def test_agent_no_tool_count_is_not_the_bypass_count(
+    seeded, capsys, maker, logged_in
+):
+    """tools 为空可能只是正常拒答；只有越线直答才算 bypass。"""
+
+    await seeded(
+        route="agent", answer_source="no_answer", no_answer=True, tools=[]
+    )
+    await seeded(
+        route="agent", answer_source="general_knowledge", no_answer=False, tools=[]
+    )
+
+    await _quality_report(7, route="agent", maker=maker, user_id=logged_in)
+    out = capsys.readouterr().out
+
+    assert "其中 tools 为空       2" in out
+    assert "越过工具直答           1" in out
 
 
 async def test_no_cost_is_printed_without_a_price_config(seeded, capsys, maker, logged_in):
