@@ -49,6 +49,15 @@ DATASET = EVAL_DIR / "dataset.yaml"
 
 sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
 
+# ⚠️ **Windows 控制台默认是 GBK，报告里的 ⚠️ / ⛔ / ✓ 一律编不出来。**
+# 症状很坏：指标全算完了、json 也写好了，然后 `print_report` 打到一半
+# 抛 UnicodeEncodeError，终端上留下半张报告和一段堆栈——看起来像评测崩了。
+# 只放宽 errors、不改 encoding：中文在 GBK 下本来就打得出来，
+# 换成 utf-8 反而会把整篇变成乱码；编不出的符号退化成 `?` 就够了。
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(errors="replace")
+
 # ---------- 判分器的 prompt ----------
 
 JUDGE_SYSTEM = """你是严格的评测判分员。给你一个问题、检索到的「参考材料」、
@@ -92,6 +101,47 @@ def wanted_sources(case: dict) -> list[str]:
     if not want:
         return []
     return [want] if isinstance(want, str) else list(want)
+
+
+# 否定词。`must_not_include` 是裸子串匹配，而中文的否定在**前面**，
+# 于是「不支持指定员工」里含着被禁的「支持指定员工」
+_NEGATORS = "不非无未没别勿"
+# 往前看几个字。「不是平台结算单」隔 1 个字，「不使用二联」隔 2 个
+_NEG_WINDOW = 3
+
+
+def banned_hits(answer: str, banned: list[str]) -> list[str]:
+    """答案里真的出现了被禁内容的那几条。
+
+    ⚠️ **必须绕开否定句，否则这条规则是反的。** 2026-08-21 核对三轮历史结果，
+    `must_not_include` 命中的**三条全是假阳性**，且三条都是同一个形状——
+    被禁串前面正好有个否定词：
+
+        禁 '支持指定员工'   答案「群消息通知**不**支持指定员工」   ← 这正是标准答案
+        禁 '二联'          答案「统一 76×130，**不**使用二联」
+        禁 '平台结算单'     答案「以 ERP 出库单为准，**不是**平台结算单为准」
+
+    裸 `in` 判定会把这三句正确答案判成「串了平台/串了客户」。而这条规则
+    存在的理由恰恰是抓串台（M13 P1 的 `cross_platform_contamination_rate`），
+    抓错了比不抓更糟。
+
+    ⚠️ 这仍然是个近似：「不仅支持指定员工」会被误放行。出题时把被禁串写得
+    具体一点（带数字、带平台名）比在这里堆规则可靠——**这个函数的职责是
+    别把否定句判成违规，不是理解中文**。
+    """
+    hits: list[str] = []
+    low = answer.lower()
+    for term in banned:
+        t = term.lower()
+        if not t:
+            continue
+        start = 0
+        while (i := low.find(t, start)) >= 0:
+            if not set(answer[max(0, i - _NEG_WINDOW) : i]) & set(_NEGATORS):
+                hits.append(term)
+                break
+            start = i + 1
+    return hits
 
 
 # ---------- 数据结构 ----------
@@ -196,6 +246,11 @@ class CaseResult:
     source_hit: bool | None = None  # 期望源是否出现在引用里（无期望源时为 None）
     cited_source: bool | None = None  # 答案的 [n] 是否指向期望源
     missing_facts: list[str] = field(default_factory=list)
+    # `must_not_include` 里真的出现了的那几条（已绕开否定句，见 `banned_hits`）。
+    # ⚠️ 原来这个判定的结果只写进 `unsupported` 那句说明里，**没有任何地方
+    # 拿它判过分**——dataset.yaml 的注释写着「出现即算错」，而代码里不算。
+    # M13 P0 一并补上：它现在是确定性失败的一种
+    banned_hits: list[str] = field(default_factory=list)
     said_no_answer: bool = False
 
     # LLM 判定
@@ -203,8 +258,14 @@ class CaseResult:
     grounded: bool | None = None
     unsupported: str = ""
     reason: str = ""
+    # ⭐ 判分器**自己**挂了（网络断、限流、吐不出 JSON），不是模型答错了。
+    # 见 `judge_all` 和 `score` 里那两段长注释——这一列是 M13 P0 的全部要点
+    judge_error: bool = False
 
     # 汇总
+    # correct / incorrect / invalid 三态。**不是 `passed` 的同义反复**：
+    # `passed=False` 混了「答错了」和「没判成」两件事，而后者不该算进准确率
+    status: str = ""
     passed: bool = False
     fail_why: str = ""
 
@@ -500,8 +561,18 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
 # ---------- 阶段三：判分（并行） ----------
 
 
-# 判分重试次数。跨境网络抖动是常态，不重试的话指标会被网络污染
-JUDGE_RETRIES = 4
+# 判分重试次数。跨境网络抖动是常态，不重试的话指标会被网络污染。
+# 指数退避 1s / 2s / 4s：**不是无限重试**——判分器真挂了就该如实报成
+# INVALID，把一轮拖成半小时换不来一个更真的数字
+JUDGE_RETRIES = 3
+JUDGE_BACKOFF = (1.0, 2.0, 4.0)
+# 判分器出的是一小段 JSON，正常两三秒回来。给 60 秒是宽限，不是等待预算——
+# 用答题那条路的 180 秒会让一条卡住的连接吃掉三次退避的时间（见 ChatLLM.timeout）
+JUDGE_TIMEOUT = 60.0
+
+# 判分失效率超过这条线，整轮结果标 UNRELIABLE：可以看，但不能拿来
+# 判断「哪版 prompt 更好」。理由见 `score()` 里那段注释
+JUDGE_ERROR_LIMIT = 5.0
 
 
 def judge_all(
@@ -516,6 +587,7 @@ def judge_all(
         api_key=s.eval_judge_api_key or s.llm_api_key,
         base_url=s.eval_judge_base_url or s.llm_base_url,
         model=model,
+        timeout=JUDGE_TIMEOUT,
     )
     by_id = {c["id"]: c for c in cases}
 
@@ -525,9 +597,9 @@ def judge_all(
         cr.missing_facts = [
             f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
         ]
-        banned = [f for f in (case.get("must_not_include") or []) if f.lower() in cr.answer.lower()]
-        if banned:
-            cr.unsupported = f"出现了禁止内容：{banned}"
+        cr.banned_hits = banned_hits(cr.answer, case.get("must_not_include") or [])
+        if cr.banned_hits:
+            cr.unsupported = f"出现了禁止内容：{cr.banned_hits}"
 
         if cr.said_no_answer:
             # 说了不知道就不必判语义了，省一次调用
@@ -547,6 +619,14 @@ def judge_all(
         # 55 题里 11 题挂在 `UNEXPECTED_EOF_WHILE_READING`，报告上显示成
         # 「12 题没过」，看起来像模型答错了，**而它们根本没被判过**。
         # 判分器的网络抖动伪装成模型退化，是这套指标最坏的一种失真。
+        #
+        # ⭐⭐ **M13 P0：重试用完之后的那一行不是「答错」，是「没判成」。**
+        # 2026-08-20 的 `m12-general-on` 那一轮，61 题里 5 题挂在这里，
+        # 报告上显示成准确率 88.5%（严格版是 95.1%）——看起来像放开常识
+        # 把系统打退化了 6.6 个点，而其中 4 个点纯粹是 Gemini 那边的 SSL 断连。
+        # 差一点就据此把一个正确的产品决定回滚掉。
+        #
+        # 所以这里只负责如实标记，判不判得进准确率交给 `score()`。
         raw = ""
         last: Exception | None = None
         for attempt in range(JUDGE_RETRIES):
@@ -561,8 +641,11 @@ def judge_all(
             except Exception as e:  # noqa: BLE001
                 last = e
                 if attempt < JUDGE_RETRIES - 1:
-                    time.sleep(2.0 * (attempt + 1))
+                    # 指数退避。限流（429）和跨境抖动都要一点时间才缓过来，
+                    # 固定间隔重试等于三次撞同一堵墙
+                    time.sleep(JUDGE_BACKOFF[min(attempt, len(JUDGE_BACKOFF) - 1)])
         cr.verdict = "judge_error"
+        cr.judge_error = True
         cr.reason = f"{type(last).__name__}: {last} | 原始输出：{raw[:160]}"
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -604,23 +687,43 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
                 for c in cr.citations
             )
 
+        # ⭐⭐ **确定性判定排在判分器前面，顺序不能反**（M13 P0）。
+        # 「该说不知道却答了」「材料里有却答不知道」「漏了关键事实」「串了别家的
+        # 数字」这四种，看答案文本就能定，判分器挂不挂都不影响结论——
+        # 所以它们**永远不会是 INVALID**。只有真正要靠判分器给语义结论的那几题，
+        # 判分器挂了才算「这题没评上」。
+        #
+        # 反过来做（先看 judge_error 再看确定性）会把一批本来铁板钉钉的失败
+        # 洗成 INVALID，那是另一个方向的失真：分母越洗越小，准确率越洗越高。
         if cr.kind == "no_answer":
-            cr.passed = cr.said_no_answer
-            cr.fail_why = "" if cr.passed else "该说不知道，却给了实质答案（幻觉）"
+            cr.status = "correct" if cr.said_no_answer else "incorrect"
+            cr.fail_why = "" if cr.said_no_answer else "该说不知道，却给了实质答案（幻觉）"
         elif cr.said_no_answer:
-            cr.passed = False
+            cr.status = "incorrect"
             cr.fail_why = "材料里有答案，却答了「暂无此内容」（假阴性）"
         elif cr.missing_facts:
-            cr.passed = False
+            cr.status = "incorrect"
             cr.fail_why = f"漏掉关键事实：{cr.missing_facts}"
+        elif cr.banned_hits:
+            cr.status = "incorrect"
+            cr.fail_why = f"出现了禁止内容：{cr.banned_hits}"
+        elif cr.judge_error:
+            cr.status = "invalid"
+            cr.fail_why = f"判分器没判成（不计入准确率）：{cr.reason[:70]}"
         elif cr.kind == "partial":
             # 部分覆盖的题，要的是「答已有的 + 点明缺的」。判分器给 correct 或
             # partial 都算过——它看到的是同一份材料，能确认答案没超出材料
-            cr.passed = cr.verdict in ("correct", "partial") and cr.grounded is not False
-            cr.fail_why = "" if cr.passed else f"判分：{cr.verdict}／{cr.reason}"
+            ok = cr.verdict in ("correct", "partial") and cr.grounded is not False
+            cr.status = "correct" if ok else "incorrect"
+            cr.fail_why = "" if ok else f"判分：{cr.verdict}／{cr.reason}"
         else:
-            cr.passed = cr.verdict == "correct" and cr.grounded is not False
-            cr.fail_why = "" if cr.passed else f"判分：{cr.verdict}／{cr.reason}"
+            ok = cr.verdict == "correct" and cr.grounded is not False
+            cr.status = "correct" if ok else "incorrect"
+            cr.fail_why = "" if ok else f"判分：{cr.verdict}／{cr.reason}"
+        # `passed` 留着：历史 json、`compare()` 的逐题变化、报告里的「没过的 N 题」
+        # 都在读它。**注意它把 invalid 也算成没过**——凡是要算比例的地方
+        # 一律用 `status`，别用 `passed`
+        cr.passed = cr.status == "correct"
 
     def pct(num: int, den: int) -> float:
         return round(100.0 * num / den, 1) if den else 0.0
@@ -630,20 +733,38 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
     with_source = [r for r in results if r.source_hit is not None]
     answered_with_source = [r for r in with_source if not r.said_no_answer]
 
+    # ⭐ 分母。**准确率的分母是「评上了的题」，不是「跑了的题」**（M13 P0）。
+    # 判分器断线的那几题既不能算对也不能算错，只能算没评上——把它们塞进分母，
+    # 等于用国内到 Gemini 的网络质量给模型打分。
+    valid = [r for r in results if r.status != "invalid"]
+    invalid = [r for r in results if r.status == "invalid"]
+
     m = {
         "题数": len(results),
-        "准确率": pct(sum(r.passed for r in results), len(results)),
+        "有效题数": len(valid),
+        "判分失效": len(invalid),
+        "判对": sum(r.status == "correct" for r in results),
+        "判错": sum(r.status == "incorrect" for r in results),
+        "准确率": pct(sum(r.status == "correct" for r in valid), len(valid)),
+        "判分失效率": pct(len(invalid), len(results)),
         "检索命中率": pct(sum(bool(r.source_hit) for r in with_source), len(with_source)),
         "引用正确率": pct(
             sum(bool(r.cited_source) for r in answered_with_source), len(answered_with_source)
         ),
+        # ⚠️ 幻觉率 / 假阴性率 / 检索命中率 / 引用正确率 / 配图带出率的分母**不剔除
+        # invalid**——它们全是看答案文本就能定的确定性判定，判分器挂了也照样算得出。
+        # 剔了反而会让这几个最要紧的指标跟着网络质量抖
         "幻觉率": pct(sum(not r.said_no_answer for r in negatives), len(negatives)),
         "假阴性率": pct(sum(r.said_no_answer for r in positives), len(positives)),
+        # 「无据陈述」是判分器给的结论，所以这一条的分母要剔掉 invalid
         "无据陈述率": pct(
-            sum(r.grounded is False for r in results if not r.said_no_answer),
-            len([r for r in results if not r.said_no_answer]),
+            sum(r.grounded is False for r in valid if not r.said_no_answer),
+            len([r for r in valid if not r.said_no_answer]),
         ),
     }
+    # ⭐ 这一轮的结论能不能用来比较。超过 5% 的题没评上时，
+    # 「这版 prompt 比那版高 2 个点」这句话没有意义——差值可能整个落在噪声里
+    m["可信"] = m["判分失效率"] <= JUDGE_ERROR_LIMIT
 
     # ⭐ 配图带出率：**该带截图的题**，答案真的把 [图N] 带出来了吗。
     #
@@ -669,15 +790,16 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
     # ⭐ 难题单独一条。总准确率会被 41 道已经饱和的老题稀释——
     # 14 道新题全错，总数也才掉 25 个点，看着像「小幅波动」
     hard_ids = {c["id"] for c in cases if c.get("hard")}
-    hard = [r for r in results if r.id in hard_ids]
+    hard = [r for r in valid if r.id in hard_ids]
     if hard:
         m["难题准确率"] = pct(sum(r.passed for r in hard), len(hard))
         m["难题数"] = len(hard)
 
+    # 分类准确率同样按有效题算分母
     m["分类准确率"] = {
         kind: pct(
-            sum(r.passed for r in results if r.kind == kind),
-            len([r for r in results if r.kind == kind]),
+            sum(r.passed for r in valid if r.kind == kind),
+            len([r for r in valid if r.kind == kind]),
         )
         for kind in ("fact", "probe", "partial", "no_answer")
     }
@@ -700,6 +822,9 @@ METRIC_HELP = {
     "**改动的效果先看这个数**——老题在 v3 上已经饱和，看总准确率会被稀释成噪声",
     "无据陈述率": "答了的题里，判分器发现「有材料不支持的具体说法」的比例。"
     "比幻觉率更细：答案整体方向对，但夹了一句编的",
+    "判分失效率": "判分器**自己**没跑成（断线/限流/吐不出 JSON）的题占比。"
+    "**这不是模型答错**——这些题不进准确率的分母。超过 5% 整轮标 UNRELIABLE",
+    "有效题数": "真正评上了的题数 = 判对 + 判错。准确率的分母是它，不是题数",
 }
 
 
@@ -728,6 +853,9 @@ def save(tag: str, meta: dict, cfg: Config, metrics: dict, results: list[CaseRes
         "corpus": meta.get("corpus", ""),
         "config": {**cfg.resolved(), **CORPUS_STATS},
         "judge_model": judge,
+        # ⭐ 顶层也存一份。`compare()` 要在读 metrics 之前就知道这一轮能不能比，
+        # 而老结果里没有这个字段——那边会从 cases 现算，见 `_reliability`
+        "reliable": bool(metrics.get("可信", True)),
         "metrics": metrics,
         "cases": [_slim(asdict(r)) for r in results],
     }
@@ -745,9 +873,26 @@ def print_report(
     print("=" * 78)
     print(f"  {tag}    判分模型 {judge}    {cfg_line}")
     print("=" * 78)
+    # ⭐ 判分口径先打出来，再打指标。**顺序是刻意的**：先让人看见这一轮
+    # 有几题根本没评上，再去看准确率——反过来的话，第一眼看到的是
+    # 一个被网络污染过的数字，而修正信息在下面第五行
+    if metrics.get("有效题数") is not None:
+        print(f"  {'题数':<12} {metrics['题数']}")
+        print(f"  {'有效题数':<11} {metrics['有效题数']}    ← 准确率的分母")
+        print(f"  {'判分失效':<11} {metrics['判分失效']}")
+        print(f"  {'判对':<12} {metrics['判对']}")
+        print(f"  {'判错':<12} {metrics['判错']}")
+        print()
+        if not metrics.get("可信", True):
+            print(
+                f"  【UNRELIABLE】：判分失效率 {metrics['判分失效率']}% > "
+                f"{JUDGE_ERROR_LIMIT}%，这一轮**不能用来比较 prompt / 架构好坏**。"
+            )
+            print("     重跑一遍（判分是确定性的，答案已经存下来了，只是判分器当时连不上）。")
+            print()
     for k in (
-        "题数",
         "准确率",
+        "判分失效率",
         "检索命中率",
         "引用正确率",
         "幻觉率",
@@ -770,11 +915,18 @@ def print_report(
     print()
     print("  分类准确率：", "  ".join(f"{k} {v}%" for k, v in metrics["分类准确率"].items()))
 
-    bad = [r for r in results if not r.passed]
+    # ⚠️ **答错的和没判成的分开列。** 混在一张「没过的题」清单里，就是
+    # 2026-08-20 那次误读的来源：5 条断线躺在失败列表里，读起来全像模型答错
+    bad = [r for r in results if r.status == "incorrect"]
     print()
-    print(f"  没过的 {len(bad)} 题：")
+    print(f"  答错的 {len(bad)} 题：")
     for r in bad:
         print(f"    [{r.kind:9}] {r.id:32} {r.fail_why[:88]}")
+    if stuck := [r for r in results if r.status == "invalid"]:
+        print()
+        print(f"  判分器没判成的 {len(stuck)} 题（**不是答错**，不计入准确率）：")
+        for r in stuck:
+            print(f"    [{r.kind:9}] {r.id:32} {r.reason[:88]}")
     ungrounded = [r for r in results if r.grounded is False]
     if ungrounded:
         print()
@@ -783,7 +935,24 @@ def print_report(
             print(f"    {r.id:32} {r.unsupported[:100]}")
 
 
-def compare(tags: list[str]) -> None:
+def _reliability(run: dict) -> tuple[bool, float, int]:
+    """这一轮能不能拿来比较，判分失效率多少，几题没评上。
+
+    ⚠️ **老结果里没有 `reliable` 这个字段，必须从 `cases` 现算。**
+    M13 之前存下来的每一轮都是「judge_error 算答错」的口径，而那正是要防的
+    误读——`m12-general-on` 那轮 61 题里 5 题断线（8.2%），照字面读会得出
+    「放开常识让准确率掉了 6.6 个点」，其中 4 个点是网络。
+    不现算的话，历史结果会永远以那个错误口径参与对比。
+    """
+    cases = run.get("cases") or []
+    if not cases:
+        return bool(run.get("reliable", True)), 0.0, 0
+    stuck = sum(1 for c in cases if c.get("verdict") == "judge_error")
+    rate = round(100.0 * stuck / len(cases), 1)
+    return rate <= JUDGE_ERROR_LIMIT, rate, stuck
+
+
+def compare(tags: list[str], allow_unreliable: bool = False) -> None:
     runs = []
     for t in tags:
         p = RESULTS_DIR / f"{t}.json"
@@ -791,19 +960,41 @@ def compare(tags: list[str]) -> None:
             sys.exit(f"没有这轮结果：{p}")
         runs.append(json.loads(p.read_text(encoding="utf-8")))
 
-    keys = ["准确率", "检索命中率", "引用正确率", "幻觉率", "假阴性率", "无据陈述率"]
+    # ⛔ 有一轮判分失效超线就不出对比表。**这是刻意挡掉一件事**：拿一轮
+    # 被网络污染过的结果去判断「哪版更好」。差值可能整个落在那几题噪声里，
+    # 而对比表长得一本正经，看的人不会去核每一题的 verdict
+    if bad := [(r, _reliability(r)) for r in runs if not _reliability(r)[0]]:
+        print()
+        print("【UNRELIABLE】 —— 这几轮的判分失效率超过 5%：")
+        for r, (_, rate, stuck) in bad:
+            print(f"     {r['tag']:<22} {rate}%（{stuck} 题没评上）")
+        print()
+        print("  判分器断线不是模型答错。拿这样的结果比较 prompt / 架构，")
+        print("  差出来的那几个点可能整个是网络。**先重跑，再比。**")
+        if not allow_unreliable:
+            print("  （真要看，加 --allow-unreliable。）")
+            return
+        print("  ⚠️ --allow-unreliable：下面的数字不作数，只当原始记录看。")
+
+    keys = ["准确率", "判分失效率", "检索命中率", "引用正确率", "幻觉率", "假阴性率", "无据陈述率"]
     w = max(len(t) for t in tags) + 2
 
     print()
     print("| 指标 | " + " | ".join(f"{r['tag']}" for r in runs) + " |")
     print("|---|" + "---|" * len(runs))
     for k in keys:
+        # ⚠️ 老结果里没有 M13 新加的那几个指标（判分失效率），打成「—」，
+        # 别 KeyError 掉整张表——历史对比是这个命令唯一的用途
+        base = runs[0]["metrics"].get(k)
         cells = []
         for r in runs:
-            v = r["metrics"][k]
-            base = runs[0]["metrics"][k]
-            d = v - base
-            cells.append(f"{v}%" if r is runs[0] else f"{v}% ({d:+.1f})")
+            v = r["metrics"].get(k)
+            if v is None:
+                cells.append("—")
+            elif r is runs[0] or base is None:
+                cells.append(f"{v}%")
+            else:
+                cells.append(f"{v}% ({v - base:+.1f})")
         print(f"| {k} | " + " | ".join(cells) + " |")
     print()
     print("参数：")
@@ -879,6 +1070,11 @@ def main() -> None:
     ap.add_argument("--tag", default="", help="这轮的名字，结果存 results/<tag>.json")
     ap.add_argument("--check", action="store_true", help="只验检索，不调 LLM")
     ap.add_argument("--compare", nargs="+", metavar="TAG", help="对比若干轮结果")
+    ap.add_argument(
+        "--allow-unreliable",
+        action="store_true",
+        help="判分失效率超线时仍然打印对比表（默认拒绝，见 compare()）",
+    )
     ap.add_argument("--only", default="", help="只跑指定 id 或 kind，逗号分隔")
     # ⭐ 常识兜底的 A/B（M12）。**必须能在同一次运行里指定**，
     # 而不是靠改 .env 再跑一遍：改 .env 那种做法下，两轮之间除了这个开关
@@ -915,7 +1111,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.compare:
-        compare(args.compare)
+        compare(args.compare, allow_unreliable=args.allow_unreliable)
         return
 
     # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——

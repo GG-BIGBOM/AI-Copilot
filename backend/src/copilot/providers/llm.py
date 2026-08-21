@@ -17,9 +17,16 @@ class ChatLLM:
         base_url: str | None = None,
         model: str | None = None,
         forced_temperature: float | None = None,
+        timeout: float | None = None,
     ) -> None:
         """
         Args:
+            timeout: 读超时（秒）。默认 180 秒是**答题**那条路的口径——详解档的推理
+                模型正文首字就要 8~60 秒，卡短了会把正常的慢答掐成报错。
+                ⚠️ 判分器是另一回事：它出的是一小段 JSON，正常两三秒就回来。
+                180 秒对它意味着「一条卡住的连接要拖两轮退避才轮到重试」，
+                而评测是 60 题并发跑的——一次跨境抖动能把整轮拖成十几分钟。
+                所以 `eval/run.py` 显式传一个短得多的值。
             forced_temperature: 这个模型只认某一个温度值，调用方传什么都按它来。
                 ⚠️ **kimi-k2.5 / k2.6 / k3 全都只接受 temperature=1**，
                 传 0.1 会直接 HTTP 400（`invalid temperature: only 1 is allowed
@@ -39,7 +46,7 @@ class ChatLLM:
         self._client = httpx.Client(
             base_url=base_url or s.llm_base_url,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            timeout=httpx.Timeout(180.0, connect=15.0),
+            timeout=httpx.Timeout(180.0 if timeout is None else timeout, connect=15.0),
         )
 
     @property

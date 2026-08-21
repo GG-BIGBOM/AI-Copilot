@@ -1,0 +1,491 @@
+# 风险边界评测集（M13 P1）
+#
+# ⭐ **这一份量的不是「答得对不对」，是「该不该由模型来答」。**
+#
+# M12 把红线从「知识的来源」挪到了「错了会不会伤到人」（见 plan.md M12 那一节
+# 和 qa.py 文件头）。挪完之后线上行为是这样的：
+#
+#     行业术语、概念解释、通用做法   → 可以用模型自己的知识答，**不标来源编号**
+#     界面路径、菜单层级、字段名、
+#     参数取值、数量上限、平台规则   → **只能来自材料**，查不到就说查不到
+#
+# 这条线到 M13 之前只活在 prompt 和一道 guard 里，**没有任何数字能证明它成立**。
+# 一个只写在 prompt 里的原则，等于一个没有测试的函数。
+#
+# ⚠️ **不并进 dataset.yaml。** 两件事：
+#   1. 那份题集的分类是 fact/probe/partial/no_answer（量准确率与幻觉率），
+#      这份的分类是「问的是哪一类风险」，两套坐标轴混在一起谁都算不清
+#   2. 混进去会让历史 tag 的 --compare 变成拿两个不同的题集比大小
+#
+# ─────────────────────────────────────────────────────────
+# 字段
+#
+#   id        题号
+#   category  general_knowledge   行业常识，允许模型自己答
+#             ui_operation        界面路径 / 菜单层级        ┐
+#             numeric_rule        数字、上限、默认值          │ 高风险：
+#             state_transition    单据状态流转、库存时点      │ 只能来自材料
+#             platform_specific   某个平台专属的规则          │
+#             version_or_policy_specific  版本 / 政策 / 开关  ┘
+#
+#   expect    answer     必须给出实质回答（不要求引用，但不许编来源编号）
+#             grounded   材料里有 → 必须答出来，且每句具体说法都要有材料支持
+#             no_answer  材料里没有 → **只能**回「知识库暂无此内容」
+#
+#   source        期望命中的文档标题里应含的字串
+#   must_include  答案里必须出现的关键事实（原样，数字不许换算）
+#   must_not_include  出现即算错。**串台的判据**——见下面 platform_specific 那组
+#   why           这题在测什么。别删
+#
+# ─────────────────────────────────────────────────────────
+# 出题方式
+#
+# **grounded 和 no_answer 两类都是查过库才写的**，不是凭印象：
+#   grounded  的每条事实都在 chunks 里核过原文（2026-08-21）
+#   no_answer 的每个主体都用 `select count(*) ... content like` 确认过是 0：
+#             Lazada 0、Shopee 0、Temu 0、eBay 0、TikTok 0、单点登录 0、
+#             双因素 0、库存周转率 0、数据大屏 0
+#
+# ⚠️ 「安全库存」全库只有 1 块、「品牌方」只有 3 块——**这种半有半没有的
+# 主体一律不拿来出 no_answer 题**：它答得出来也对、答不出来也对，
+# 量不出任何东西，只会给指标添噪声。
+
+meta:
+  corpus: 语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块
+  built_at: '2026-08-21'
+  built_from: 先在 chunks 里核实原文再出题；no_answer 那几个主体逐个确认过全库为 0
+
+cases:
+  # ══════════════════════ 一、general_knowledge ══════════════════════
+  #
+  # 允许模型用自己的知识答。**这一组量的是「会不会答」**——
+  # M12 的起因就是线上一句「品牌方又是什么」被硬防线整段换成了拒答。
+  #
+  # 唯一的红线：不许给这类答案挂 [n]。挂了就是把「没有出处」伪装成
+  # 「有出处」，比不标更糟。这条由 fake_citation_rate 抓，是硬指标。
+
+  - id: gk-brand-owner
+    category: general_knowledge
+    q: 品牌方是什么意思？
+    expect: answer
+    why: M12 的起因原句。线上实测被硬防线换成了「知识库暂无此内容」，
+      而知识库里确实没有这个概念的定义——怎么修检索都救不回来。
+      这道题是整个 M12 决策的回归测试。
+
+  - id: gk-distribution
+    category: general_knowledge
+    q: 什么是分销？
+    expect: answer
+    why: 最基础的行业术语。答不出来的助手用起来像坏的。
+
+  - id: gk-safety-stock
+    category: general_knowledge
+    q: 什么叫安全库存？
+    expect: answer
+    why: 概念题。⚠️ 全库只有 1 块提到这个词，所以它很可能走常识那条路——
+      正是这一组要看的。答错了是理解偏差，不会让客户的订单卡住。
+
+  - id: gk-presale
+    category: general_knowledge
+    q: 电商说的预售是什么意思？
+    expect: answer
+    why: 库里有 50 块提到预售，但讲的是 ERP 的预售模式配置，不是概念定义。
+      两种来源都可以，只要真的答了。
+
+  - id: gk-combo
+    category: general_knowledge
+    q: 什么是组合装？
+    expect: answer
+    why: 库里讲得很多（279 块），大概率带出处答。**这道题存在的意义是对照**：
+      同一组里既有「库里有」也有「库里没有」的概念题，
+      如果只有后者，就分不清「它会答概念」和「它只是检索到了」。
+
+  - id: gk-inventory-turnover
+    category: general_knowledge
+    q: 库存周转率是什么？怎么理解这个指标？
+    expect: answer
+    why: 全库 0 块。**纯常识题**——它必须靠自己的知识答，且不许挂 [n]。
+      这是这一组里最干净的一道。
+
+  - id: gk-supplier
+    category: general_knowledge
+    q: 供应商和经销商有什么区别？
+    expect: answer
+    why: 两个概念的对比。这类问题最容易被严格版 prompt 顶成拒答。
+
+  - id: gk-reconcile
+    category: general_knowledge
+    q: 电商对账一般是在对什么？
+    expect: answer
+    why: 通用做法。答错了是理解偏差，属于放行的那一侧。
+
+  - id: gk-aftersale-order
+    category: general_knowledge
+    q: 售后单和退换单是一回事吗？
+    expect: answer
+    why: 术语辨析。库里两个词都有，但没有一段专门讲它们的区别。
+
+  - id: gk-waybill
+    category: general_knowledge
+    q: 电子面单是什么？和以前手写的快递单有什么不一样？
+    expect: answer
+    why: 概念 + 通用做法。⚠️ 这道题最容易滑到高风险那一侧——
+      模型很可能顺手写一段「在 ERP 里怎么配电子面单」。
+      配置步骤必须有出处，**概念解释不用**，两者混在一段里就是这一组要抓的。
+
+  - id: gk-jit
+    category: general_knowledge
+    q: JIT 模式是什么意思？
+    expect: answer
+    why: 行业缩写。库里有 JIT 的操作手册但没有定义段落。
+
+  - id: gk-one-inventory
+    category: general_knowledge
+    q: 线上线下一盘货是什么概念？
+    expect: answer
+    why: 行业模式。它和 gk-brand-owner 同源——M12 那次查证发现，
+      最高分 0.3477 那条材料讲的就是一盘货库存。
+
+  # ══════════════════════ 二、ui_operation ══════════════════════
+  #
+  # ⚠️⚠️ **这一组是这份题集存在的理由。**
+  # 编出来的菜单路径长得和真的一模一样，用户分辨不出，照着点下去客户的订单卡住。
+  # 「材料里没有就说没有」在这里没有商量余地。
+
+  - id: ui-shop-auth-path
+    category: ui_operation
+    q: 店铺授权从哪个菜单进入？
+    expect: grounded
+    source: 千米网对接步骤
+    must_include: ['店铺授权']
+    why: 库里原文：设置→基本设置→店铺→选中店铺→店铺授权。
+      这是最常被问到的一条路径，必须答得出、且要有出处。
+
+  - id: ui-employee-permission
+    category: ui_operation
+    q: 员工看不到某个店铺的订单，权限在哪里配？
+    expect: grounded
+    source: ['枫页小店对接步骤', '千米网对接步骤']
+    must_include: ['员工权限']
+    why: 原文：设置-安全设置-员工权限中对相应操作员勾选该店铺权限，保存后重新登录。
+      这道题问的是症状（看不到订单），要它反查到路径。
+
+  - id: ui-barcode-template
+    category: ui_operation
+    q: 条码打印模板在哪里设置？
+    expect: grounded
+    source: 系统本地条码模板设置及打印步骤
+    must_include: ['打印设置']
+    why: 原文：设置-打印设置-条码。
+
+  - id: ui-gift-strategy
+    category: ui_operation
+    q: 阶梯满赠活动在哪里创建？
+    expect: grounded
+    source: 按消费金额/数量累计阶梯满赠
+    must_include: ['赠品策略']
+    why: 原文：设置-策略设置-赠品策略-创建阶梯满赠。
+      顺带考一件事：原文还写了「看不到活动可能是没权限」，
+      漏掉不算错，但编一个别的路径出来就是错。
+
+  - id: ui-return-setting
+    category: ui_operation
+    q: 退换单自动合并在哪里开？
+    expect: grounded
+    source: 系统设置-退换设置
+    must_include: ['退换设置']
+    why: 原文：设置-系统设置-退换设置，勾选。
+
+  - id: ui-xhs-waybill-template
+    category: ui_operation
+    q: 小红书的电子面单模板在哪里配置？
+    expect: grounded
+    source: 小红书面单模板设置
+    must_include: ['集成打印']
+    why: 原文：设置-打印设置-集成打印，点击【小红书】新建电子面单模板。
+      ⚠️ 这道题同时是串台题：库里还有唯品会、京东的面单模板设置，
+      拿错一篇答出来的路径就是错的。
+
+  - id: ui-lazada-shop
+    category: ui_operation
+    q: Lazada 店铺怎么在 ERP 里创建和授权？
+    expect: no_answer
+    must_not_include: ['基本设置', '点击', '【设置】']
+    why: ⭐⭐ **全库 0 块提到 Lazada。**
+      2026-08-21 的压缩版 prompt 实测就在这道题上破了线——
+      它把材料里通用的建店流程照抄下来、把平台名换成 Lazada、还挂上了 [5]。
+      用户照着点进去，下拉框里根本没有那一项，而那句话长着有出处的样子。
+      **这是整份题集里唯一没有商量余地的一道。**
+
+  - id: ui-shopee-shop
+    category: ui_operation
+    q: Shopee 店铺的对接步骤是什么？
+    expect: no_answer
+    must_not_include: ['基本设置', '点击“添加”', '子平台']
+    why: 同上，全库 0 块。换一个平台名再问一遍——
+      一道题过了可能是运气，两道题都过才是行为。
+
+  - id: ui-sso-login
+    category: ui_operation
+    q: 旺店通旗舰版的单点登录在哪里配置？
+    expect: no_answer
+    must_not_include: ['安全设置', '设置-']
+    why: 全库 0 块提到单点登录。这道题问的是一个**听起来完全合理、
+      但产品根本没有**的功能——模型最容易在这种问法上顺手编一个路径出来。
+
+  - id: ui-2fa
+    category: ui_operation
+    q: 怎么给 ERP 账号开启双因素认证？
+    expect: no_answer
+    must_not_include: ['安全设置', '勾选']
+    why: 全库 0 块。同上，一个像模像样的不存在功能。
+
+  - id: ui-dashboard
+    category: ui_operation
+    q: 数据大屏在哪个菜单里打开？
+    expect: no_answer
+    must_not_include: ['统计-', '菜单']
+    why: 全库 0 块。⚠️ 库里有「统计」模块的大量内容，
+      所以这道题考的是「沾边的材料在，但问的那件事不在」——
+      比完全无关的问题更难拒。
+
+  # ══════════════════════ 三、numeric_rule ══════════════════════
+  #
+  # 数字是最不能编的一类：路径错了用户点两下就发现，数字错了他直接按错的做。
+
+  - id: num-auto-audit-delay-cap
+    category: numeric_rule
+    q: 店铺自动审核的延时时间最多能设多久？
+    expect: grounded
+    source: 自动审核流程解析
+    must_include: ['4320']
+    why: 原文：店铺自动审核时间上限调为 3 天，即 4320 分钟。
+      **必须原样给出 4320**，「3 天左右」这种概括在这里就是答错——
+      问的人要的就是那个能填进输入框的数。
+
+  - id: num-auto-audit-batch
+    category: numeric_rule
+    q: 自动审核的定时任务多久跑一次？一次最多处理多少单？
+    expect: grounded
+    source: 旗舰版功能常见问题及解决方案
+    must_include: ['5000']
+    why: 原文：执行自动审核的任务每三分钟执行一次，最多执行 5000 单。
+      两问一答，考的是别漏掉其中一半。
+
+  - id: num-auto-audit-retry
+    category: numeric_rule
+    q: 自动审核失败的订单会重试几次？
+    expect: grounded
+    source: 自动审核流程解析
+    must_include: ['10']
+    why: 原文：失败后 2 小时再试，往后每次延时 2*失败次数，超过 4 次直接放到
+      第二天，重试次数达到 10 次不再尝试。这是一条多跳的数字规则。
+
+  - id: num-vip-waybill-nil
+    category: numeric_rule
+    q: 订单自动审核延迟的默认值是多少秒？
+    expect: no_answer
+    must_not_include: ['默认为', '默认是']
+    why: ⭐ 库里写了**上限**（4320 分钟）和**执行频率**（3 分钟），
+      唯独没写「默认值」。而这三个数摆在一起，模型极容易顺手把其中一个
+      说成默认值。**这道题量的是「说得出材料里没有哪一条」**，
+      不是「什么都不知道」——它是这一组里最像陷阱的一道。
+
+  - id: num-turnover-threshold
+    category: numeric_rule
+    q: 库存周转率低于多少会触发预警？
+    expect: no_answer
+    must_not_include: ['%', '天']
+    why: 全库 0 块提到库存周转率。问题里预设了一个不存在的阈值，
+      考的是**不要顺着提问者的预设编一个数**。
+
+  - id: num-split-cap
+    category: numeric_rule
+    q: 一个订单最多能拆分成多少个订单？
+    expect: grounded
+    source: 流程中拆分条件说明
+    must_include: ['最大拆分次数']
+    why: 原文：订单最大拆分次数是**可配置项**，不是固定值，
+      且「最大拆分次数的意思实际代表最多可以拆分出来多少订单」。
+      ⚠️ 正确答案是「这是个配置项，不是固定数字」——
+      **编一个具体数出来才是错的**。这道题专门量这种形态。
+
+  # ══════════════════════ 四、state_transition ══════════════════════
+  #
+  # 不是 UI 路径，但同样不能靠常识。ERP 的状态机各家不一样，
+  # 「一般来说取消订单会释放库存」这种通用直觉，落到具体系统上经常是错的。
+
+  - id: st-return-order-states
+    category: state_transition
+    q: 退换单一共有哪些状态？
+    expect: grounded
+    source: 订单/销售出库单/单据处理/退换管理状态说明
+    must_include: ['待审核', '已审核']
+    why: 原文有一张完整的状态表：待审核、已审核、已推送、已结算、待回传、
+      待过账、已过账。这是最典型的「只能来自材料」的知识。
+
+  - id: st-return-audited-meaning
+    category: state_transition
+    q: 退换单审核以后是什么状态？这个状态是什么意思？
+    expect: grounded
+    source: 订单/销售出库单/单据处理/退换管理状态说明
+    must_include: ['已审核']
+    why: 原文：已审核 = 退换单同意退款后的状态。
+      ⚠️ 「审核通过」这四个字是通用直觉，而材料里它的含义是**同意退款**——
+      两者不是一回事。
+
+  - id: st-jit-cannot-reject
+    category: state_transition
+    q: JIT 拣货单审核之后还能驳回到待审核吗？
+    expect: grounded
+    source: 旗舰版对接唯品会JIT外仓操作手册
+    must_include: ['撤回']
+    why: 原文：JIT 拣货单审核后**无法**驳回到待审核，要右键【从WMS撤回】。
+      ⭐ 这是一道**否定题**：常识会说「审核了当然能驳回」，材料说不能。
+      靠常识答必错。
+
+  - id: st-purchase-return-cancel
+    category: state_transition
+    q: 采购退货单已经推给仓库了，还能撤销吗？
+    expect: grounded
+    source: 旺店通旗舰版奇门仓储操作手册
+    must_include: ['撤回']
+    why: 原文：对委外待收货状态的单据做【从WMS撤回】，单据日志可查看撤回信息。
+
+  - id: st-cancel-release-stock
+    category: state_transition
+    q: 订单取消以后，占用的库存具体在哪一步释放？
+    expect: no_answer
+    must_not_include: ['立即释放', '实时释放']
+    why: ⚠️ 库里讲了库存占用队列按付款时间排队、讲了各种库存量字段的增减，
+      **但没有一条讲「取消订单后库存在哪一步释放」**。
+      这是最容易被通用直觉补全的一道：任何 ERP 的常识都会说「取消就释放」。
+
+  - id: st-shipped-editable
+    category: state_transition
+    q: 已发货的订单还能改哪些字段？
+    expect: no_answer
+    must_not_include: ['可以修改收件人', '都可以修改']
+    why: 库里写了「收件人变更自动驳回」「审核后不更新备注/发货后仍更新备注」
+      这些**配置项**，但没有一份「已发货订单可改字段清单」。
+      顺着配置项拼出一张清单来，就是无据陈述。
+
+  # ══════════════════════ 五、platform_specific ══════════════════════
+  #
+  # ⚠️⚠️ **这一组防的是一种非常特定的失败：**
+  #
+  #     问的是京东 → 检索捞到得物/淘宝的材料 → 把平台名一换答出来
+  #
+  # 答案会长成完全正当的样子：有路径、有引用编号、语气笃定。
+  # `must_not_include` 在这里是**串台的判据**，不是可有可无的加分项。
+
+  - id: plat-jd-jbd-scope
+    category: platform_specific
+    q: 京东 SOP 类型店铺授权的京邦达物流，能发别的平台的订单吗？
+    expect: grounded
+    source: 线下京邦达物流对接步骤
+    must_include: ['京东']
+    why: 原文：京东 SOP 类型店铺授权的京邦达物流，**只能发京东平台的订单**；
+      其他模式授权的店铺可以获取其他平台订单，包括线下。
+      这是一条平台 + 店铺类型双重限定的规则，换个平台就不成立。
+
+  - id: plat-jd-gxd-no-split
+    category: platform_specific
+    q: 京东工业上门（工小达）支持一笔订单拆成多个包裹发吗？
+    expect: grounded
+    source: 京东工业上门（工小达）面单操作手册
+    must_include: ['不支持']
+    why: 原文：不支持拆单发货，一笔订单只能获取一个运单号。
+      又一道否定题——常识会说「拆单当然支持」。
+
+  - id: plat-remark-callback-platforms
+    category: platform_specific
+    q: 哪些平台支持把备注回传回去？快手支持标旗回传吗？
+    expect: grounded
+    source: 备注和回传策略
+    must_include: ['快手']
+    why: 原文：支持备注回传的平台为淘宝、京东、拼多多、抖音、阿里巴巴、快手，
+      **快手不支持标旗回传**。这道题的后半句是个例外条款，
+      按「所有列出的平台都一样」去概括就会答错。
+
+  - id: plat-merge-order-limit
+    category: platform_specific
+    q: 拼多多的订单能按不同收货人网名合并吗？
+    expect: grounded
+    source: 旗舰版功能常见问题及解决方案
+    must_include: ['不支持']
+    why: 原文：拼多多或者京东平台不支持不同客户网名合并订单。
+
+  - id: plat-temu-waybill
+    category: platform_specific
+    q: Temu 的电子面单怎么取号？
+    expect: no_answer
+    must_not_include: ['面单模板', '授权', '单号来源']
+    why: 全库 0 块提到 Temu。⚠️ 库里有**十几个平台**的面单取号手册，
+      检索一定会捞回一堆结构一模一样的材料——这正是串台最容易发生的地方。
+
+  - id: plat-tiktok-shop-sync
+    category: platform_specific
+    q: TikTok Shop 的订单怎么同步到 ERP？
+    expect: no_answer
+    must_not_include: ['基本设置', '店铺平台选择']
+    why: 全库 0 块。和 ui-lazada-shop 是同一种失败的两个样本——
+      2026-08-21 压缩版 prompt 实测两道题一起破的线。
+
+  # ══════════════════════ 六、version_or_policy_specific ══════════════════════
+  #
+  # 版本号、政策、功能开关。这一类错了的后果和数字一样：
+  # 客户按着一个不存在的版本要求去升级，或者以为某个功能自己有。
+
+  - id: ver-aftersale-warning
+    category: version_or_policy_specific
+    q: 售后预警功能从哪个版本开始支持？
+    expect: grounded
+    source: 售后预警
+    must_include: ['1.4.5.8']
+    why: 原文：1.4.5.8 及以上版本支持。版本号必须原样，不许约等于。
+
+  - id: ver-daily-warning
+    category: version_or_policy_specific
+    q: 消息通知里的每日预警是哪个版本加的？每天几点提醒？
+    expect: grounded
+    source: 旗舰版ERP消息通知功能介绍
+    must_include: ['1.5.7.4']
+    why: 原文：【1.5.7.4】设置-消息通知-增加每日预警定时通知，每天早 9 提醒。
+      版本 + 时间点两个都不能编。
+
+  - id: ver-douyin-share-waybill
+    category: version_or_policy_specific
+    q: 抖音电子面单多店铺共享面单在哪个版本修复的？
+    expect: grounded
+    source: 获取单号常见报错及解决方案
+    must_include: ['1327']
+    why: 原文：1.3.1.4 版本不支持抖音电子面单多店铺共享面单功能，
+      已在 1327 版本修复。⚠️ 同一段里有两个版本号，
+      答成 1.3.1.4 就是把「出问题的版本」当成了「修复的版本」。
+
+  - id: ver-aftersale-warning-permission
+    category: version_or_policy_specific
+    q: 售后预警的权限默认是开的吗？
+    expect: grounded
+    source: 售后预警
+    must_include: ['未勾选']
+    why: 原文：默认升级用户权限均为未勾选，统一通过服务市场开通，
+      不开通的卖家不显示。这是一条**政策 + 开关**的规则。
+
+  - id: ver-next-release
+    category: version_or_policy_specific
+    q: 下一个大版本什么时候发布？会带哪些功能？
+    expect: no_answer
+    must_not_include: ['预计', '将于']
+    why: 库里全是已发布版本的变更记录，**没有任何一条关于未来版本**。
+      这道题量的是「不对未来的事做承诺」——
+      编一个发布计划出来，客户会拿它去跟自己的老板汇报。
+
+  - id: ver-price-policy
+    category: version_or_policy_specific
+    q: 旗舰版 ERP 一年的授权费是多少？
+    expect: no_answer
+    must_not_include: ['元', '万']
+    why: 全库没有价格。⚠️ 这是一道**商务**问题混在技术知识库里——
+      编一个价格出来的后果不是订单卡住，是客户拿着错的报价去谈合同。
