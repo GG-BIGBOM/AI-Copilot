@@ -771,3 +771,158 @@ cases:
     source: 系统打印模板设置及打印位置
     must_include: ['仓储-销售出库-单据处理']
     why: 和上一题同一篇的邻块。两题都问出来，说明相邻块没有互相盖掉。
+
+  # ─── M13 P3：从 6 道扩到 20 道 ───────────────────────────
+  #
+  # ⚠️ **6 道题的分母撑不起一个指标。** 一道题就是 16.7 个点——
+  # M12 那次「配图带出率 83.3% → 33.3%」看着像塌方，其实是掉了 2 道题，
+  # 和模型的随机抖动分不开。plan.md 在 M11 P5 和 M12 各撞过一次这堵墙，
+  # 两次的结论都是同一句：**要定论、要修，都得先把分母做大。**
+  #
+  # ⚠️ **这 14 道题不是从线上失败样本里来的。** 任务书写的优先级是
+  # request_trace / 差评 / 真实线上失败，但本机库里 357 条 trace 全是测试造的，
+  # 一条 `feedback IS NOT NULL` 都没有——线上那份在服务器上。
+  # 所以退回第二档：**按原来那批题一样的做法**，先在 chunks 里挑
+  # 「带界面路径 + 本块真的有配图」的块读，再针对读到的具体事实出题。
+  # 这不是「凭空编」，每一条路径都是原文抄的；但它也**不等于**真实失败样本，
+  # 等线上攒够差评要回头补。
+  #
+  # 挑块的条件是 `images IS NOT NULL AND jsonb_array_length(images) > 0`——
+  # **这一条不能省**：本块没有图的题放进分母，等于要求模型引用一张不存在的图，
+  # 而那正是硬指标「不许编图号」禁止的事。
+  #
+  # 覆盖面按任务书点的名走：菜单操作 / 打印 / 面单 / 库存 / 审核 /
+  # 采购 / 退货 / 店铺配置 / 仓库配置 / 物流。
+
+  - id: proc-shop-add
+    kind: fact
+    procedural: true
+    q: 在 ERP 里新增一个店铺要怎么操作？
+    source: 店铺授权教程
+    must_include: ['基本设置']
+    why: 最高频的一条配置路径：设置-基本设置-店铺，点击【添加】，
+      选平台和子平台后填店铺编号等信息保存。这一块自带一张界面截图。
+
+  - id: proc-shop-permission
+    kind: fact
+    procedural: true
+    q: 新加的店铺别人看不到，要怎么给权限？
+    source: 店铺授权教程
+    must_include: ['员工权限']
+    why: 原文：设置-安全设置-员工权限，选人或权限组，点【店铺】tab 勾选，
+      保存后**务必重新登录**。⭐ 最后那句「重新登录」是这道题真正要考的——
+      漏了它用户会以为权限没生效，而这句话只在截图旁边那一行里。
+
+  - id: proc-purchase-create
+    kind: fact
+    procedural: true
+    q: 采购单是怎么创建和审核的？
+    source: 采购流程
+    must_include: ['采购开单']
+    why: 原文：采购--采购开单/采购单管理，选供应商-收货仓库-添加货品-填采购量，
+      提交后是待审核，待审核才能审核。**「提交」和「保存」是两个不同的结果**
+      （待审核 / 编辑中），答成一个就是错的。
+
+  - id: proc-purchase-inbound-ways
+    kind: fact
+    procedural: true
+    q: 采购入库有哪几种方式？
+    source: 采购流程
+    must_include: ['快速入库', '批量入库']
+    why: 三种：分步采购入库、采购快速入库、采购批量入库，分散在相邻的块里，
+      每块各带自己的截图。少答一种就是漏了一条路。
+
+  - id: proc-purchase-settle
+    kind: fact
+    procedural: true
+    q: 采购单怎么结算？在哪个界面？
+    source: 采购流程
+    must_include: ['采购结算']
+    why: 原文：账款-单据结算-采购结算-新建-引用采购单。
+      这条路径跨了模块（从采购跳到账款），最容易被答成「在采购里结算」。
+
+  - id: proc-return-create
+    kind: fact
+    procedural: true
+    q: 退换单怎么创建？
+    source: 创建退换单以及销退入库流程
+    must_include: ['退换开单']
+    why: 两条路都对：销售—订单管理里右键新建退换单，或销售—售后管理—退换开单。
+      这一块带 4 张截图，是配图最该出现的形态。
+
+  - id: proc-return-inbound
+    kind: fact
+    procedural: true
+    q: 销售退货的分步入库怎么操作？
+    source: 创建退换单以及销退入库流程
+    must_include: ['入库开单']
+    why: 原文：仓储—入库管理—销售退货—入库开单、入库管理，
+      引用【已审核】状态的退货单。⚠️「已审核」这个前置状态不能漏——
+      漏了用户会在退换单还没审核的时候去找它，找不到。
+
+  - id: proc-return-prein
+    kind: fact
+    procedural: true
+    q: 退换单怎么关联预入库单？
+    source: 创建退换单以及销退入库流程
+    must_include: ['关联预入库']
+    why: 手动那条：选中退换单右键关联预入库，双击选已完成的预入库单。
+      前置条件是「退换单待入库或部分入库、预入库单已完成」。
+
+  - id: proc-virtual-warehouse-create
+    kind: fact
+    procedural: true
+    q: 虚拟仓怎么创建？
+    source: 虚拟仓功能介绍
+    must_include: ['虚拟仓策略']
+    why: 原文：设置→策略设置→虚拟仓策略→虚拟仓，左上角点新建。
+      顺带一条硬规则：一个店铺只能对应一个虚拟仓。
+
+  - id: proc-virtual-warehouse-permission
+    kind: fact
+    procedural: true
+    q: 虚拟仓的页签看不到，权限在哪里开？
+    source: 虚拟仓功能介绍
+    must_include: ['员工权限']
+    why: 原文：设置→安全设置→员工权限→权限，按账号勾选才显示虚拟仓各页签。
+      ⚠️ 和 proc-shop-permission 是同一个界面的两件事——
+      **两道题都问，能看出它是不是把「员工权限」当成了万能答案**。
+
+  - id: proc-batch-exchange
+    kind: fact
+    procedural: true
+    q: 订单审核界面的批量换货怎么用？有哪几种换货方式？
+    source: 订单审核界面换货说明
+    must_include: ['一对一换货']
+    why: 四种方式：一对一换货、按比例严格换货、按比例可部分换货、
+      一对一换货（同货品不同明细时）。这一块带 4 张截图。
+
+  - id: proc-print-assistant
+    kind: fact
+    procedural: true
+    q: 慧策打印助手在哪里下载？用之前要开什么配置？
+    source: 慧策打印助手操作说明
+    must_include: ['仓库设置']
+    why: 两件事分在两块里：下载在「设置-基本设置-物流（新）」界面，
+      而**用之前必须先开「设置-系统设置-仓库设置」里的系统配置**。
+      只答下载路径的话，用户下完发现用不了。
+
+  - id: proc-pda-box-print
+    kind: fact
+    procedural: true
+    q: PDA 按单入库要用云端打印箱码，服务在哪里开？模板在哪里配？
+    source: 按单入库
+    must_include: ['PDA打印服务']
+    why: 两条路径都要：服务在「仓储→PDA打印服务→箱码」开，
+      模板在「设置→打印设置→箱码」配。这一块带 3 张截图，
+      而问题问了两件事——正是铁律 3「问了两件事就答两件」要管的形态。
+
+  - id: proc-tongchengpei-logistics
+    kind: fact
+    procedural: true
+    q: 淘宝小时达同城配的外仓发货，物流要怎么配？
+    source: 淘宝同城配操作手册
+    must_include: ['纸质面单']
+    why: 四步：物流设置里创建纸质面单-同城配物流 →【仓库】界面选中仓库绑定
+      wms 物流 → WMS 提供固定名称和编码 → 绑定刚创建的同城配物流。
+      这一块带 6 张截图，是全库配图最密的操作段之一。
