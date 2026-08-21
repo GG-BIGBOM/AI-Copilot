@@ -7,13 +7,10 @@ import { Check, Copy } from "lucide-react";
 
 import { CitationChip } from "@/components/chat/citations";
 import { API_BASE } from "@/lib/api";
+import { fallbackImages, inlineImages } from "@/lib/image-rendering";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/api";
 import type { AnswerImage } from "@/lib/chat-types";
-
-// 模型在步骤末尾写的配图引用，如「1. 进入【设置】[图1]」。
-// 容忍中间多打一个空格——模型偶尔会写成 [图 1]，漏掉的话用户就看见一个裸标记。
-const IMAGE_REF_RE = /\[图\s*(\d{1,2})\]/g;
 
 // 正文里的引用角标 [1] [2]。转成一个假锚点交给 a 渲染器，
 // 那边再换成可悬停、可聚焦的角标组件
@@ -31,22 +28,6 @@ function replaceOutsideCode(text: string, run: (segment: string) => string): str
     .split(/(```[\s\S]*?```|```[\s\S]*$)/g)
     .map((segment) => (segment.startsWith("```") ? segment : run(segment)))
     .join("");
-}
-
-/**
- * 把答案里的 `[图1]` 换成 Markdown 图片语法，交给 react-markdown 正常渲染。
- *
- * **图号对不上的一律删掉。** 模型偶尔会引用一个材料里不存在的编号
- * （本轮只有 3 张图却写了 [图5]）。留着它，用户看到的是一个意义不明的
- * 方括号；换成图，就是配了一张错的截图。两者都比直接抹掉差。
- */
-function inlineImages(content: string, images: AnswerImage[]): string {
-  if (images.length === 0) return content.replace(IMAGE_REF_RE, "");
-  const byNumber = new Map(images.map((img) => [img.n, img.url]));
-  return content.replace(IMAGE_REF_RE, (_, n: string) => {
-    const url = byNumber.get(Number(n));
-    return url ? `![图${n}](${url})` : "";
-  });
 }
 
 /**
@@ -141,6 +122,10 @@ export const MarkdownContent = memo(function MarkdownContent({
   isStreaming?: boolean;
 }) {
   const byNumber = new Map(citations.map((c) => [c.n, c]));
+  // 图片先于正文到达；流结束前不能把“正文还没来得及写图号”误判成漏图。
+  // 没有引用时也不兜底，避免 no-answer 回答挂上无关截图。
+  const fallback =
+    !isStreaming && citations.length > 0 ? fallbackImages(content, images) : [];
 
   // 地址是根相对路径 /images/…：开发时要拼上后端的 8000，线上同源留空，由 nginx 直接发
   const absolute = (src: string) => (src.startsWith("/") ? `${API_BASE}${src}` : src);
@@ -210,6 +195,24 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {inlineCitations(inlineImages(content, images), citations)}
       </ReactMarkdown>
+      {fallback.length > 0 && (
+        <details className="content-wide overflow-hidden rounded-lg border border-border-subtle bg-surface">
+          <summary className="cursor-pointer select-none px-3.5 py-2.5 text-sm font-medium text-foreground marker:text-muted-foreground">
+            参考材料里的操作截图
+            <span className="ml-2 font-normal text-muted-foreground">{fallback.length} 张</span>
+          </summary>
+          <div className="grid gap-3 border-t border-border-subtle bg-surface-subtle p-3 sm:grid-cols-2">
+            {fallback.map((image) => (
+              <figure key={image.n} className="m-0 min-w-0">
+                <Screenshot src={absolute(image.url)} alt={`操作截图 ${image.n}`} />
+                <figcaption className="mt-1.5 text-xs text-muted-foreground">
+                  图 {image.n}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 });

@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 
 echo "==> [1/7] 本机自检（不过就别推上去）"
 ( cd backend && uv run ruff check . && uv run pytest -q )
-( cd frontend && npm run lint && npx tsc --noEmit )
+( cd frontend && npm test && npm run lint && npx tsc --noEmit )
 
 # 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
 # 拦下来只会逼人加 --skip 绕过去，那这条检查就永远没人看了。
