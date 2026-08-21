@@ -308,21 +308,33 @@ def test_guard_does_not_touch_follow_up_questions():
     assert not looks_like_kb_answer("")
 
 
-async def test_bypassed_answer_is_replaced_with_the_fallback(maker):
-    """⭐ 没调终结工具、却写出一段像知识库答案的东西 —— 拦下换成兜底话术。
+async def test_bypassed_answer_is_retrieved_by_the_existing_kb_path(maker, public_chunk):
+    """⭐ 没调终结工具、却写出一段像知识库答案的东西 —— 结构化回到直路。
 
     实测撞到过：追问「那不良品呢」时 Agent 拿上一轮留在历史里的答案编了一段，
     带着 [3][4] 标记，而页面上 0 条引用可点（见 guard.py 文件头）。
     """
-    from copilot.qa import NO_ANSWER
-
     bogus = "残次品入库有两种方式：1. 进入【仓库管理】点击入库单 [3]；2. 勾选残次品 [4]。"
     async with maker() as s:
-        chunks, answer = await drain("那不良品呢", _deps(s), scripted(bogus))
+        deps = _deps(s)
+        chunks, answer = await drain("那不良品呢", deps, scripted(bogus))
 
-    assert text_of(chunks) == NO_ANSWER
-    assert answer == NO_ANSWER
-    assert "残次品" not in text_of(chunks)
+    assert text_of(chunks) == KB_REPLY
+    assert answer == KB_REPLY
+    assert deps.used_tools == {"answer_kb"}
+
+
+async def test_no_tool_refusal_is_retried_through_answer_kb(maker, public_chunk):
+    """线上追问曾直接回兜底且 tools=[]；这时应让现有 RAG 做最终判断。"""
+    from copilot.qa import NO_ANSWER
+
+    async with maker() as s:
+        deps = _deps(s)
+        chunks, answer = await drain("那个要先审核吗？", deps, scripted(NO_ANSWER))
+
+    assert text_of(chunks) == KB_REPLY
+    assert answer == KB_REPLY
+    assert deps.used_tools == {"answer_kb"}
 
 
 async def test_history_strips_citation_marks_and_truncates(maker):
@@ -335,6 +347,20 @@ async def test_history_strips_citation_marks_and_truncates(maker):
     assert "[1]" not in kept and "[图2]" not in kept, "编号在新一轮里无效，抄过去会指错来源"
     assert len(kept) == HISTORY_ANSWER_LIMIT
     assert msgs[0].parts[0].content == "退货入库怎么操作", "用户那半边原样保留"
+
+
+async def test_truncated_history_never_invents_the_first_question(maker):
+    """窗口第一条不等于会话第一条；问最早内容时必须明确说不可见。"""
+    async with maker() as s:
+        chunks, answer = await drain(
+            "第一个问题我问的是什么？",
+            _deps(s, history_truncated=True),
+            scripted("你第一个问的是订单审核在哪里。"),
+        )
+
+    assert "无法确认" in text_of(chunks)
+    assert answer == text_of(chunks)
+    assert "订单审核" not in answer
 
 
 async def test_guard_does_not_fire_when_a_tool_did_run(maker):

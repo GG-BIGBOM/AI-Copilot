@@ -47,6 +47,9 @@ class AgentDeps:
     # 「单轮 + 简答档」，而那正是 M10 要消灭的双路差异
     llm: ChatLLM | None = None
     history: list[tuple[str, str]] = field(default_factory=list)
+    # True 表示更早的消息因 HISTORY_TURNS 上限被省略。模型必须知道这件事，
+    # 否则问「第一个问题是什么」时会把当前窗口第一条冒充整段会话第一条。
+    history_truncated: bool = False
     mode: str = DEFAULT_MODE
     # ⭐ 用户这一轮的**原话**。`answer_kb` 拿它去检索，而不是让模型自己写检索词。
     # M7 的准确率掉 12 个点，第一条成因就是「检索词漂移」——模型把

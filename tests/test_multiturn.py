@@ -29,7 +29,19 @@ from copilot.qa import small_talk_reply
 
 @pytest.mark.parametrize(
     "text",
-    ["你好", "你好！", "您好~", "在吗？", "hi", "HELLO", "  早上好  ", "谢谢", "再见"],
+    [
+        "你好",
+        "你好！",
+        "您好~",
+        "在",
+        "在吗？",
+        "hi",
+        "HELLO",
+        "  早上好  ",
+        "谢谢",
+        "再见",
+        "？",
+    ],
 )
 def test_small_talk_hit(text):
     assert small_talk_reply(text) is not None
@@ -460,8 +472,9 @@ async def test_small_talk_does_not_hijack_an_agent_conversation(
 
     conv_id = uuid.uuid4()
     async with maker() as s:
-        # `profile is not None` = 这条会话正在走 Agent（第一轮往往是空字典）
-        s.add(Conversation(id=conv_id, user_id=logged_in, title="出方案", profile={}))
+        # 第一轮往往还没记下字段，所以 profile 是空字典；标题里的明确意图词
+        # 才能把它和“白名单普通问答也走过 Agent”的空 profile 区分开。
+        s.add(Conversation(id=conv_id, user_id=logged_in, title="帮我出实施方案", profile={}))
         await s.commit()
 
     # `_draft` 是 M11 P1 加的第 5 个参数（那一轮的 request_trace 草稿）。

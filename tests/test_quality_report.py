@@ -183,7 +183,7 @@ async def test_agent_route_filter_excludes_direct_rows(seeded, capsys, maker, lo
 async def test_agent_no_tool_count_is_not_the_bypass_count(
     seeded, capsys, maker, logged_in
 ):
-    """tools 为空可能只是正常拒答；只有越线直答才算 bypass。"""
+    """tools 为空可能是拒答或允许的常识；只有伪造材料编号才算 bypass。"""
 
     await seeded(
         route="agent", answer_source="no_answer", no_answer=True, tools=[]
@@ -191,12 +191,26 @@ async def test_agent_no_tool_count_is_not_the_bypass_count(
     await seeded(
         route="agent", answer_source="general_knowledge", no_answer=False, tools=[]
     )
+    await seeded(route="agent", answer_source="kb", no_answer=False, tools=[])
 
     await _quality_report(7, route="agent", maker=maker, user_id=logged_in)
     out = capsys.readouterr().out
 
-    assert "其中 tools 为空       2" in out
+    assert "其中 tools 为空       3" in out
     assert "越过工具直答           1" in out
+
+
+async def test_user_cancellation_is_not_counted_as_service_error(
+    seeded, capsys, maker, logged_in
+):
+    await seeded(ok=False, error="CancelledError: user stopped generation")
+    await seeded(ok=False, error="RuntimeError: provider unavailable")
+
+    await _quality_report(7, maker=maker, user_id=logged_in)
+    out = capsys.readouterr().out
+
+    assert "用户主动中断           1" in out
+    assert "出错                   1" in out
 
 
 async def test_no_cost_is_printed_without_a_price_config(seeded, capsys, maker, logged_in):

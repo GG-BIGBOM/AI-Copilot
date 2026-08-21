@@ -1026,9 +1026,13 @@ async def _quality_report(
             r
             for r in rows
             if r.route == "agent" and not (r.tools or []) and not r.no_answer
-            and r.answer_source in (trace_mod.KB, trace_mod.GENERAL)
+            and r.answer_source == trace_mod.KB
         ]
-        errors = [r for r in rows if not r.ok]
+        interrupted = [
+            r for r in rows
+            if not r.ok and (r.error or "").startswith(("CancelledError:", "GeneratorExit:"))
+        ]
+        errors = [r for r in rows if not r.ok and r not in interrupted]
         color = typer.colors.RED if bypass else typer.colors.GREEN
         # ⭐ Agent 路上 `tools` 为空的轮次单独列一行（M13 P12 的灰度观察项）。
         # 它**不等于**违规：追问「你有哪些平台？」和寒暄都不该调工具。
@@ -1043,6 +1047,7 @@ async def _quality_report(
                 "   （追问 / 寒暄是正常的，不等于违规）"
             )
         typer.secho(f"  越过工具直答           {len(bypass)}", fg=color)
+        typer.echo(f"  用户主动中断           {len(interrupted)}   {_pct(len(interrupted), total)}")
         typer.echo(f"  出错                   {len(errors)}   {_pct(len(errors), total)}")
         if bypass:
             typer.echo("    （这几轮值得逐条看）")

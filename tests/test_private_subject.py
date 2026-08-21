@@ -448,6 +448,29 @@ async def test_has_private_chunks_is_the_hard_boundary(customer_docs):
         assert await has_private_chunks(s, owner_id) is True
 
 
+async def test_subject_without_relevant_private_hit_refuses_before_generation(customer_docs):
+    """公共默认规则不能被模型改写成某家公司的专属约定。"""
+    from chat_helpers import FakeLLM
+
+    from copilot.qa import NO_ANSWER, ask_stream
+
+    maker, owner_id, _tag = customer_docs
+    llm = FakeLLM("星辰电商默认按金额对账[1]。")
+    async with maker() as s:
+        streamed = await ask_stream(
+            s,
+            "星辰电商的发票怎么开？",
+            FakeEmbedder(),
+            AllBelowThreshold(),
+            llm,
+            user_id=owner_id,
+        )
+
+    answer = "".join(piece for kind, piece in streamed.stream if kind == "content")
+    assert answer == NO_ANSWER
+    assert llm.calls == [], "没有私有依据时不该让模型拿公共材料自由发挥"
+
+
 # ---------- P4：Agent 白名单 ----------
 
 

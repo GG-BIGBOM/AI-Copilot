@@ -49,15 +49,12 @@ logger = logging.getLogger(__name__)
 _IMG_RE = re.compile(r"\[图(\d+)\]")
 
 
-async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
-    """回答用户关于旺店通旗舰版 ERP 的问题：操作步骤、参数配置、异常排查、
-    功能限制、界面路径——**只要沾边就调它**。答案会直接呈现给用户，
-    你不需要、也不允许再复述或补充。
+async def answer_kb_for_deps(deps: AgentDeps) -> str:
+    """运行终结知识库工具的实际实现。
 
-    这个工具没有参数：它用的就是用户这一轮的原话。
+    主 Agent 正常通过 ``answer_kb`` 调用它；runner 的硬防线也会在模型漏调工具时
+    调用它。两条入口共用同一份实现，避免回退路径悄悄长成第二套 RAG。
     """
-    deps = ctx.deps
-
     # ⚠️ 一轮只允许一次终结答案。第二次调用会毁掉第一次的引用编号——
     # 那批 [1][2] 已经连着正文流给用户了，而 `citations` 只有一份
     if deps.final_answer is not None:
@@ -110,6 +107,16 @@ async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
     deps.private_hits = max(deps.private_hits, streamed.private_hits)
     deps.retrieved.append(streamed.context_text)
     return "已经把答案直接给用户了。不要复述、不要补充、不要总结，本轮到此结束。"
+
+
+async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
+    """回答用户关于旺店通旗舰版 ERP 的问题：操作步骤、参数配置、异常排查、
+    功能限制、界面路径——**只要沾边就调它**。答案会直接呈现给用户，
+    你不需要、也不允许再复述或补充。
+
+    这个工具没有参数：它用的就是用户这一轮的原话。
+    """
+    return await answer_kb_for_deps(ctx.deps)
 
 
 async def whoami(ctx: RunContext[AgentDeps]) -> str:

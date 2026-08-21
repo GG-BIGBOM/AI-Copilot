@@ -62,7 +62,7 @@ from copilot.agent.deps import AgentDeps
 from copilot.agent.guard import looks_like_kb_answer
 from copilot.api import stream
 from copilot.config import get_settings
-from copilot.qa import NO_ANSWER
+from copilot.qa import NO_ANSWER, asks_about_subject
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ _CHANNEL_SIZE = 256
 HISTORY_ANSWER_LIMIT = 400
 # 历史里要抹掉的引用与配图标记
 _MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
+_EARLIEST_HISTORY_RE = re.compile(r"(第一个|最开始|一开始).{0,8}(问题|问的|说的)")
 
 
 def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | ModelResponse]:
@@ -211,6 +212,41 @@ async def run_agent_stream(
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。
     if deps.final_answer is None and (text := "".join(drafted).strip()):
+        if deps.history_truncated and _EARLIEST_HISTORY_RE.search(deps.question):
+            # 当前窗口的第一条不等于整段会话第一条。让模型猜会制造一段看似确定的
+            # 假记忆；这里用结构化状态直接说明边界。
+            text = "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"
+
+        # ⭐ 模型漏调 `answer_kb` 时不要只会拒答。线上 20 组多轮验收里，
+        # 「那个要先审核吗」「再说详细点」等追问都在这里变成了无工具拒答。
+        # 对非方案流，把这类结果结构化地送回**现有的同一条直路**；不是让
+        # Agent 自己补写，也不是再造一套检索。
+        should_retrieve = not used_tools and not deps.profile.filled() and (
+            text == NO_ANSWER
+            or asks_about_subject(deps.question)
+            or looks_like_kb_answer(
+                text, operational_only=get_settings().allow_general_knowledge
+            )
+        )
+        if should_retrieve:
+            from copilot.agent.tools import answer_kb_for_deps
+
+            used_tools.add("answer_kb")
+            # 工具正常是边生成边 emit；这里是模型已经走完之后的安全回退，
+            # 先完整生成，再按「图片 → 正文」顺序补进同一条 UI 流。
+            deps.emit = None
+            await answer_kb_for_deps(deps)
+            if deps.images:
+                deps.images_sent = True
+                yield stream.data_part("images", {"images": deps.images}), so_far()
+            replacement = deps.final_answer or NO_ANSWER
+            tid = stream.new_id("txt")
+            yield stream.text_start(tid), so_far()
+            answer.append(replacement)
+            yield stream.text_delta(tid, replacement), so_far()
+            yield stream.text_end(tid), so_far()
+            return
+
         # ⭐ **硬防线**：这一轮**一个工具都没调**，却写出了一段像知识库答案的
         # 东西——那只可能是编的、或者是从上一轮的历史里抄的
         # （见 guard.py 文件头的实测）。换成兜底话术：宁可什么都不说，

@@ -68,7 +68,7 @@ _CITE_MARK_RE = re.compile(r"\[\d{1,2}\]")
 # ─────────────────────────────────────────────────────────
 
 _GREETING = {
-    "你好", "您好", "你好呀", "你好啊", "哈喽", "哈啰", "嗨", "在吗", "在么", "在不在",
+    "你好", "您好", "你好呀", "你好啊", "哈喽", "哈啰", "嗨", "在", "在吗", "在么", "在不在",
     "早上好", "中午好", "下午好", "晚上好", "早安", "hi", "hello", "hey", "yo",
 }
 _THANKS = {
@@ -76,6 +76,7 @@ _THANKS = {
     "thanks", "thank you", "thx",
 }
 _BYE = {"再见", "拜拜", "回见", "bye", "goodbye", "88"}
+_UNCLEAR = {"?", "？"}
 _CAPABILITY = {
     "你是谁", "你叫什么", "你是什么", "你能做什么", "你能干什么", "你能干嘛", "你会什么",
     "你会做什么", "有什么功能", "怎么用", "如何使用", "使用说明", "帮助", "help",
@@ -105,6 +106,7 @@ ERP 里一个编出来的配置步骤，可能让客户的订单卡住。那种�
 
 _THANKS_REPLY = "不客气。还有别的问题随时问。"
 _BYE_REPLY = "再见，需要的时候再来找我。"
+_UNCLEAR_REPLY = "我在。请直接告诉我你想了解的旺店通功能或遇到的问题。"
 
 # 去掉首尾空白和句末的标点再比对。「你好！」「你好~」都算招呼
 _TRAILING_PUNCT = "?？.。!！~～,，;；、 \t\n"
@@ -116,6 +118,7 @@ _SMALL_TALK_TABLE: tuple[tuple[str, set[str], str], ...] = (
     ("capability", _CAPABILITY, _CAPABILITY_REPLY),
     ("thanks", _THANKS, _THANKS_REPLY),
     ("bye", _BYE, _BYE_REPLY),
+    ("unclear", _UNCLEAR, _UNCLEAR_REPLY),
 )
 
 
@@ -126,7 +129,10 @@ def small_talk_kind(question: str) -> str | None:
     让评测量**真代码**，而不是它自己抄一份判定逻辑。抄一份的话，
     改了这边忘了改那边，评测会一直报告一个早就不存在的系统。
     """
-    q = question.strip().strip(_TRAILING_PUNCT).lower()
+    raw = question.strip().lower()
+    if raw in _UNCLEAR:
+        return "unclear"
+    q = raw.strip(_TRAILING_PUNCT)
     if not q:
         return None
     for kind, table, _ in _SMALL_TALK_TABLE:
@@ -593,9 +599,15 @@ async def ask_stream(
     context = result.build_context()
 
     # M11 P3 第 3 步。判据抽在 `needs_subject_guard` 里，评测走的是同一个函数
-    guard = await needs_subject_guard(session, question, user_id)
+    # 追问可能只写「那对账呢」，主体只存在于改写后的独立问题里。
+    # 用原句判定会把这类私有约定追问漏回公共知识库。
+    guard = await needs_subject_guard(session, search_query, user_id)
     if guard:
         logger.info("本轮追加主体约束：q=%r", question[:60])
+        # 没有任何当前用户的私有材料时，公共默认规则绝不能冒充这家公司的约定。
+        # 这是能由数据结构直接保证的边界，不交给 Prompt 猜。
+        if result.private_count == 0:
+            return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     messages = [
         {"role": "system", "content": system_prompt_for(mode, subject_guard=guard)},

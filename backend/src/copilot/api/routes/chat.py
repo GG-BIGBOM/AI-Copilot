@@ -32,7 +32,7 @@ from collections.abc import AsyncIterator
 
 import anyio
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import FileResponse, StreamingResponse
@@ -320,7 +320,7 @@ async def _chat_stream(
             draft.tokens = tokens
             draft.answer_chars = len(answer)
             draft.answer = answer  # 只为判 answer_source，不落库（见 TraceDraft.answer）
-            draft.no_answer = not shown
+            draft.no_answer = is_no_answer(answer)
             draft.message_id = writer.row.id if writer.row is not None else None
 
     except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
@@ -379,6 +379,12 @@ async def _agent_stream(
             # 取的是最老的 20 条**——会话一长，带进上下文的就永远是开头那几轮，
             # 而「接着聊」要的恰恰是最近几轮。顺带也统一了截断口径（HISTORY_TURNS）。
             history = await _recent_turns(session, conv.id)
+            history_total = await session.scalar(
+                select(func.count(Message.id)).where(
+                    Message.conversation_id == conv.id,
+                    Message.role.in_(("user", "assistant")),
+                )
+            )
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -397,6 +403,7 @@ async def _agent_stream(
                 # 而消灭这种双路差异正是 M10 的目的
                 llm=providers.get_llm_for(mode),
                 history=history,
+                history_truncated=(history_total or 0) > len(history),
                 mode=mode,
                 profile=Requirement(**(conv.profile or {})),
                 checklist=Checklist(**conv.checklist) if conv.checklist else None,
@@ -468,7 +475,7 @@ async def _agent_stream(
             draft.tokens = tokens
             draft.answer = answer
             draft.answer_chars = len(answer)
-            draft.no_answer = not shown
+            draft.no_answer = is_no_answer(answer)
             draft.message_id = writer.row.id if writer.row is not None else None
 
     except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
@@ -654,6 +661,22 @@ async def _use_agent(session: AsyncSession, user, question: str, client_id: str 
     return bool(conv and conv.user_id == user.id and conv.profile is not None)
 
 
+async def _active_plan_flow(
+    session: AsyncSession, user_id: uuid.UUID, client_id: str | None
+) -> bool:
+    """当前会话是否真的在收集实施需求，而不只是恰好走过 Agent。"""
+    if not client_id:
+        return False
+    try:
+        cid = uuid.UUID(client_id)
+    except ValueError:
+        return False
+    conv = await session.get(Conversation, cid)
+    if conv is None or conv.user_id != user_id or conv.profile is None:
+        return False
+    return bool(conv.profile) or any(trigger in conv.title for trigger in AGENT_TRIGGERS)
+
+
 @router.post("/chat")
 async def chat(
     body: ChatRequest, request: Request, user: CurrentUser, session: SessionDep
@@ -676,10 +699,11 @@ async def chat(
         )
 
     use_agent = await _use_agent(session, user, question, body.id)
+    plan_flow = await _active_plan_flow(session, user.id, body.id)
     # ⭐ 寒暄短路（M10 P2）。**顺序不能反**：已经在多轮流程里的会话不走这条。
     # Agent 问完「要对接哪些平台？」，用户回一句「好的」——那个「好的」在
     # 寒暄表里，短路掉就变成「不客气，还有别的问题随时问」，流程当场断掉。
-    if not use_agent and small_talk_reply(question) is not None:
+    if not plan_flow and small_talk_reply(question) is not None:
         producer, route = _canned_stream, "canned"
     elif use_agent:
         producer, route = _agent_stream, "agent"
