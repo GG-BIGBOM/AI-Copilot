@@ -20,7 +20,9 @@ M7 让它拿着原始材料自己写答案，41 题上准确率 87.8% / 幻觉�
 
 from __future__ import annotations
 
-from pydantic_ai import Agent, UsageLimits
+import re
+
+from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
 
 from copilot.agent.deps import AgentDeps
 from copilot.agent.model import build_model
@@ -94,6 +96,18 @@ INSTRUCTIONS = """你是旺店通旗舰版 ERP 的实施顾问助手。
 - 直接说事，不要「根据参考材料」之类的开场白。
 - 不要自己拼下载链接，导出成功后页面上会有下载按钮。"""
 
+_CONTINUE_ONLY_RE = re.compile(r"^(?:好(?:的)?[，,。 ]*)?(?:继续|接着来)[。！! ]*$")
+
+
+def plan_turn_requires_tool(deps: AgentDeps, tool_calls: int) -> bool:
+    """已开始收集后，含新信息的回复不能只在文字里假装“已记录”。"""
+    return (
+        deps.plan_flow
+        and bool(deps.profile.filled())
+        and tool_calls == 0
+        and not _CONTINUE_ONLY_RE.fullmatch(deps.question.strip())
+    )
+
 # 主 Agent 的工具。**`search_kb` 不在这里**——那是 M7 留下的「材料级」工具，
 # 一旦挂上去，模型就又有了拿原始材料自由发挥的路子，M10 等于白做。
 # 函数和它的隔离测试暂时留着，跟 `_chat_stream` 一起进 P3 的删除清单。
@@ -115,7 +129,7 @@ def build_agent(model=None) -> Agent[AgentDeps, str]:
         model: 只给测试用——传一个 `FunctionModel` 就能在不联网、不花钱的
             情况下把「模型决定调哪个工具」这件事写死，从而测 runner 的翻译逻辑。
     """
-    return Agent(
+    agent = Agent(
         model or build_model(),
         deps_type=AgentDeps,
         output_type=str,
@@ -126,6 +140,19 @@ def build_agent(model=None) -> Agent[AgentDeps, str]:
         retries=1,
         model_settings={"temperature": 0.1},
     )
+
+    @agent.output_validator
+    def require_tool_for_active_plan(ctx: RunContext[AgentDeps], output: str) -> str:
+        if plan_turn_requires_tool(ctx.deps, ctx.usage.tool_calls):
+            raise ModelRetry(
+                "当前会话正在收集实施需求，但你没有调用任何工具。"
+                "如果用户提供了需求值，必须调用 save_requirement；"
+                "如果用户在问产品知识，必须调用 answer_kb；"
+                "不要只用文字声称“已记录”。"
+            )
+        return output
+
+    return agent
 
 
 def usage_limits(*, plan_flow: bool = False) -> UsageLimits:

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -54,8 +55,14 @@ def scripted(*turns) -> FunctionModel:
     return FunctionModel(stream_function=f)
 
 
-def call(name: str) -> dict[int, DeltaToolCall]:
-    return {0: DeltaToolCall(name=name, json_args="{}", tool_call_id=f"call_{name}")}
+def call(name: str, **args) -> dict[int, DeltaToolCall]:
+    return {
+        0: DeltaToolCall(
+            name=name,
+            json_args=json.dumps(args, ensure_ascii=False),
+            tool_call_id=f"call_{name}",
+        )
+    }
 
 
 def _deps(session, **kw) -> AgentDeps:
@@ -286,6 +293,43 @@ async def test_runner_uses_plan_limits_before_profile_is_filled(maker, monkeypat
         )
 
     assert seen == [True]
+
+
+async def test_active_plan_retries_text_only_fake_recording(maker):
+    """模型说“已记录”却没调工具时必须重试，否则刷新后字段会凭空消失。"""
+    from copilot.agent.checklist import Requirement
+
+    async with maker() as s:
+        deps = _deps(
+            s,
+            plan_flow=True,
+            profile=Requirement(platforms="淘宝、拼多多"),
+        )
+        _chunks, answer = await drain(
+            "5 个店",
+            deps,
+            scripted(
+                "好的，已记录。请问仓库模式？",
+                call("save_requirement", field="shop_count", value="5 个店"),
+                "好的，请问仓库模式？",
+            ),
+        )
+
+    assert deps.profile.shop_count == "5 个店"
+    assert "save_requirement" in deps.used_tools
+    assert "仓库模式" in answer
+
+
+def test_pure_continue_may_ask_the_next_plan_question_without_a_tool():
+    """“继续”没有新字段，允许直接追问，避免把 G6 一起锁死。"""
+    from copilot.agent.agent import plan_turn_requires_tool
+    from copilot.agent.checklist import Requirement
+
+    deps = object.__new__(AgentDeps)
+    deps.plan_flow = True
+    deps.profile = Requirement(platforms="淘宝")
+    deps.question = "好，继续。"
+    assert plan_turn_requires_tool(deps, tool_calls=0) is False
 
 
 # ---------- 8：每个注册的工具都要有中文标签 ----------
