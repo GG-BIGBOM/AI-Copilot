@@ -1,0 +1,1212 @@
+{
+  "tag": "p13-baseline-private-agent-20260822",
+  "ran_at": "2026-08-22T04:51:25+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "agent",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "prompt_sha": "ae2fdb78",
+    "chunk_count": 4568
+  },
+  "judge_model": "moonshot-v1-128k",
+  "reliable": true,
+  "metrics": {
+    "题数": 19,
+    "有效题数": 19,
+    "判分失效": 0,
+    "判对": 2,
+    "判错": 17,
+    "准确率": 10.5,
+    "判分失效率": 0.0,
+    "检索命中率": 0.0,
+    "引用正确率": 0.0,
+    "幻觉率": 83.3,
+    "假阴性率": 46.2,
+    "无据陈述率": 33.3,
+    "可信": true,
+    "分类准确率": {
+      "fact": 8.3,
+      "probe": 0.0,
+      "partial": 0.0,
+      "no_answer": 16.7
+    }
+  },
+  "cases": [
+    {
+      "id": "priv-fact-zhongtong-cap",
+      "kind": "fact",
+      "q": "星辰电商给中通配的日单量上限是多少？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.3055
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 分销常见问题",
+          "heading": "申请可调整的功能上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/zi7hxqgg3o90c7b8",
+          "score": 0.1038
+        },
+        {
+          "n": 3,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.0994
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "106、 Q：子订单补发货发货次数超过上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.0799
+        },
+        {
+          "n": 5,
+          "title": "APP · 我的订单",
+          "heading": "二、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/app/xs2hp358sh0s6d8g",
+          "score": 0.0307
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "📒常见问题库 · 分销常见问题",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "APP · 我的订单"
+      ],
+      "top_score": 0.3055,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "800"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 1714
+    },
+    {
+      "id": "priv-fact-warehouse-scope",
+      "kind": "fact",
+      "q": "星辰电商的华南备货仓负责发哪些省份？",
+      "answer": "知识库里没有“星辰电商的华南备货仓”这一具体配置，无法直接回答它负责发哪些省份。\n\n不过，关于“华南仓”的仓库编码和地址，材料里有以下信息可供参考：\n\n- 唯品会华南仓（仓库编号 `VIP_NH`），位于肇庆大旺，邮寄地址为：广东省肇庆市大旺高新区亚铝大街以南北江大道 [1]。\n- 华南客退整饰仓（仓库编号 `VIP_KTNH`），位于肇庆大旺，邮寄地址为：广东省肇庆市其他区大旺高新区唯品会物流中心16号库1-8号门 [2]。\n\n至于“华南备货仓”具体负责哪些省份，以及“星辰电商”这家公司的仓库覆盖范围，材料中没有提及。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.2323
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.1432
+        },
+        {
+          "n": 3,
+          "title": "设置 · 就近仓库",
+          "heading": "3、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/egbpgt",
+          "score": 0.0075
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "设置 · 就近仓库"
+      ],
+      "top_score": 0.2323,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "广西",
+        "海南"
+      ],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": false,
+      "unsupported": "星辰电商的华南备货仓负责发哪些省份",
+      "reason": "材料中没有提及星辰电商的华南备货仓及其负责的省份",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['广西', '海南']",
+      "context_chars": 1049
+    },
+    {
+      "id": "priv-negation-combo-split",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单需要拆分吗？",
+      "answer": "星辰电商的组合装订单是否需要拆分，取决于订单的实际情况和你的业务需求。知识库中没有针对“星辰电商”这一特定客户的专属约定，以下按公共知识库的通用规则说明：\n\n**1. 什么情况下组合装订单会被拆分**\n\n- **按指定组合装拆分**：订单包含设置的组合装就会拆分。拆分条件可配置为“1个1单”（按组合装数量拆分，一个组合装一个订单）或“1种1单”（按组合装种类拆分，一种组合装一个订单）。[1]\n- **按组合装指定仓库拆分**：当需要为整个组合装设置仓库并拆分时使用，需设置组合装对应的仓库。[2]\n- **组合装大件拆分**：当订单中有拆分属性为大件拆分的组合装时，订单会被拆分。独立大件必须单独发，普通大件可与非大件一起发；包含单品大件时，组合装大件全部拆分出去。[3]\n- **按货品标签拆分**：按照设置的单品、组合装标签进行拆分订单。若整单货品都是标签货品，则不会拆分。[4]\n\n**2. 什么情况下组合装订单不会被拆分**\n\n合装的打印方式是【组合装】或【组合装以及明细】时，系统默认不做拆分处理。除了上述【按指定组合装拆分】、【按组合装指定仓库拆分】、【按重量拆分】会对这两种打印方式按整个组合装为单位进行拆分外，其他拆分均不会拆分此类型的组合装。[2]\n\n**3. 需要人工拆分发货的场景**\n\n若原始单需要拆分发货，需先在【设置-基本设置-店铺设置】将“拆单发货”方式配置为“数量拆单发货”，且组合装打印内容需设置为“组合装”或“组合装以及明细”。配置完成后，可在【销售-订单审核】右键选择“订单拆分-拆分”自主拆分原始单。[5]\n\n---\n\n**结论**：星辰电商的组合装订单是否需要拆分，取决于订单是否触发了上述拆分条件（指定组合装、指定仓库、大件、标签等），以及你是否需要人工拆分发货。如果订单不满足任何拆分条件，组合装订单默认不拆分。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9828
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品指定仓库拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9776
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "组合装大件拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9747
+        },
+        {
+          "n": 4,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品标签拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9671
+        },
+        {
+          "n": 5,
+          "title": "销售 · 拆单发货使用说明",
+          "heading": "支持拆单发货的平台",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/xqfkpb",
+          "score": 0.9561
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "销售 · 拆单发货使用说明"
+      ],
+      "top_score": 0.9828,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确总结了参考材料中关于组合装订单是否需要拆分的规则，并明确指出了不同情况下的处理方式。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1526
+    },
+    {
+      "id": "priv-multi-reconciliation",
+      "kind": "fact",
+      "q": "星辰电商的对账以什么为准？多大的差异需要人工复核？",
+      "answer": "星辰电商的对账以**应收金额 = 收款金额 + 退款金额**（售中场景）或**应收金额 = 收款金额**（售后场景）为核对基准，差异金额即为需要人工复核的部分。具体如下：\n\n1. **售中（已发货未确认收货）**：需核对应收金额是否等于收款金额+退款金额。例如账单应收 100，售中退款 20，确认收货后商家收到 80，则 100 = 80 + 20 才平账。[1]\n2. **售后（已确认收货）**：只需核对应收金额是否等于收款金额，不需要计算退款金额。例如应收 100，收款 100，售后退款 20，则只需核对 100 = 100。[1]\n3. **差异处理**：当存在差异时（如示例中金额差异 -5.0400），平台对账状态显示为**部分对账**，需人工复核差异金额；退换单结算后，状态变为**对账成功**，金额差异消失。[1]\n\n关于**多大的差异需要人工复核**，知识库中没有给出具体的金额阈值或比例标准。知识库仅提到「按数量对账的店铺」可配置对账方式，但未说明差异金额的复核触发条件。[5] 建议您根据实际业务设置复核阈值，或咨询旺店通官方支持获取具体配置参数。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.1927
+        },
+        {
+          "n": 2,
+          "title": "账款 · 平台对账",
+          "heading": "一．平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0515
+        },
+        {
+          "n": 3,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.1、导入平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0349
+        },
+        {
+          "n": 4,
+          "title": "账款 · 抓取京东平台账单",
+          "heading": "一 业务场景",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/uua33p",
+          "score": 0.0261
+        },
+        {
+          "n": 5,
+          "title": "设置 · 结算",
+          "heading": "7. 【按数量对账的店铺】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg6g768p4qheeuql",
+          "score": 0.0209
+        }
+      ],
+      "retrieved_titles": [
+        "账款 · 平台对账",
+        "账款 · 平台对账",
+        "账款 · 平台对账",
+        "账款 · 抓取京东平台账单",
+        "设置 · 结算"
+      ],
+      "top_score": 0.1927,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "平台结算单",
+        "500"
+      ],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地总结了对账基准和差异处理流程，且与材料一致。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['平台结算单', '500']",
+      "context_chars": 1410
+    },
+    {
+      "id": "priv-noanswer-not-in-fixture",
+      "kind": "no_answer",
+      "q": "星辰电商的退货入库要走哪几个审核节点？",
+      "answer": "星辰电商的退货入库流程，按分步入库方式，审核节点如下：\n\n1. **入库开单**：在【仓储—入库管理—销售退货—入库开单】中引用【已审核】状态的退货单，输入入库数量等信息后提交入库单。[1]\n2. **入库审核**：在【销退入库管理】中审核入库单，审核后即为入库完成。[1]\n\n[图1]\n\n---\n\n补充说明：\n\n- 若启用了【销售退货入库需要质检】配置，则入库后还需经过质检流程，将已入库货品分货，并把残次品移位到残次品货位。[4]\n- 若启用了【快速退货入库增加入库必须要输入【生产日期】的配置】，则快速退货入库时必须填写生产日期。[5]\n\n关于换货流程的审核节点，材料中未提及，知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 创建退换单以及销退入库流程",
+          "heading": "二、销退入库流程 › 1、退货流程-分步入库",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ib91lq",
+          "score": 0.6429
+        },
+        {
+          "n": 2,
+          "title": "销售 · 创建退换单以及销退入库流程",
+          "heading": "二、销退入库流程 › 4、换货流程",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ib91lq",
+          "score": 0.3598
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 销退质检",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tq5z5p",
+          "score": 0.3177
+        },
+        {
+          "n": 4,
+          "title": "设置 · 出入库",
+          "heading": "12. 【销售退货入库需要质检】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.2985
+        },
+        {
+          "n": 5,
+          "title": "设置 · 出入库",
+          "heading": "21、【快速退货入库增加入库必须要输入【生产日期】的配置】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.1831
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 创建退换单以及销退入库流程",
+        "销售 · 创建退换单以及销退入库流程",
+        "仓储 · 销退质检",
+        "设置 · 出入库",
+        "设置 · 出入库"
+      ],
+      "top_score": 0.6429,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地总结了退货入库的审核节点，并提供了补充说明，所有信息均能在材料中找到依据。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 1109
+    },
+    {
+      "id": "priv-probe-inventory-line",
+      "kind": "probe",
+      "q": "星辰的 SKU 库存低到多少会在采购建议里飘红？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 同步设置",
+          "heading": "9.【平台货品库存同步预警值】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg3k7xqwrdlrhipi",
+          "score": 0.0293
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 库存同步常见报错及解决方案",
+          "heading": "8、Q：库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ts8by7gundrlk7zr",
+          "score": 0.0207
+        },
+        {
+          "n": 3,
+          "title": "销售 · 库存同步常见报错及解决方案",
+          "heading": "8、Q:库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/fo7xg3",
+          "score": 0.0207
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 以货找单",
+          "heading": "五、版本优化 › 1、【仓储】【服装快进快出易用性优化】",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/vfsiclyv73qtn6uo",
+          "score": 0.0157
+        },
+        {
+          "n": 5,
+          "title": "销售 · 订单管理/订单明细界面字段说明",
+          "heading": "三、Tab页货品列表颜色说明",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/olyh60b7cdpehurp",
+          "score": 0.0136
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 同步设置",
+        "📒常见问题库 · 库存同步常见报错及解决方案",
+        "销售 · 库存同步常见报错及解决方案",
+        "仓储 · 以货找单",
+        "销售 · 订单管理/订单明细界面字段说明"
+      ],
+      "top_score": 0.0293,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "20"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 1352
+    },
+    {
+      "id": "priv-cross-zhongtong-b",
+      "kind": "fact",
+      "q": "远岸家居给中通配的日单量上限是多少？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.0811
+        },
+        {
+          "n": 2,
+          "title": "📒常见问题库 · 分销常见问题",
+          "heading": "申请可调整的功能上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/zi7hxqgg3o90c7b8",
+          "score": 0.0352
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "106、 Q：子订单补发货发货次数超过上限",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.0241
+        },
+        {
+          "n": 4,
+          "title": "设置 · 出入库",
+          "heading": "1.【采购入库数量不允许超过采购量】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/rcoyw5co57bbvmmr",
+          "score": 0.0148
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "📒常见问题库 · 分销常见问题",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 出入库"
+      ],
+      "top_score": 0.0811,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "1500"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 935
+    },
+    {
+      "id": "priv-cross-inventory-b",
+      "kind": "fact",
+      "q": "远岸家居的安全库存线是多少件？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": null,
+      "missing_facts": [
+        "50"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 0
+    },
+    {
+      "id": "priv-cross-stocktake-b",
+      "kind": "fact",
+      "q": "远岸家居每月几号做动碰盘点？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "仓储 · 盘点流程",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.0076
+        }
+      ],
+      "retrieved_titles": [
+        "仓储 · 盘点流程"
+      ],
+      "top_score": 0.0076,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "25"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 89
+    },
+    {
+      "id": "priv-cross-waybill-a",
+      "kind": "fact",
+      "q": "星辰电商的面单模板用的是几联单？尺寸是多少？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 得物品牌直发电子面单模板设置",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/zenhk8o7640uv31q",
+          "score": 0.0696
+        },
+        {
+          "n": 2,
+          "title": "设置 · 得物品牌直发电子面单对接步骤",
+          "heading": "二、商家指定物流",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/btb6gps08iu2246k",
+          "score": 0.0612
+        },
+        {
+          "n": 3,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "二、模板设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.0567
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "A3.8：设置开机自启动组件，如开启后未自动启动，按以下流程排查 › 七、打印效果调整 › Q7：物流单logo打印开启/关闭如何设置",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.0418
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 打印相关问题",
+          "heading": "一、模板选择及设置 › Q3：打印没有模板，如何排查？",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/wy7m9epi424gdc4p",
+          "score": 0.0326
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 得物品牌直发电子面单模板设置",
+        "设置 · 得物品牌直发电子面单对接步骤",
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "📒常见问题库 · 打印相关问题",
+        "📒常见问题库 · 打印相关问题"
+      ],
+      "top_score": 0.0696,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "三联",
+        "76"
+      ],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里有答案，却答了「暂无此内容」（假阴性）",
+      "context_chars": 2244
+    },
+    {
+      "id": "priv-cross-warehouse-b",
+      "kind": "fact",
+      "q": "远岸家居的西南备货仓负责发哪些省份？",
+      "answer": "知识库里没有“远岸家居”这家客户的信息，也没有“西南备货仓”这个仓库的省份发货范围说明。\n\n不过，材料里有一张**唯品会仓库编码表**，其中“西南仓”对应的是 **VIP_CD（成都简阳）**，邮寄地址为：四川省简阳市简新大道南路66号法派工业园 [1]。\n\n如果你问的是唯品会西南仓的发货范围，材料里没有写明它具体覆盖哪些省份，只有仓库编码和地址信息 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.1162
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.3 仓库维护 › 唯品会仓库编码",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.0156
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册"
+      ],
+      "top_score": 0.1162,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "重庆",
+        "云南",
+        "贵州"
+      ],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地指出了知识库中没有远岸家居和西南备货仓的信息，并且没有对唯品会西南仓的发货范围做出无依据的推断。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['重庆', '云南', '贵州']",
+      "context_chars": 764
+    },
+    {
+      "id": "priv-conflict-combo-split-a",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单按什么条件拆分？",
+      "answer": "星辰电商的组合装订单，按「按指定组合装拆分」条件拆分：订单包含设置的组合装就会拆分 [1]。\n\n具体规则如下：\n\n1. **组合装打印方式限制**：组合装的打印方式只能为「组合装」或者「组合装以及明细」 [1]。\n2. **拆分条件配置**（二选一）[1]：\n   - **1 个 1 单**：按照组合装数量拆分，一个组合装一个订单。\n   - **1 种 1 单**：按照组合装种类拆分，一种组合装一个订单。\n\n> [图1]\n\n另外，关于赠品跟随规则（1.5.3.1 版本）：拆分出来的都满足，则赠品跟随拆分订单；拆分出来的部分满足，跟随部分赠品 [4][5]。主赠品关系需要记录所有赠品策略条件，拆分主品需要满足策略内所有条件才带出相应赠品 [5]。\n\n> 注：以上为「按指定组合装拆分」的通用规则。若星辰电商另有专属约定（如自定义拆分条件），材料中未提及，需以贵司实际配置为准。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按指定组合装拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9882
+        },
+        {
+          "n": 2,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按货品指定仓库拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9804
+        },
+        {
+          "n": 3,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "按体积拆分",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.9783
+        },
+        {
+          "n": 4,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.9732
+        },
+        {
+          "n": 5,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.9673
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 流程中拆分条件说明",
+        "设置 · 递交后处理流程解析",
+        "设置 · 递交后处理流程解析"
+      ],
+      "top_score": 0.9882,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "不"
+      ],
+      "banned_hits": [
+        "按指定组合装拆分"
+      ],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "出现了禁止内容：['按指定组合装拆分']",
+      "reason": "答案正确地总结了参考材料中关于星辰电商组合装订单拆分的条件和规则。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['不']",
+      "context_chars": 2210
+    },
+    {
+      "id": "priv-conflict-logistics-switch-a",
+      "kind": "fact",
+      "q": "星辰电商的中通到了日单量上限之后，系统会自动切到韵达吗？",
+      "answer": "不会自动切换。中通达到日单量上限后，系统会判定该物流为“无可选物流”，订单会被拦截至订单审核页面手动操作，此时订单对应的物流公司为“空”，需要人工处理，不会自动切到韵达。[1]\n\n具体拦截逻辑如下：\n\n1. **审核前（订单流程图）**：选中的物流达到该物流类型的单量上限，则判定为无可选物流。无可选物流则拦截至订单审核页面手动操作，该类订单对应的物流公司为“空”。需要有拦截提示：订单审核失败，具体失败原因需要去流程图执行日志里面查看。[1]\n2. **审核阶段（订单审核页面）**：更换物流的时候做校验（审核阶段不需要做校验），订单审核页面手动切换的物流（不支持强制修改），如果达到上限则弹窗提示：所选物流类型的今日单量已达上限，请至“物流单量限制”页面调整该物流类型的单量后重试。[1]\n\n**补充说明：**\n- 物流单量限制的配置路径为：设置-策略设置-物流策略-物流类型单量限制。[2]\n- 当前剩余单量 = 每日最多消耗单量 - 当日物流单消耗量，每日0点刷新成“每日最多消耗单量”。[1][2]\n- 每个物流类型只能有一条策略，已启用策略的物流类型不会在新建中的物流类型中展示。[1][2]\n- 如需继续使用中通发货，需在“物流单量限制”页面调整该物流类型的单量后重试。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.154
+        },
+        {
+          "n": 2,
+          "title": "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/sk2ygb0evumz6t5g",
+          "score": 0.1042
+        },
+        {
+          "n": 3,
+          "title": "设置 · 递交后处理流程解析",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nhrd6oszng6uhtza",
+          "score": 0.0278
+        },
+        {
+          "n": 4,
+          "title": "销售 · 订单审核界面字段说明",
+          "heading": "七、更新优化 › 1.订单包装修改后支持自动刷新重量、标签（1.5.5.6版本）",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ixbgdo2qcoailtl8",
+          "score": 0.0171
+        },
+        {
+          "n": 5,
+          "title": "设置 · 淘宝小时达对接步骤",
+          "heading": "三、商家自配送--普通快递模式 › 2、创建门店下载",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/uskhktb5xft62ytg",
+          "score": 0.0074
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "设置 · 【物流单量限制】当前剩余单量支持每天刷新",
+        "设置 · 递交后处理流程解析",
+        "销售 · 订单审核界面字段说明",
+        "设置 · 淘宝小时达对接步骤"
+      ],
+      "top_score": 0.154,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "手工"
+      ],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地引用了材料中的信息，说明了中通达到日单量上限后系统不会自动切换到韵达，而是需要人工在订单审核页面处理。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['手工']",
+      "context_chars": 2470
+    },
+    {
+      "id": "priv-conflict-reconcile-b",
+      "kind": "fact",
+      "q": "远岸家居的对账以什么为准？差异多少钱要人工复核？",
+      "answer": "远岸家居的对账以**应收金额 = 收款金额 + 退款金额**为准（售中场景）[1]。差异金额需要人工复核，具体阈值知识库暂无此内容。\n\n说明：知识库中未提及远岸家居这家客户的具体对账差异复核阈值，也未说明“差异多少钱要人工复核”的通用规则。上述对账原则来自公共知识库的售中对账示例[1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.3、售中，即已发货未确认收货订单的情况下，平台对账",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.1195
+        },
+        {
+          "n": 2,
+          "title": "设置 · 结算",
+          "heading": "7. 【按数量对账的店铺】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg6g768p4qheeuql",
+          "score": 0.0181
+        },
+        {
+          "n": 3,
+          "title": "账款 · 平台对账",
+          "heading": "三、对账示例 › 3.1、导入平台账单",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/eho1xse4lr504ll2",
+          "score": 0.0055
+        }
+      ],
+      "retrieved_titles": [
+        "账款 · 平台对账",
+        "设置 · 结算",
+        "账款 · 平台对账"
+      ],
+      "top_score": 0.1195,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": false,
+      "cited_source": false,
+      "missing_facts": [
+        "ERP 发货单",
+        "200"
+      ],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确引用了材料中的对账原则，并且指出了知识库中没有提及具体的人工复核阈值。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "漏掉关键事实：['ERP 发货单', '200']",
+      "context_chars": 1139
+    },
+    {
+      "id": "priv-noanswer-refund-window-b",
+      "kind": "no_answer",
+      "q": "远岸家居约定的售后退款时效是几天？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "销售 · 退换管理页面说明",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/rgylfuo6va997ms0",
+          "score": 0.0213
+        },
+        {
+          "n": 2,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.10微盟",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0137
+        },
+        {
+          "n": 3,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.5有赞",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0113
+        },
+        {
+          "n": 4,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.4速卖通",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0085
+        },
+        {
+          "n": 5,
+          "title": "平台事项 · 📢订购服务+授权返款的详细操作流程",
+          "heading": "2 .订购链接+扣/返 款说明 › 2.11微信小商店",
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/xf69vx1igzgteppf",
+          "score": 0.0067
+        }
+      ],
+      "retrieved_titles": [
+        "销售 · 退换管理页面说明",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程",
+        "平台事项 · 📢订购服务+授权返款的详细操作流程"
+      ],
+      "top_score": 0.0213,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1616
+    },
+    {
+      "id": "priv-noanswer-sms-vendor-a",
+      "kind": "no_answer",
+      "q": "星辰电商用的是哪家短信服务商？",
+      "answer": "知识库里没有关于“星辰电商用的是哪家短信服务商”的内容。材料中只提到“部分平台因加密导致无法发送短信，目前只有淘宝支持发送短信”[5]，并未涉及具体短信服务商的信息。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 6、注意",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.0251
+        },
+        {
+          "n": 2,
+          "title": "设置 · 短信策略",
+          "heading": "前言",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.0194
+        },
+        {
+          "n": 3,
+          "title": "事务 · 企业公告",
+          "heading": "3、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shiwu/ot63zf",
+          "score": 0.0113
+        },
+        {
+          "n": 4,
+          "title": "设置 · 短信策略",
+          "heading": "一、设置步骤 › 5、短信相关功能",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.0097
+        },
+        {
+          "n": 5,
+          "title": "CRM · 营销管理/短信发送查询",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/crm/hi6uptq27ivsg082",
+          "score": 0.0059
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 短信策略",
+        "设置 · 短信策略",
+        "事务 · 企业公告",
+        "设置 · 短信策略",
+        "CRM · 营销管理/短信发送查询"
+      ],
+      "top_score": 0.0251,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地指出了材料中没有提及星辰电商使用的短信服务商信息。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 1508
+    },
+    {
+      "id": "priv-noanswer-promo-plan-a",
+      "kind": "no_answer",
+      "q": "星辰电商的大促期间订单审核策略是怎么约定的？",
+      "answer": "知识库里没有“星辰电商”这家公司的大促订单审核策略约定。你上传的几份材料分别讲的是阿里前n有礼活动赠品、短信策略、快速审核、预订单拆分转审核和赠品跟随逻辑，没有一份提到“星辰电商”的专属约定。\n\n按通用做法，大促期间订单审核可以从下面几个方向来配置（这些是公共知识库里的通用能力，不是星辰电商的约定）：\n\n1. **快速审核**：在订单审核页面工具栏区域，配置允许审核的订单条件（如无备注、无标旗），系统自动对选中或全部（最多3000单）待审核订单筛选符合配置条件的订单进行普通审核。单量较大时建议使用，可提高操作效率。[3]\n\n2. **活动赠品订单审核校验**：如果大促有前n有礼这类活动，订单审核时会对活动订单单独校验：\n   - 中奖单未下载：提示“中奖名单未下载无法审核”；强制审核时，开启“允许生成纯赠品订单”才能审核过去，否则不可强审。\n   - 中奖单已下载、订单未中奖：跳过检测允许审核。\n   - 中奖单已下载、订单中奖但未执行赠送赠品：开启“允许生成纯赠品订单”可强制审核，否则不可强审。[1]\n\n3. **赠品跟随拆分**：如果大促订单递交时发生拆分，可配置【赠品跟随】逻辑，避免赠品后发导致售后压力或赠品先发导致成本损失。支持跟随的赠品策略方式包括指定平台货品ID、指定货品、指定仓库、指定货品倍增、客户标签、指定货品金额等；支持的拆分条件包括按库存不足拆分、单品自定义拆分、组合装自定义拆分、按货品标签拆分、一键拆分、按数量拆分等。[5]\n\n4. **预订单拆分转审核**：大促预售订单可通过智能转审核或选中/筛选拆分转审核，转审核后订单日志会记录拆分方式及是否抢占其他订单库存。[4]\n\n至于“星辰电商”具体的大促审核策略约定（比如审核时限、特殊订单处理规则等），知识库里没有，需要查看你们自己公司的内部文档或与实施顾问确认。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 阿里-前n有礼（已下线）",
+          "heading": "一、功能使用流程 › 2、 新增活动策略界面，在该界面用户需要建立维护与平台后台相同的活动编码的策略（活动编码对应于商家后台的活动 ID 不可重复），添加需要赠送的活动商品及数量",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/mrp7bi",
+          "score": 0.1596
+        },
+        {
+          "n": 2,
+          "title": "设置 · 短信策略",
+          "heading": "前言",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/hyn2v5",
+          "score": 0.1242
+        },
+        {
+          "n": 3,
+          "title": "销售 · 快速审核",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/gycqcbbuyazvz4zl",
+          "score": 0.0358
+        },
+        {
+          "n": 4,
+          "title": "销售 · 待分配预订单拆分转审核",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ck5eom0tyu2zrkl1",
+          "score": 0.0272
+        },
+        {
+          "n": 5,
+          "title": "设置 · 流程中拆分条件说明",
+          "heading": "更新 › 版本：1.5.3.1",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/onv8lh",
+          "score": 0.0226
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 阿里-前n有礼（已下线）",
+        "设置 · 短信策略",
+        "销售 · 快速审核",
+        "销售 · 待分配预订单拆分转审核",
+        "设置 · 流程中拆分条件说明"
+      ],
+      "top_score": 0.1596,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": false,
+      "unsupported": "星辰电商的大促订单审核策略约定",
+      "reason": "答案明确表示知识库中没有关于星辰电商的大促订单审核策略的信息",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 2133
+    },
+    {
+      "id": "priv-noanswer-picking-mode-b",
+      "kind": "no_answer",
+      "q": "远岸家居的拣货模式用的是边拣边分还是先拣后分？",
+      "answer": "知识库中没有关于“远岸家居”这家客户拣货模式的具体记录，无法判断它用的是边拣边分还是先拣后分。\n\n不过可以给你两种拣货方式的通用区别，方便你对照判断：\n\n- **边拣边分**：拣货和分货同时进行，一边拣一边分好，适用于商品重合度不高的零散单，且体积和重量不大的商品 [2]。\n- **先拣后分**：先拣货，拣完货再分货，适用于单量中等、产品重合率很高的订单，或大件商品 [2]。\n\n如果你能提供远岸家居的订单特征（比如商品重合度、单量、商品大小），我可以帮你进一步判断更匹配哪种方式。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 拣货分组新增多区拣货（拣→分）",
+          "heading": "1、功能说明",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/lz2zuk",
+          "score": 0.9759
+        },
+        {
+          "n": 2,
+          "title": "设置 · 拣货分组设置说明",
+          "heading": "一、新建拣货分组",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/knzla9",
+          "score": 0.9744
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 批量分拣",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tvygdl",
+          "score": 0.962
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 批量分拣",
+          "heading": "二、操作步骤 › 先拣后分",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/tvygdl",
+          "score": 0.943
+        },
+        {
+          "n": 5,
+          "title": "设置 · 通道拣货",
+          "heading": "使用场景",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xdta09fl3pf8bq76",
+          "score": 0.9391
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 拣货分组新增多区拣货（拣→分）",
+        "设置 · 拣货分组设置说明",
+        "仓储 · 批量分拣",
+        "仓储 · 批量分拣",
+        "设置 · 通道拣货"
+      ],
+      "top_score": 0.9759,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": false,
+      "unsupported": "",
+      "reason": "答案表示知识库中没有关于远岸家居拣货模式的具体记录，无法判断",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 1067
+    },
+    {
+      "id": "priv-noanswer-invoice-a",
+      "kind": "no_answer",
+      "q": "星辰电商的发票是随货同行还是电子发票？",
+      "answer": "知识库里没有关于“星辰电商”这家客户发票形式的专属约定，也没有“星辰电商”这个主体的任何材料。按通用理解：**“随货同行”和“电子发票”是两种不同的发票交付方式**——随货同行指纸质发票随包裹一起寄给买家；电子发票则是以电子数据形式开具、通过平台或短信/邮件推送给买家，不随货寄送。\n\n关于旺店通旗舰版里发票类型的判断，材料里有一条可参考的判断逻辑：在【发票系统配置】的“开发票的订单类型”中，区分了“仅在平台申请电子发票的订单”和“所有标记需要开发票的订单”——前者指在淘宝、京东等支持电子发票的平台下单时选择电子发票的订单（有电子发票内置标记）；后者指平台未开启电子发票服务、仅有普通发票标记的订单（手工建单选择开发票也属于普通发票标记）[2]。也就是说，**订单是否走电子发票，取决于平台下单时买家是否选择了电子发票，以及你在发票系统配置里选择的订单类型**，而不是由 ERP 侧固定为“随货同行”或“电子发票”。\n\n至于“星辰电商”这家客户具体采用哪种方式，知识库里没有对应材料，建议直接查看该客户在【发票系统配置】里的“开发票的订单类型”设置，或咨询该客户的实施对接人。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 有赞电子面单操作步骤",
+          "heading": "一、有赞商家后台开通电子面单",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/eg7g9vqu4qzm2oxq",
+          "score": 0.0555
+        },
+        {
+          "n": 2,
+          "title": "账款 · 发票管理旗舰版操作手册",
+          "heading": "百望数电/全电发票-对接流程 › 功能&字段&设置解析 › 发票系统配置",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/kgpktsz7gm7hgu2k",
+          "score": 0.0488
+        },
+        {
+          "n": 3,
+          "title": "账款 · 发票管理旗舰版操作手册",
+          "heading": "航信数电/全电发票-对接流程 › 第六步：手动/自动开具全电发票 › 确认开票",
+          "url": "https://www.yuque.com/wdterpqjb/zhangkuan/kgpktsz7gm7hgu2k",
+          "score": 0.0391
+        },
+        {
+          "n": 4,
+          "title": "平台事项 · 国补对接进度及功能支持情况",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/odvc2lofegausak5",
+          "score": 0.0217
+        },
+        {
+          "n": 5,
+          "title": "平台事项 · 国补对接进度及功能支持情况",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/pingtai/odvc2lofegausak5",
+          "score": 0.0203
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 有赞电子面单操作步骤",
+        "账款 · 发票管理旗舰版操作手册",
+        "账款 · 发票管理旗舰版操作手册",
+        "平台事项 · 国补对接进度及功能支持情况",
+        "平台事项 · 国补对接进度及功能支持情况"
+      ],
+      "top_score": 0.0555,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "no_answer",
+      "grounded": false,
+      "unsupported": "星辰电商的发票是随货同行还是电子发票",
+      "reason": "知识库中没有关于星辰电商发票形式的具体信息",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "该说不知道，却给了实质答案（幻觉）",
+      "context_chars": 2322
+    }
+  ]
+}

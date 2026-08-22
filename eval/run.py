@@ -479,7 +479,9 @@ def answer_all(
 # ---------- Agent 路径（M7）----------
 
 
-def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
+def run_agent_cases(
+    cases: list[dict], cfg: Config, *, user_id: uuid.UUID | None = None
+) -> list[CaseResult]:
     """让 Agent 自己跑每一道题。
 
     **和直路的评测不是同一件事**：直路是「先检索固定 top-k，再答」，Agent 是
@@ -520,9 +522,9 @@ def run_agent_cases(cases: list[dict], cfg: Config) -> list[CaseResult]:
             for i, case in enumerate(cases, 1):
                 deps = AgentDeps(
                     session=session,
-                    # 评测只打公共库。用一个随机 uuid 当"当前用户"：它没有任何
-                    # 私有文档，可见范围就等于公共库
-                    user_id=uuid.uuid4(),
+                    # 公共库用随机用户保持可见范围为公共库；私有评测必须沿用
+                    # `--as-user` 解析出的 ID，否则私有文档永远不会被检索到。
+                    user_id=user_id or uuid.uuid4(),
                     conversation_id=uuid.uuid4(),
                     embedder=emb,
                     reranker=rr,
@@ -1142,7 +1144,7 @@ def main() -> None:
     if cfg.agent:
         # Agent 自己决定检索几次，所以「检索」和「生成」分不开，只能一起跑
         print("── Agent 逐题跑（检索由它自己决定）──")
-        results = run_agent_cases(cases, cfg)
+        results = run_agent_cases(cases, cfg, user_id=user_id)
     else:
         print("── 检索（串行，受 SiliconFlow 限速）──")
         results = retrieve_all(cases, cfg, user_id=user_id)
