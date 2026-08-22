@@ -512,6 +512,21 @@ async def test_truncated_history_asks_to_resolve_vague_reference(maker):
     assert deps.used_tools == set()
 
 
+async def test_truncated_history_blocks_tool_calls_for_vague_reference(maker):
+    """模型即使准备检索，历史边界也应在 Agent 启动前直接返回澄清。"""
+    async with maker() as s:
+        deps = _deps(s, history_truncated=True)
+        chunks, answer = await drain(
+            "那个功能在哪配置来着？",
+            deps,
+            scripted(call("answer_kb"), "随机命中的功能说明"),
+        )
+
+    assert "请直接说出功能名称" in answer
+    assert text_of(chunks) == answer
+    assert deps.used_tools == set()
+
+
 async def test_guard_does_not_fire_when_a_tool_did_run(maker):
     """⚠️ 误伤检查：`generate_plan` 之后那段方案摘要带着界面路径，
     长得和越线的一模一样——但它有据，据在刚跑完的那个工具里。

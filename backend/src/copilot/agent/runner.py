@@ -140,6 +140,24 @@ async def run_agent_stream(
     Args:
         model: 只给测试用，见 `build_agent`。
     """
+    # 历史窗口已经裁掉时，含糊指代没有可靠的对象。必须在 Agent 启动前
+    # 截断这条路径；否则模型可能先调用 answer_kb，再把随机命中的功能当成
+    # 「那个功能」，后面的无工具回退保护就来不及了。
+    if deps.history_truncated and (
+        _EARLIEST_HISTORY_RE.search(question) or _TRUNCATED_REFERENCE_RE.search(question)
+    ):
+        boundary_text = (
+            "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"
+            if _EARLIEST_HISTORY_RE.search(question)
+            else "当前上下文只保留最近几轮，我无法确认“那个功能”具体指什么。"
+            "请直接说出功能名称，我再帮你查配置位置。"
+        )
+        text_id = stream.new_id("txt")
+        yield stream.text_start(text_id), ""
+        yield stream.text_delta(text_id, boundary_text), boundary_text
+        yield stream.text_end(text_id), boundary_text
+        return
+
     agent = build_agent(model)
     deps.question = question
 
