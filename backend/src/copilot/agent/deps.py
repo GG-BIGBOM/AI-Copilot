@@ -55,6 +55,8 @@ class AgentDeps:
     # 普通问答的 3 次工具上限，会在保存到第 4 项时整轮失败。
     plan_flow: bool = False
     mode: str = DEFAULT_MODE
+    # 评测时可显式覆盖常识兜底；线上默认读取 settings。
+    general: bool | None = None
     # ⭐ 用户这一轮的**原话**。`answer_kb` 拿它去检索，而不是让模型自己写检索词。
     # M7 的准确率掉 12 个点，第一条成因就是「检索词漂移」——模型把
     # 「京东电子面单怎么配」改写成「电子面单 模板 设置」，然后召回了得物那篇。

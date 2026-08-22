@@ -79,6 +79,7 @@ async def answer_kb_for_deps(deps: AgentDeps) -> str:
             user_id=deps.user_id,
             history=deps.history,
             mode=deps.mode,
+            general=deps.general,
         )
         # 配图在正文之前发，理由见 deps.emit_images()
         deps.images = list(streamed.images)

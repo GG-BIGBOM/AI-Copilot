@@ -212,6 +212,7 @@ class Config:
             "rerank_model": s.rerank_model,
             "mode": self.mode,
             "answer_model": s.llm_deep_model if self.mode == "deep" else s.llm_model,
+            "general": self.general,
             # ⭐ prompt 指纹。没有它，「改了 prompt 重跑」和「什么都没改重跑」
             # 存出来的 config 一模一样——半年后看对比表根本分不清哪轮是哪轮。
             #
@@ -529,6 +530,7 @@ def run_agent_cases(
                     embedder=emb,
                     reranker=rr,
                     llm=answer_llm,
+                    general=cfg.general,
                 )
                 answer = ""
                 try:

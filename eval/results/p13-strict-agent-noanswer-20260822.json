@@ -1,0 +1,182 @@
+{
+  "tag": "p13-strict-agent-noanswer-20260822",
+  "ran_at": "2026-08-22T05:13:43+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "agent",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "general": false,
+    "prompt_sha": "56893f1f",
+    "chunk_count": 4568
+  },
+  "judge_model": "moonshot-v1-128k",
+  "reliable": true,
+  "metrics": {
+    "题数": 2,
+    "有效题数": 2,
+    "判分失效": 0,
+    "判对": 2,
+    "判错": 0,
+    "准确率": 100.0,
+    "判分失效率": 0.0,
+    "检索命中率": 0.0,
+    "引用正确率": 0.0,
+    "幻觉率": 0.0,
+    "假阴性率": 0.0,
+    "无据陈述率": 0.0,
+    "可信": true,
+    "难题准确率": 100.0,
+    "难题数": 2,
+    "分类准确率": {
+      "fact": 0.0,
+      "probe": 0.0,
+      "partial": 0.0,
+      "no_answer": 100.0
+    }
+  },
+  "cases": [
+    {
+      "id": "hard-noanswer-tiktok",
+      "kind": "no_answer",
+      "q": "TikTok 小店的电子面单模板要怎么在旗舰版 ERP 里配置？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "一、erp物流设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.7861
+        },
+        {
+          "n": 2,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "二、【旺店通ERP内操作】 › ERP新增物流设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.7433
+        },
+        {
+          "n": 3,
+          "title": "设置 · 小红书面单模板设置",
+          "heading": "二、【旺店通ERP内操作】 › ERP新增物流设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/xfa1gqkkhay9arrh",
+          "score": 0.733
+        },
+        {
+          "n": 4,
+          "title": "设置 · 有赞电子面单操作步骤",
+          "heading": "​二、ERP 内操作 客户端需要升级到1.4.9.7及以上",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/eg7g9vqu4qzm2oxq",
+          "score": 0.731
+        },
+        {
+          "n": 5,
+          "title": "设置 · 美团医药电子面单操作手册",
+          "heading": "一、ERP物流设置 › 1、新建物流授权",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/tk2lcdsmuocactl5",
+          "score": 0.6847
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "设置 · 小红书面单模板设置",
+        "设置 · 小红书面单模板设置",
+        "设置 · 有赞电子面单操作步骤",
+        "设置 · 美团医药电子面单操作手册"
+      ],
+      "top_score": 0.7861,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1793
+    },
+    {
+      "id": "hard-noanswer-lazada",
+      "kind": "no_answer",
+      "q": "Lazada 店铺的订单怎么同步到 ERP？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "79、Q：发件人信息无效，请在店铺后台维护对应的信息",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.7523
+        },
+        {
+          "n": 2,
+          "title": "设置 · 得物对接仓内实物库存操作手册",
+          "heading": "erp配置流程以及操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pq87194ke29vcazs",
+          "score": 0.7175
+        },
+        {
+          "n": 3,
+          "title": "设置 · 考拉商家直发店铺对接步骤与配置信息",
+          "heading": "二、注意事项",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/twiq5e",
+          "score": 0.6612
+        },
+        {
+          "n": 4,
+          "title": "设置 · 【阿里速卖通优选】速卖通优选业务对接",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/eyty1ltisx0w7n3g",
+          "score": 0.5834
+        },
+        {
+          "n": 5,
+          "title": "设置 · 枫页小店对接步骤",
+          "heading": "ERP授权操作 › 1、获取平台授权",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/qc1wbh",
+          "score": 0.509
+        }
+      ],
+      "retrieved_titles": [
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "设置 · 得物对接仓内实物库存操作手册",
+        "设置 · 考拉商家直发店铺对接步骤与配置信息",
+        "设置 · 【阿里速卖通优选】速卖通优选业务对接",
+        "设置 · 枫页小店对接步骤"
+      ],
+      "top_score": 0.7523,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1465
+    }
+  ]
+}

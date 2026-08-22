@@ -562,6 +562,7 @@ async def ask_stream(
     user_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
     mode: str = DEFAULT_MODE,
+    general: bool | None = None,
 ) -> StreamedAnswer:
     """检索并流式作答。
 
@@ -570,6 +571,7 @@ async def ask_stream(
             有历史时会先把追问改写成独立问题再检索。
         mode: 回答档位，`fast` 简答 / `deep` 详解。只影响写法，
             防幻觉的铁律两档完全一样。
+        general: 常识兜底开关。留 None 读取 settings；评测可显式传入 A/B 版本。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
@@ -596,7 +598,10 @@ async def ask_stream(
     #
     # 代价说清楚：这条路以前是 0 成本的，现在每一次「知识库里没有」都要花
     # 一次模型调用。挡在前面的仍然是寒暄短路（那个不花钱）。
-    if result.is_empty and not get_settings().allow_general_knowledge:
+    allow_general = (
+        get_settings().allow_general_knowledge if general is None else general
+    )
+    if result.is_empty and not allow_general:
         return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     context = result.build_context()
@@ -613,7 +618,10 @@ async def ask_stream(
             return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
     messages = [
-        {"role": "system", "content": system_prompt_for(mode, subject_guard=guard)},
+        {
+            "role": "system",
+            "content": system_prompt_for(mode, subject_guard=guard, general=general),
+        },
         *_history_messages(history),
         {
             "role": "user",
@@ -641,9 +649,18 @@ async def ask(
     user_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
     mode: str = DEFAULT_MODE,
+    general: bool | None = None,
 ) -> Answer:
     streamed = await ask_stream(
-        session, question, embedder, reranker, llm, user_id=user_id, history=history, mode=mode
+        session,
+        question,
+        embedder,
+        reranker,
+        llm,
+        user_id=user_id,
+        history=history,
+        mode=mode,
+        general=general,
     )
     text = "".join(t for kind, t in streamed.stream if kind == "content")
     answer = Answer(text=text, citations=streamed.citations, images=streamed.images)
