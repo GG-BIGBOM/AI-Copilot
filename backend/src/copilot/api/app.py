@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from copilot.api import logging_setup, providers, ratelimit
+from copilot.api.routes import admin as admin_routes
 from copilot.api.routes import auth as auth_routes
 from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import corrections as corrections_routes
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback_routes.router)
     app.include_router(spaces_routes.router)
     app.include_router(images_routes.router)
+    app.include_router(admin_routes.router)
 
     # 镜像下来的语雀配图。**只有公共图走这里。**
     # 私有图（M17 从上传文档里解出来的）一律走 `/api/images/{id}`，

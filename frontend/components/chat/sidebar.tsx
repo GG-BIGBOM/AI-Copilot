@@ -12,10 +12,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Check,
   FileText,
+  Gauge,
   LogOut,
   MoreHorizontal,
   PanelLeftClose,
@@ -140,6 +142,7 @@ export function Sidebar({
 }) {
   // 主题的应用时机在 layout 的内联脚本里（首帧之前），这里只跟着它显示图标
   const [isDark, toggleTheme] = useDarkMode();
+  const router = useRouter();
 
   // 批量管理态。选中的 id 存在 Set 里——列表可能上百条，
   // 用数组的话每次勾选都是一次 O(n) 扫描
@@ -500,6 +503,19 @@ export function Sidebar({
                     <Menu.Item className={MENU_ITEM} onClick={() => setInviting(true)}>
                       <Ticket className="size-3.5" />
                       邀请码
+                    </Menu.Item>
+                  )}
+                  {/* 同邀请码：**只对管理员显示**。非管理员点进去每个接口都是
+                      403，摆一个必然报错的入口不如不摆。
+                      ⚠️ 这不是权限控制——`/api/admin/*` 在服务端各自卡了
+                      `CurrentAdmin`，藏起菜单只是别让人白点一趟 */}
+                  {user.is_admin && (
+                    <Menu.Item
+                      className={MENU_ITEM}
+                      onClick={() => router.push("/admin")}
+                    >
+                      <Gauge className="size-3.5" />
+                      管理台
                     </Menu.Item>
                   )}
                   <Menu.Item className={MENU_ITEM} onClick={toggleTheme}>

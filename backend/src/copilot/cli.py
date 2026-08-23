@@ -13,6 +13,11 @@ from __future__ import annotations
 
 import typer
 
+# ⚠️ 这里只有 typer 和 metrics 是模块级导入，别再往上加。
+# 其余一律在子命令内部 import：`copilot --help` 要是把 SQLAlchemy、httpx、
+# pydantic-ai 全拖起来，一次补全要等两秒。`metrics` 是纯 dataclass，没有代价
+from copilot import metrics
+
 app = typer.Typer(
     name="copilot",
     help="知识库 Agent —— 语雀 + 自传文档的带引用问答",
@@ -926,31 +931,18 @@ def quality_report(
     asyncio.run(_quality_report(days, email=user or None, route=route or None))
 
 
-def _pct(num: int, den: int) -> str:
-    return f"{100.0 * num / den:.1f}%" if den else "—"
+# ⚠️ 口径统一在 `copilot.metrics` 里，这里只负责**把它印出来**。
+# 管理台的 Overview 读的是同一批函数——两边各算一次的话，某天有人改了
+# 「差评率的分母」或「延迟算不算寒暄」，另一处不会跟着变，
+# 于是同一天在两个页面上有两个数，而看的人无从判断哪个是真的。
+_pct = metrics.pct
+_percentile = metrics.percentile
 
 
-def _percentile(values: list[int], q: float) -> int | None:
-    """第 q 百分位（q 取 0.5 / 0.95）。
-
-    ⚠️ **自己算，不引 numpy。** 这台机器上装 numpy 是为了一个百分位
-    多背 20MB 依赖；而且样本量常常是两位数，这时候「用哪种插值法」
-    的差别远小于样本本身的随机性。
-    最近邻取法，向下取整：n=20 时 p95 就是第 19 个（0 起数），
-    也就是「第二慢的那一次」——对这个量级的数据，这是能给出的最诚实的答案。
-    """
-    if not values:
-        return None
-    ordered = sorted(values)
-    idx = min(int(q * len(ordered)), len(ordered) - 1)
-    return ordered[idx]
-
-
-def _latency_line(label: str, values: list[int]) -> str:
-    p50, p95 = _percentile(values, 0.5), _percentile(values, 0.95)
-    if p50 is None:
+def _latency_line(label: str, lat: metrics.Latency) -> str:
+    if lat.p50 is None:
         return f"  {label:<22} —"
-    return f"  {label:<22} p50 {p50:>6} ms    p95 {p95:>6} ms    （{len(values)} 次）"
+    return f"  {label:<22} p50 {lat.p50:>6} ms    p95 {lat.p95:>6} ms    （{lat.count} 次）"
 
 
 async def _quality_report(
@@ -995,10 +987,11 @@ async def _quality_report(
             typer.secho("这段时间一条请求都没有。", fg=typer.colors.YELLOW)
             return
 
-        total = len(rows)
-        users = len({r.user_id for r in rows if r.user_id is not None})
+        # ⭐ 所有口径都在 `copilot.metrics.summarize` 里，这里只排版
+        stat = metrics.summarize(rows)
+        total = stat.total
         typer.echo(f"  提问数                 {total}")
-        typer.echo(f"  活跃用户               {users}")
+        typer.echo(f"  活跃用户               {stat.users}")
         typer.echo("")
 
         # ---- 答案来源（M13 P5 的那一列）----
@@ -1006,10 +999,7 @@ async def _quality_report(
         # ⚠️ **老数据是 NULL**（那时候还没有这一列），单独列出来。
         # 把它并进任何一类都会让那一类凭空变大，而这份报告的用途
         # 恰恰是判断「常识兜底放开之后，到底有多少回答没有出处」
-        by_source: dict[str, int] = {}
-        for r in rows:
-            key = r.answer_source or "（M13 之前的老数据）"
-            by_source[key] = by_source.get(key, 0) + 1
+        by_source = stat.by_source
         label = {
             trace_mod.KB: "知识库回答",
             trace_mod.GENERAL: "常识回答（无出处）",
@@ -1018,21 +1008,19 @@ async def _quality_report(
             trace_mod.TOOL: "工具（出方案/查文档）",
         }
         typer.echo("  答案来源")
-        for key in (*label, "（M13 之前的老数据）"):
+        for key in (*label, metrics.LEGACY):
             if n := by_source.get(key):
                 typer.echo(f"    {label.get(key, key):<22} {n:>5}   {_pct(n, total)}")
         typer.echo("")
 
         # ---- 反馈 ----
-        up = sum(r.feedback == "up" for r in rows)
-        down = sum(r.feedback == "down" for r in rows)
-        typer.echo(f"  👍                     {up}")
-        typer.echo(f"  👎                     {down}")
+        typer.echo(f"  👍                     {stat.up}")
+        typer.echo(f"  👎                     {stat.down}")
         # 分母是**被评价过的**，不是全部请求：绝大多数轮次没人点过，
         # 拿总数当分母只会得到一个恒定接近 0、看不出变化的数
         typer.echo(
-            f"  差评率                 {_pct(down, up + down)}"
-            f"　（分母 = 被评价过的 {up + down} 轮）"
+            f"  差评率                 {stat.feedback_rate}"
+            f"　（分母 = 被评价过的 {stat.up + stat.down} 轮）"
         )
         typer.echo("")
 
@@ -1042,37 +1030,27 @@ async def _quality_report(
         # `agent/guard.py` 那道硬防线拦的就是它；这里数的是**漏过去的**。
         # ⚠️ 只看 Agent 路：直路的 tools 恒为空数组，混进来会把每一条直路
         # 都算成违规
-        bypass = [
-            r
-            for r in rows
-            if r.route == "agent" and not (r.tools or []) and not r.no_answer
-            and r.answer_source == trace_mod.KB
-        ]
-        interrupted = [
-            r for r in rows
-            if not r.ok and (r.error or "").startswith(("CancelledError:", "GeneratorExit:"))
-        ]
-        errors = [r for r in rows if not r.ok and r not in interrupted]
-        color = typer.colors.RED if bypass else typer.colors.GREEN
+        color = typer.colors.RED if stat.bypass else typer.colors.GREEN
         # ⭐ Agent 路上 `tools` 为空的轮次单独列一行（M13 P12 的灰度观察项）。
         # 它**不等于**违规：追问「你有哪些平台？」和寒暄都不该调工具。
         # 违规的是「tools 为空 + 写出了一段有出处样子的答案」，也就是下一行。
         # 两个数分开看，才分得出「Agent 在正常追问」和「Agent 在越线」
-        agent_rows = [r for r in rows if r.route == "agent"]
-        if agent_rows:
-            no_tool = [r for r in agent_rows if not (r.tools or [])]
-            typer.echo(f"  Agent 轮次             {len(agent_rows)}")
+        if stat.agent_total:
+            typer.echo(f"  Agent 轮次             {stat.agent_total}")
             typer.echo(
-                f"    其中 tools 为空       {len(no_tool)}"
+                f"    其中 tools 为空       {stat.agent_no_tool}"
                 "   （追问 / 寒暄是正常的，不等于违规）"
             )
-        typer.secho(f"  越过工具直答           {len(bypass)}", fg=color)
-        typer.echo(f"  用户主动中断           {len(interrupted)}   {_pct(len(interrupted), total)}")
-        typer.echo(f"  出错                   {len(errors)}   {_pct(len(errors), total)}")
-        if bypass:
+        typer.secho(f"  越过工具直答           {stat.bypass}", fg=color)
+        typer.echo(f"  用户主动中断           {stat.interrupted}   {_pct(stat.interrupted, total)}")
+        typer.echo(f"  出错                   {stat.errors}   {_pct(stat.errors, total)}")
+        if stat.bypass_ids:
             typer.echo("    （这几轮值得逐条看）")
-            for r in bypass[:5]:
-                typer.echo(f"      {r.id}  {r.question[:40]}")
+            # 命令行是管理员自己的终端，这里可以带上问题原文——
+            # 管理台的概览页不行（见 metrics.Summary 的注释）
+            by_id = {str(r.id): r for r in rows}
+            for trace_id in stat.bypass_ids[:5]:
+                typer.echo(f"      {trace_id}  {by_id[trace_id].question[:40]}")
         typer.echo("")
 
         # ---- 延迟：M13 P11 ----
@@ -1080,10 +1058,9 @@ async def _quality_report(
         # ⚠️ 寒暄那条路不算进去。它一次模型调用都不花、首字是毫秒级的，
         # 混进来会把 p50 拉到看不出问题——而这两个数字存在的意义
         # 就是回答「用户等了多久」
-        real = [r for r in rows if r.route != "canned"]
         typer.echo("  延迟（不含寒暄）")
-        typer.echo(_latency_line("首字 TTFB", [r.ttfb_ms for r in real if r.ttfb_ms]))
-        typer.echo(_latency_line("总时长", [r.total_ms for r in real if r.total_ms]))
+        typer.echo(_latency_line("首字 TTFB", stat.ttfb))
+        typer.echo(_latency_line("总时长", stat.duration))
         typer.echo("")
 
         # ---- token ----
@@ -1093,11 +1070,11 @@ async def _quality_report(
         # 它压根不区分进出。要拆就得解析流式响应末尾的 usage 字段——
         # 那是另一件事，而且这份报告的用途（看量级、看趋势）不需要它。
         # **宁可少报一个数，也不要报一个编出来的拆分。**
-        tokens = sum(r.tokens for r in rows)
-        answered = [r for r in rows if r.route != "canned"]
-        typer.echo(f"  token 合计             {tokens}")
-        if answered:
-            typer.echo(f"  平均 token / 回答      {tokens // len(answered)}　（不含寒暄）")
+        typer.echo(f"  token 合计             {stat.tokens}")
+        if stat.answered:
+            typer.echo(
+                f"  平均 token / 回答      {stat.tokens // stat.answered}　（不含寒暄）"
+            )
 
         # 成本：**没有可靠的价格配置就不印。**
         # 硬编码一个单价，半年后模型换了、价格调了，报告会一本正经地

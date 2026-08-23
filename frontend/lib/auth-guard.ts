@@ -64,3 +64,41 @@ export function useRedirectIfAuthed(): boolean {
 
   return checking;
 }
+
+/**
+ * 管理台专用：没登录踢去登录页，登录了但不是管理员踢回聊天页。
+ *
+ * ⚠️ **同样不是安全边界。** `/api/admin/*` 每一个都在服务端挂了
+ * `CurrentAdmin`，非管理员打过去是 403。这里挡的只是「点进去看到一片报错」，
+ * 而**不能**因为这道 guard 在就把后端那道省掉——它挡不住任何一个会开控制台
+ * 的人，也挡不住直接 curl 的人。
+ */
+export function useRequireAdmin(): AuthState {
+  const router = useRouter();
+  const [state, setState] = useState<AuthState>(LOADING);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .me()
+      .then((user) => {
+        if (!alive) return;
+        if (!user.is_admin) {
+          setState({ status: "anon", user: null });
+          router.replace("/chat");
+          return;
+        }
+        setState({ status: "authed", user });
+      })
+      .catch(() => {
+        if (!alive) return;
+        setState({ status: "anon", user: null });
+        router.replace("/login");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [router]);
+
+  return state;
+}

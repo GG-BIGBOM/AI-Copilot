@@ -139,6 +139,153 @@ export const FEEDBACK_REASONS = [
 
 export type FeedbackReason = (typeof FEEDBACK_REASONS)[number]["value"];
 
+
+/* ─────────────── 管理台（M15-A，只读）───────────────
+ *
+ * ⚠️ 这一段的每个接口在后端都挂着 `CurrentAdmin`。**前端这边不做鉴权**，
+ * `useRequireAdmin` 只是别让非管理员对着一屏 403 发呆——真正的门在服务端，
+ * 任何一个会开控制台的人都绕得过前端那道。
+ */
+
+export type AdminRange = "24h" | "7d" | "30d";
+
+export type AdminLatency = { p50: number | null; p95: number | null; count: number };
+
+/** 概览。⚠️ **刻意没有任何问题原文**——一个人问过什么连起来就是他在处理
+ *  哪个客户、哪个故障，那不该出现在一眼扫过去的仪表盘上。 */
+export type AdminOverview = {
+  range: AdminRange;
+  since: string;
+  questions: number;
+  active_users: number;
+  by_source: Record<string, number>;
+  thumbs_up: number;
+  thumbs_down: number;
+  feedback_rate: string;
+  agent_requests: number;
+  agent_without_tools: number;
+  tool_bypass: number;
+  interrupted: number;
+  errors: number;
+  ttfb: AdminLatency;
+  duration: AdminLatency;
+  tokens: number;
+  uploaded_documents: number;
+  failed_jobs: number;
+  verified_answers: number;
+  users_total: number;
+  documents_total: number;
+};
+
+export type AdminUserRow = {
+  id: string;
+  email: string;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+  last_active_at: string | null;
+  requests: number;
+  thumbs_up: number;
+  thumbs_down: number;
+  no_answer: number;
+  agent_requests: number;
+  ttfb_p95: number | null;
+  tokens: number;
+  uploads: number;
+  storage_bytes: number;
+};
+
+export type AdminUserPage = {
+  total: number;
+  limit: number;
+  offset: number;
+  range: AdminRange;
+  items: AdminUserRow[];
+};
+
+export type AdminUserDetail = {
+  id: string;
+  email: string;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+  daily_token_quota: number;
+  range: AdminRange;
+  questions: number;
+  by_source: Record<string, number>;
+  by_route: Record<string, number>;
+  by_space: Record<string, number>;
+  thumbs_up: number;
+  thumbs_down: number;
+  errors: number;
+  ttfb: AdminLatency;
+  duration: AdminLatency;
+  tokens: number;
+  trend: { day: string; requests: number }[];
+  /** ⚠️ 详情页**有**问题原文：管理员点进来是一次明确的动作，不是仪表盘顺带展示 */
+  recent: {
+    id: string;
+    created_at: string;
+    route: string;
+    answer_source: string | null;
+    question: string;
+    ttfb_ms: number | null;
+    total_ms: number | null;
+    ok: boolean;
+    feedback: FeedbackVote | null;
+  }[];
+  documents: {
+    id: string;
+    title: string;
+    status: DocumentSummary["status"];
+    chunk_count: number;
+    size_bytes: number | null;
+    created_at: string;
+    error: string | null;
+  }[];
+};
+
+export type AdminFeedbackRow = {
+  id: string;
+  created_at: string;
+  feedback: FeedbackVote;
+  feedback_reason: FeedbackReason | null;
+  feedback_at: string | null;
+  user_email: string | null;
+  question: string;
+  answer: string | null;
+  knowledge_space: string | null;
+  route: string;
+  answer_source: string | null;
+  tools: string[] | null;
+  chunk_count: number;
+  top_score: number | null;
+  private_hits: number;
+  citations: Citation[] | null;
+  images: { n: number; url: string }[] | null;
+  ttfb_ms: number | null;
+  total_ms: number | null;
+  model: string | null;
+  ok: boolean;
+  error: string | null;
+};
+
+export type AdminFeedbackPage = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminFeedbackRow[];
+};
+
+/** 答案来源在页面上的说法。后端的枚举是给程序看的，这里是给人看的 */
+export const ANSWER_SOURCE_LABEL: Record<string, string> = {
+  kb: "知识库回答",
+  general_knowledge: "常识回答（无出处）",
+  no_answer: "拒答",
+  canned: "寒暄",
+  tool: "工具（出方案/查文档）",
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -338,4 +485,30 @@ export const api = {
 
   deleteDocument: (id: string) =>
     request<void>(`/api/documents/${id}`, { method: "DELETE" }),
+
+  // ─────────────── 管理台（只读）───────────────
+
+  adminOverview: (range: AdminRange) =>
+    request<AdminOverview>(`/api/admin/overview?range=${range}`),
+
+  adminUsers: (p: { range: AdminRange; q?: string; limit: number; offset: number }) =>
+    request<AdminUserPage>(
+      `/api/admin/users?range=${p.range}&limit=${p.limit}&offset=${p.offset}` +
+        (p.q ? `&q=${encodeURIComponent(p.q)}` : ""),
+    ),
+
+  adminUser: (id: string, range: AdminRange) =>
+    request<AdminUserDetail>(`/api/admin/users/${id}?range=${range}`),
+
+  adminFeedback: (p: {
+    kind: "down" | "up" | "all";
+    reason?: string;
+    range: AdminRange;
+    limit: number;
+    offset: number;
+  }) =>
+    request<AdminFeedbackPage>(
+      `/api/admin/feedback?kind=${p.kind}&range=${p.range}&limit=${p.limit}&offset=${p.offset}` +
+        (p.reason ? `&reason=${p.reason}` : ""),
+    ),
 };
