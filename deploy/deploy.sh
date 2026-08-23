@@ -16,12 +16,23 @@ SSH="ssh -i $KEY -o BatchMode=yes $HOST"
 cd "$(dirname "$0")/.."
 
 echo "==> [1/7] 本机自检（不过就别推上去）"
-( cd backend && uv run ruff check . && uv run pytest -q )
+# ⚠️ **这三条不能写成 `uv run`**（2026-08-23 踩到）。`uv run` 会先把环境同步成
+# pyproject 的默认样子——带 dev 组、**不带 extra**——于是本机 venv 里的
+# parse / agent / eval 当场被卸掉，自检自己把自己跑红：
+#   ModuleNotFoundError: docx / pptx / pydantic_ai
+# 而且它卸完就走，下次在本机跑评测还得手动装回来。
+# 服务器那一段（第 7 步）早就为同样的理由改成直接调 `.venv/bin/...` 了，
+# 本机这一段一直漏着。要重装回来：
+#   cd backend && uv sync --extra parse --extra agent --extra eval
+PY=backend/.venv/bin/python
+[ -x "$PY" ] || PY=backend/.venv/Scripts/python.exe   # Git Bash on Windows
+[ -x "$PY" ] || { echo "找不到 backend/.venv，先 uv sync 一次"; exit 1; }
+( cd backend && "../$PY" -m ruff check . && "../$PY" -m pytest -q )
 ( cd frontend && npm test && npm run lint && npx tsc --noEmit )
 
 # 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
 # 拦下来只会逼人加 --skip 绕过去，那这条检查就永远没人看了。
-( cd backend && uv run copilot corrections --check ) || \
+( cd backend && "../$PY" -m copilot.cli corrections --check ) || \
     echo "  ⚠️ 上面有过期的勘误，语雀原文已经变了，抽空核对一下"
 
 echo "==> [2/7] 构建前端"

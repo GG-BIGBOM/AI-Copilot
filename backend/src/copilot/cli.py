@@ -184,8 +184,18 @@ async def _ask(question: str, show_chunks: bool) -> None:
                     typer.secho(f"    {rc.content[:180]}…\n", fg=typer.colors.BRIGHT_BLACK)
 
             answer = await ask_stream(session, question, embedder, reranker, llm)
+            # ⚠️ `ask_stream` 吐的是 `(kind, text)`，kind 是 `reasoning`（模型草稿）
+            # 或 `content`（正文）。**草稿不是答案**：落库、判「暂无此内容」都只看
+            # content（见 qa.StreamedAnswer）。
+            # 这里原来把整个元组直接 echo 又 join，于是终端上是
+            # `('content', '知识')('content', '库')…`，最后 join 抛
+            # `TypeError: sequence item 0: expected str instance, tuple found`。
+            # 详解档加草稿那一版（6af2c23）漏改了这条路——它只在 CLI 上，
+            # 网页那条走的是 `routes/chat.py`，所以一直没人踩到。
             buf: list[str] = []
-            for piece in answer.stream:
+            for kind, piece in answer.stream:
+                if kind != "content":
+                    continue  # 草稿只给网页做「正在思考」用，命令行不打
                 typer.echo(piece, nl=False)
                 buf.append(piece)
             typer.echo("\n")
