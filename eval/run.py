@@ -440,6 +440,14 @@ def retrieve_all(
         emb, rr = SiliconFlowEmbedder(client=client), SiliconFlowReranker(client=client)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
+            # ⚠️ 知识版本。评测目前**只量旗舰版**——另外两个空间的语料要到 M18
+            # 才导入。不传的话检索是 fail closed 的（一条都不返回），
+            # 整份题集会全变成「知识库暂无此内容」，而那看起来像模型退化了。
+            # 跨空间的负例题集是 M19-A 的活，那时这里会变成一个参数。
+            from copilot import spaces
+
+            space_id = await spaces.default_id(session)
+
             # 可见范围 = 公共库 +（指定用户时）他的私有库，和线上完全一致
             scope_filter = (
                 Chunk.owner_id.is_(None)
@@ -456,6 +464,7 @@ def retrieve_all(
                     emb,
                     rr,
                     user_id=user_id,  # None = 只打公共库
+                    space_id=space_id,
                     top_k=r["top_k"],
                     rerank_k=r["rerank_k"],
                     score_threshold=r["threshold"],
@@ -623,11 +632,17 @@ def run_agent_cases(
         answer_llm = ChatLLM(forced_temperature=0.0)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
+            # 同直路那一支：评测只量旗舰版，不传就是 fail closed
+            from copilot import spaces
+
+            space_id = await spaces.default_id(session)
+
             CORPUS_STATS["chunk_count"] = await session.scalar(
                 select(func.count(Chunk.id)).where(Chunk.owner_id.is_(None))
             )
             for i, case in enumerate(cases, 1):
                 deps = AgentDeps(
+                    space_id=space_id,
                     session=session,
                     # 公共库用随机用户保持可见范围为公共库；私有评测必须沿用
                     # `--as-user` 解析出的 ID，否则私有文档永远不会被检索到。

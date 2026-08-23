@@ -321,3 +321,53 @@ async def test_forged_token_rejected(api_client):
 async def test_health_needs_no_login(api_client):
     r = await api_client.get("/api/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+# ---------- 管理员守卫（M14-A）----------
+
+
+async def test_require_admin_rejects_a_regular_user(api_client, logged_in, maker):
+    """⭐ 普通用户过不了 `require_admin`。
+
+    ⚠️ 这里断言的是**服务端**的判定。前端的 `/admin` guard 只负责体验，
+    挡不住任何一个会开控制台的人。
+    """
+    from fastapi import HTTPException
+
+    from copilot.auth.deps import require_admin
+    from copilot.db.models import User
+
+    async with maker() as s:
+        user = await s.get(User, logged_in)
+        assert user.is_admin is False, "新注册用户不该是管理员"
+        with pytest.raises(HTTPException) as e:
+            await require_admin(user)
+        assert e.value.status_code == 403
+
+
+async def test_require_admin_lets_an_admin_through(api_client, logged_in, maker):
+    from copilot.auth.deps import require_admin
+    from copilot.db.models import User
+
+    async with maker() as s:
+        user = await s.get(User, logged_in)
+        user.is_admin = True
+        await s.commit()
+        assert await require_admin(user) is user
+
+
+async def test_a_disabled_account_cannot_even_authenticate(api_client, logged_in, maker):
+    """⭐ 停用之后，手里的旧 JWT 立刻失效——管理员守卫不必重复判 `is_active`。
+
+    这一条是 `require_admin` 不再重复检查停用状态的**前提**。两处都写等于
+    两处都要维护，而漏掉一处的表现是「停用了还能用管理台」。
+    """
+    from copilot.db.models import User
+
+    async with maker() as s:
+        user = await s.get(User, logged_in)
+        user.is_active = False
+        await s.commit()
+
+    r = await api_client.get("/api/knowledge-spaces")
+    assert r.status_code == 401

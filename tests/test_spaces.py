@@ -317,3 +317,25 @@ async def test_an_unknown_code_fails_closed(maker):
     async with maker() as s:
         with pytest.raises(spaces.SpaceNotFound):
             await spaces.by_code(s, "flagshipp")
+
+
+# ---------- 列表接口 ----------
+
+
+async def test_the_api_lists_only_selectable_spaces(api_client, logged_in):
+    """⭐ 接口只列**用户能选的**：inactive 的企业版和 `common` 都不出现。
+
+    列出 inactive 的表现是：用户选进去，问什么都得到「知识库暂无此内容」，
+    而他会以为是系统坏了。
+    """
+    r = await api_client.get("/api/knowledge-spaces")
+    assert r.status_code == 200
+    body = r.json()
+    codes = [x["code"] for x in body]
+    assert codes == [spaces.FLAGSHIP], f"多列了：{codes}"
+    assert all("id" not in x for x in body), "不要把 id 暴露给前端——每套环境的 id 都不一样"
+
+
+async def test_the_space_list_needs_a_login(api_client):
+    r = await api_client.get("/api/knowledge-spaces")
+    assert r.status_code == 401
