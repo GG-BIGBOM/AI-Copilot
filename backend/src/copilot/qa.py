@@ -588,15 +588,36 @@ def rewrite_query(llm: ChatLLM, question: str, history: list[tuple[str, str]]) -
     return rewritten
 
 
+# 历史里的引用/配图编号。**喂回模型之前必须剥掉**，理由见 `_history_messages`。
+# 和 `agent/runner._MARK_RE` 是同一条规则，两条路都要做。
+_HISTORY_MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
+
+
 def _history_messages(history: list[tuple[str, str]] | None) -> list[dict]:
-    """历史轮次。只取最近几轮，且每条都截断。"""
+    """历史轮次。只取最近几轮，每条都截断，**并剥掉 `[n]` / `[图n]` 编号**。
+
+    ⚠️ **编号是每一轮各自的，跨轮无意义。** 上一轮召回 5 块材料，这一轮可能
+    只召回 1 块；把上一轮带 `[2]` `[5]` 的答案原样喂回去，模型会照着那个样子
+    继续写编号——于是正文引用 `[2]` `[5]`，而页面上的来源列表只有 1 条，
+    点不动，也查不出它到底指哪一篇。
+
+    2026-08-23 的 20 组人工验收撞到的原句（组 2 第 2 轮「那不良品呢？」）：
+    正文写着「…默认勾选 [2]」「…记录正品和残次品的库存量 [5]」，
+    来源列表**只有 1 条**（仓储 · 生产入库的质检操作）。
+
+    Agent 那条路早就在 `agent/runner._prior_messages` 里剥了；直路一直没剥,
+    同一道防线只做了一半。
+    """
     if not history:
         return []
-    return [
-        {"role": role, "content": content[:_HISTORY_CHAR_LIMIT]}
-        for role, content in history[-HISTORY_TURNS:]
-        if role in ("user", "assistant") and content.strip()
-    ]
+    out = []
+    for role, content in history[-HISTORY_TURNS:]:
+        if role not in ("user", "assistant") or not content.strip():
+            continue
+        # 用户自己打的字不动——他要是引用了「第 2 条」，那是他的原话
+        text = _HISTORY_MARK_RE.sub("", content) if role == "assistant" else content
+        out.append({"role": role, "content": text[:_HISTORY_CHAR_LIMIT]})
+    return out
 
 
 # 兜底话术前面最多允许多长的铺垫，超过就说明前面那段是**答案**，不是解释。
@@ -765,7 +786,9 @@ async def ask_stream(
         # 变成「知识库暂无此内容」——假阴性正是主体约束这条规则最贵的失败。
         # 点名带公司后缀的问法没有这个歧义：他问的就是这一家的约定。
         if asks_about_named_subject(search_query) or asks_about_named_subject(question):
-            result = RetrievalResult(chunks=[c for c in result.chunks if c.private])
+            # ⚠️ `renumbered()` 不能省：滤掉公共块之后编号会留下窟窿
+            # （线上出现过「来源 · 2」下面列着 1 和 4），见它的 docstring
+            result = RetrievalResult(chunks=[c for c in result.chunks if c.private]).renumbered()
             context = result.build_context()  # 编号跟着材料一起重排，别留旧的
 
     # 定义题才追加那一段。判据用**原句和改写后的独立问题**两处：

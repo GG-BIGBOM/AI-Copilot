@@ -73,6 +73,30 @@ def test_small_talk_miss(text):
     assert small_talk_reply(text) is None
 
 
+def test_history_citation_marks_are_stripped_before_they_go_back_to_the_model():
+    """⭐ 编号是每一轮各自的，跨轮无意义。
+
+    2026-08-23 人工验收（组 2 第 2 轮「那不良品呢？」）：正文写着
+    「…默认勾选 [2]」「…记录正品和残次品的库存量 [5]」，而来源列表**只有 1 条**。
+    上一轮召回 5 块、这一轮只召回 1 块，模型照着历史里的样子继续写编号。
+    Agent 路早就剥了，直路一直没剥。
+    """
+    from copilot.qa import _history_messages
+
+    msgs = _history_messages(
+        [
+            ("user", "退货入库怎么操作"),
+            ("assistant", "先在【入库开单】引用退货单 [1]，再审核 [2]。配图见 [图1]"),
+            ("user", "那不良品呢"),
+        ]
+    )
+    assistant = [m for m in msgs if m["role"] == "assistant"][0]["content"]
+    assert "[1]" not in assistant and "[2]" not in assistant and "[图1]" not in assistant
+    assert "入库开单" in assistant, "只剥编号，正文要留着"
+    # 用户自己打的字不动
+    assert msgs[0]["content"] == "退货入库怎么操作"
+
+
 async def test_greeting_answers_without_retrieval(
     api_client, logged_in, public_chunk, fake_providers
 ):

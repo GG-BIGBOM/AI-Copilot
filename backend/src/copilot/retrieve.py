@@ -118,6 +118,26 @@ class RetrievalResult:
     def citations(self) -> list[Citation]:
         return [c.citation for c in self.chunks]
 
+    def renumbered(self) -> RetrievalResult:
+        """把编号重排成连续的 1..n。**滤掉几块之后必须调它。**
+
+        编号是「这一轮材料的第几条」，不是块的身份。滤掉中间几块却留着旧号，
+        页面上就会出现「来源 · 2」下面列着 1 和 4——用户看得见 2 和 3 不见了，
+        却无从知道那是被规则挡掉的还是系统丢了。上下文里同样别扭：
+        模型看到的材料标着 [1] [4]，它照抄，正文里也就出现跳号的引用。
+
+        2026-08-23 人工验收撞到的原句：「星辰电商的对账以什么为准？」
+        点名主体那道闸门滤掉了公共材料，剩下两块仍标着 1 和 4。
+        """
+        from dataclasses import replace
+
+        return RetrievalResult(
+            chunks=[
+                replace(rc, citation=replace(rc.citation, n=i))
+                for i, rc in enumerate(self.chunks, start=1)
+            ]
+        )
+
     @property
     def private_count(self) -> int:
         """这一轮召回里有几块来自用户自己的文档。

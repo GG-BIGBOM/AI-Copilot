@@ -536,6 +536,20 @@ async def test_named_subject_answer_never_sees_public_material(customer_docs):
     assert "流程中拆分条件说明" not in context, "公共材料仍然进了上下文"
     assert "客户A-实施配置约定" in context, "他自己的文档被一起滤掉了"
     assert all("流程中拆分条件说明" not in c.title for c in streamed.citations)
+    # ⭐ 滤完要**重排编号**。留着旧号的话，页面上会出现「来源 · 2」下面列着
+    # 1 和 4（2026-08-23 人工验收的原句：「星辰电商的对账以什么为准？」），
+    # 上下文里的材料也标着跳号的 [1] [4]，模型照抄，正文引用跟着跳。
+    assert [c.n for c in streamed.citations] == list(
+        range(1, len(streamed.citations) + 1)
+    ), "滤掉公共块之后编号留了窟窿"
+    import re
+
+    assert [int(n) for n in re.findall(r"^\[(\d+)\] 来源：", context, re.M)] == list(
+        range(1, len(streamed.citations) + 1)
+    ), "上下文里的编号也要连续"
+    # ⚠️ 这道断言在这个夹具上是**结构性成立**的（私有块正好排在最前），
+    # 真正盯住重排的是 test_images.py::test_citations_are_renumbered_after_chunks_are_filtered_out。
+    # 这里留着是为了在整条链路上再确认一次，两处缺一不可。
 
 
 async def test_first_person_question_keeps_public_material(customer_docs):

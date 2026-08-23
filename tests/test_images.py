@@ -222,6 +222,25 @@ def _chunk(n: int, content: str, images: list[dict]) -> RetrievedChunk:
     )
 
 
+def test_citations_are_renumbered_after_chunks_are_filtered_out():
+    """⭐ 编号是「这一轮材料的第几条」，不是块的身份。
+
+    2026-08-23 人工验收：「星辰电商的对账以什么为准？」——点名主体那道闸门
+    滤掉了公共材料，剩下两块仍标着 1 和 4，于是页面上出现「来源 · 2」下面
+    列着 1 和 4；送进模型的材料也标着 [1] [4]，模型照抄，正文引用跟着跳号。
+    """
+    kept = RetrievalResult(chunks=[_chunk(2, "私有一", []), _chunk(4, "私有二", [])])
+
+    renumbered = kept.renumbered()
+
+    assert [c.n for c in renumbered.citations] == [1, 2]
+    assert [c.title for c in renumbered.citations] == ["文档2", "文档4"], "只换号，别换内容"
+    assert renumbered.build_context().text.startswith("[1] 来源：")
+    assert "[2] 来源：" in renumbered.build_context().text
+    # 原对象不动：调用方可能还要用它算别的
+    assert [c.n for c in kept.citations] == [2, 4]
+
+
 def test_context_renumbers_markers_globally():
     """块里存的是 [图:a3f9]，送进模型的必须是从 1 开始的连续编号。"""
     result = RetrievalResult(
