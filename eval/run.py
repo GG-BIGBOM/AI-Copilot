@@ -109,6 +109,39 @@ _NEGATORS = "不非无未没别勿"
 # 往前看几个字。「不是平台结算单」隔 1 个字，「不使用二联」隔 2 个
 _NEG_WINDOW = 3
 
+# ⚠️ 第二种假阳性：**排除句在被禁串的后面**（2026-08-23 风险边界实测）。
+# `st-cancel-release-stock` 的答案先照材料讲了 JIT 的释放规则、点明出处，
+# 紧接着写「**但普通淘宝订单不适用此规则**」——这正是铁律 8 要的答法
+# （把别家的规则摆出来并划清界限），却因为「夜间定时任务」这个禁串出现在
+# 排除句之前，被判成串场景。往前看三个字的窗口够不着它。
+#
+# 所以再看一眼**后面**：被禁串之后不远处出现「不适用 / 并非 / 无关 / 仅适用于」
+# 这类划界说法，就认为它是被点名排除的、不是被拿来当答案的。
+#
+# ⚠️ 这仍然是近似，方向和 `_NEGATORS` 一致：**宁可漏抓一个绕着圈说的违规，
+# 也不能把「说清它不适用」这种正确答法判成违规**——那会逼着模型闭嘴，
+# 而闭嘴恰恰是这套指标最容易被骗过去的失败形态。
+_EXCLUDERS = (
+    "不适用",
+    "不适用于",
+    "并非",
+    "并不适用",
+    "不是这个",
+    "无关",
+    "不针对",
+    "不涉及",
+    "仅适用于",
+    "只适用于",
+    "规则不同",
+    "不同于",
+    "此处不适用",
+)
+# 划界的话可能在被禁串**前**也可能在**后**，两边都要看：
+#     后：「……夜间定时任务自动释放。[1] 但普通淘宝订单不适用此规则」
+#     前：「JIT 实时订单的库存释放**规则不同**——……由夜间定时任务释放」
+# 一句这样的论述大约 30 字，留一倍余量；再远就不是同一处论述了
+_EXCLUDE_WINDOW = 60
+
 
 def banned_hits(answer: str, banned: list[str]) -> list[str]:
     """答案里真的出现了被禁内容的那几条。
@@ -128,6 +161,11 @@ def banned_hits(answer: str, banned: list[str]) -> list[str]:
     ⚠️ 这仍然是个近似：「不仅支持指定员工」会被误放行。出题时把被禁串写得
     具体一点（带数字、带平台名）比在这里堆规则可靠——**这个函数的职责是
     别把否定句判成违规，不是理解中文**。
+
+    第二种假阳性（排除句在**后面**）见 `_EXCLUDERS` 上面那段。
+    ⚠️ 它同样是近似，且**分不开**这一种：编完一个数字，紧跟着写一句
+    「另一家的规则不适用」。真遇上了要靠出题——把禁串写得具体一点
+    （带数字、带平台名），而不是在这里继续堆规则。
     """
     hits: list[str] = []
     low = answer.lower()
@@ -137,7 +175,10 @@ def banned_hits(answer: str, banned: list[str]) -> list[str]:
             continue
         start = 0
         while (i := low.find(t, start)) >= 0:
-            if not set(answer[max(0, i - _NEG_WINDOW) : i]) & set(_NEGATORS):
+            negated_before = bool(set(answer[max(0, i - _NEG_WINDOW) : i]) & set(_NEGATORS))
+            near = low[max(0, i - _EXCLUDE_WINDOW) : i + len(t) + _EXCLUDE_WINDOW]
+            excluded = any(x in near for x in _EXCLUDERS)
+            if not negated_before and not excluded:
                 hits.append(term)
                 break
             start = i + 1
@@ -148,16 +189,22 @@ def banned_hits(answer: str, banned: list[str]) -> list[str]:
 
 
 def _guard_suffix(mode: str, general: bool | None = None) -> str:
-    """主体约束那一段（M11 P3 第 3 步）追加在 system prompt 后面的文本。
+    """按问题形状追加的那几段文本：主体约束（M11 P3）和定义题追加段（2026-08-23）。
 
     ⚠️ **拿 `system_prompt_for` 算差值，不要自己抄一份。**
     那段话只该有一个出处；抄一份的话，改了线上那份而评测还在用旧的，
     评测就会一直报告一个早就不存在的系统。
+
+    ⚠️⚠️ **两段都要算进指纹。** 它们不在 `prompt_text` 里（只有命中的那一轮
+    才会被拼上去），漏掉哪一段，改了它的两轮就会存出一模一样的 sha——
+    2026-08-20 私有库那四轮就是这么丢掉唯一变过的东西的。
     """
     from copilot.qa import system_prompt_for
 
     base = system_prompt_for(mode, general=general)
-    return system_prompt_for(mode, subject_guard=True, general=general)[len(base) :]
+    guard = system_prompt_for(mode, subject_guard=True, general=general)[len(base) :]
+    definition = system_prompt_for(mode, general=general, definition=True)[len(base) :]
+    return guard + definition
 
 
 @dataclass
@@ -579,11 +626,49 @@ JUDGE_TIMEOUT = 60.0
 JUDGE_ERROR_LIMIT = 5.0
 
 
+JUDGE_UNAVAILABLE = "judge_unavailable"
+
+
 def judge_all(
-    results: list[CaseResult], cases: list[dict], workers: int = 5, quiet: bool = False
+    results: list[CaseResult],
+    cases: list[dict],
+    workers: int = 5,
+    quiet: bool = False,
+    skip: bool = False,
 ) -> str:
+    """判分。`skip=True` 时只做确定性判定，语义判分一律记「没判成」。
+
+    ⭐ **`--no-judge` 不是「不判分也能过」，恰恰相反。** 判分器欠费/断网时，
+    准确率、幻觉率这些要看语义的指标本来就量不出来；照旧跑只会得到一堆
+    被重试拖慢的 429，再被误读成模型退化（M13 P0 那一段说的就是这件事）。
+    所以这里把它们如实标成 `judge_error` —— `score()` 会因此把
+    判分失效率顶到 100%、`可信` 打成 false，整轮结果**不能**用来比较好坏。
+
+    留下来的是三条**规则判定**的发布红线：该拒答有没有拒答、有没有编来源
+    编号、有没有串别家的规则。它们只看答案文本，判分器在不在场都成立。
+    """
     from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
+
+    if skip:
+        by_id = {c["id"]: c for c in cases}
+        for cr in results:
+            case = by_id[cr.id]
+            cr.missing_facts = [
+                f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
+            ]
+            cr.banned_hits = banned_hits(cr.answer, case.get("must_not_include") or [])
+            if cr.banned_hits:
+                cr.unsupported = f"出现了禁止内容：{cr.banned_hits}"
+            if cr.said_no_answer:
+                cr.verdict, cr.grounded, cr.reason = "no_answer", True, "答案是兜底话术"
+                continue
+            cr.verdict = JUDGE_UNAVAILABLE
+            cr.judge_error = True
+            cr.reason = "判分器不可用（--no-judge）：这一轮只有规则判定有效"
+        if not quiet:
+            print("  ⚠️ --no-judge：语义判分全部记为「没判成」，本轮不可用于比较")
+        return ""
 
     s = get_settings()
     model = s.eval_judge_model or s.llm_model
@@ -1090,6 +1175,11 @@ def main() -> None:
         default="",
         help="常识兜底开/关。不传则读 .env 的 ALLOW_GENERAL_KNOWLEDGE",
     )
+    ap.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="判分器不可用时用：只跑规则判定的三条红线，语义指标一律记 UNRELIABLE",
+    )
     ap.add_argument("--top-k", type=int, default=0)
     ap.add_argument("--rerank-k", type=int, default=0)
     ap.add_argument("--threshold", type=float, default=-1.0)
@@ -1159,7 +1249,7 @@ def main() -> None:
             general=cfg.general,
         )
     print("── 判分 ──")
-    judge = judge_all(results, cases, workers=args.workers)
+    judge = judge_all(results, cases, workers=args.workers, skip=args.no_judge)
 
     metrics = score(results, cases)
     path = save(tag, meta, cfg, metrics, results, judge)

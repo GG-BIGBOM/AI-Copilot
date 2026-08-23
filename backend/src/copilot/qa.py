@@ -240,9 +240,6 @@ _TEMPLATE = """{head}
    「材料完全没有」，**不是「有一部分」**。把 B 的步骤搬过来、把名字换成 A，
    是这里最危险的一种答法：它长着有出处的样子，用户分辨不出。
    只有材料**明确写了**「各平台通用」这类话时，才能拿通用流程回答某一个具体平台。
-9. 用户问「X 是什么 / 什么叫 X / X 什么意思」时，**第一句先用通俗的一句话定义他问的
-   那个 X**，再补充材料里的产品能力、适用平台或配置说明。材料只讲了 X 的某个子功能时，
-   不能把子功能当成 X 本身；例如「共享面单」不能冒充「电子面单」的定义。
 
 写法要求：
 {style}"""
@@ -385,8 +382,53 @@ ANSWER_STYLES = {"fast": _STYLE_FAST, "deep": _STYLE_DEEP}
 DEFAULT_MODE = "fast"
 
 
+# ⭐ 定义题追加段（原铁律 9）。**只在问「X 是什么」时追加，不能常开。**
+#
+# 它常开过一版（2026-08-21 加进 `_TEMPLATE`），代价在 2026-08-23 的风险边界
+# A/B 上量了出来——同一份题集、同一个语料、只差这一条：
+#
+#     high_risk_hallucination_rate       0.0% → 18.2%
+#     cross_platform_contamination_rate  0.0% → 20.0%
+#     no_answer_correct_rate           100.0% → 81.8%
+#
+# 坏在哪：「第一句先用通俗的一句话定义」是给**定义题**写的，可模型把它读成了
+# 「任何问题都先用自己的话开个头」。于是「Temu 的电子面单怎么取号」不再拒答，
+# 而是「知识库里没有专门针对 Temu 的说明。**按通用理解**，通常是在 ERP 中
+# 新建快递……」——一套编出来的操作路径，长着有出处的样子。
+#
+# 光在这条规则后面补一句「只管定义、不管操作」**没用**（同样量过，两条硬指标
+# 一个点都没动）。所以改成由代码判定问题形状：定义题才追加这一段，
+# 操作题连见都见不到它。这也是本项目一贯的做法——
+# **能由规则保证的边界，不交给 prompt 猜。**
+_DEFINITION_HINT = """
+
+⭐ 这一问是在问「某个东西是什么」：
+- **第一句先用通俗的一句话定义他问的那个 X**，再补充材料里的产品能力、
+  适用平台或配置说明。
+- 材料只讲了 X 的某个子功能时，不能把子功能当成 X 本身；
+  例如「共享面单」不能冒充「电子面单」的定义。
+- ⚠️ 这只覆盖「是什么」那句定义。**同一个回答里的操作步骤、界面路径、
+  参数取值仍然只能来自材料**，材料里没有就说没有。"""
+
+# 「X 是什么 / 什么是 X / 什么叫 X / X 什么意思」这几种问法。
+# ⚠️ `是什么时候 / 是什么原因` 这类**不是**定义题，问的是时机和归因，
+# 顺着它给一句"通俗定义"只会跑题，所以在这里排掉。
+_DEFINITION_RE = re.compile(
+    r"什么是|啥是|什么叫|怎么理解|如何理解|是什么(?!时候|时间|情况|原因|地方|样)|是啥|什么意思|啥意思"
+)
+
+
+def is_definition_question(question: str) -> bool:
+    """这一问是不是在要一个定义。评测和线上走同一个函数，别各抄一份。"""
+    return bool(_DEFINITION_RE.search(question or ""))
+
+
 def system_prompt_for(
-    mode: str = DEFAULT_MODE, *, subject_guard: bool = False, general: bool | None = None
+    mode: str = DEFAULT_MODE,
+    *,
+    subject_guard: bool = False,
+    general: bool | None = None,
+    definition: bool = False,
 ) -> str:
     """按档位拼出 system prompt。认不出来的档位一律退回简答档。
 
@@ -396,6 +438,9 @@ def system_prompt_for(
 
     `general` 是常识兜底（M12）。留 None 则读配置 `ALLOW_GENERAL_KNOWLEDGE`；
     传死值是给评测用的——A/B 两版 prompt 必须能在同一次运行里都拿到。
+
+    `definition` 同 `subject_guard`：由 `ask_stream` 按问题形状判定，
+    **不要常开**，理由见 `_DEFINITION_HINT` 上面那段。
     """
     if general is None:
         general = get_settings().allow_general_knowledge
@@ -405,7 +450,11 @@ def system_prompt_for(
         rule3_tail=_RULE3_TAIL_OPEN if general else _RULE3_TAIL_STRICT,
         style=ANSWER_STYLES.get(mode, _STYLE_FAST),
     )
-    return prompt + _SUBJECT_GUARD if subject_guard else prompt
+    if subject_guard:
+        prompt += _SUBJECT_GUARD
+    if definition:
+        prompt += _DEFINITION_HINT
+    return prompt
 
 
 # 简答档的完整 prompt。评测脚本 import 的是这个名字，别删
@@ -617,10 +666,15 @@ async def ask_stream(
         if result.private_count == 0:
             return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
+    # 定义题才追加那一段。判据用**原句和改写后的独立问题**两处：
+    # 追问经常只写「那这个又是什么」，主体在改写后的句子里
+    wants_definition = is_definition_question(question) or is_definition_question(search_query)
     messages = [
         {
             "role": "system",
-            "content": system_prompt_for(mode, subject_guard=guard, general=general),
+            "content": system_prompt_for(
+                mode, subject_guard=guard, general=general, definition=wants_definition
+            ),
         },
         *_history_messages(history),
         {

@@ -157,10 +157,41 @@ def find_fake_cites(cr: RiskResult) -> list[str]:
     return sorted(bad)
 
 
-def judge_all(results: list[RiskResult], cases: list[dict], workers: int, quiet: bool) -> str:
-    """判分。常识题和高风险题走两份不同的 prompt，其余口径与 `run.py` 一致。"""
+def judge_all(
+    results: list[RiskResult],
+    cases: list[dict],
+    workers: int,
+    quiet: bool,
+    skip: bool = False,
+) -> str:
+    """判分。常识题和高风险题走两份不同的 prompt，其余口径与 `run.py` 一致。
+
+    `skip=True`（`--no-judge`）时只做确定性判定，语义判分一律记「没判成」，
+    理由见 `run.judge_all`。⭐ 这份题集的三条硬指标——高风险幻觉率、假引用率、
+    跨平台污染率——**本来就全是规则判定**（见 `score()` 里那三段注释），
+    判分器不在场照样成立；受影响的只有准确率和 `high_risk_grounded_rate`。
+    """
     from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
+
+    by_id_skip = {c["id"]: c for c in cases}
+    if skip:
+        for cr in results:
+            case = by_id_skip[cr.id]
+            cr.missing_facts = [
+                f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
+            ]
+            cr.banned_hits = base.banned_hits(cr.answer, case.get("must_not_include") or [])
+            cr.fake_cites = find_fake_cites(cr)
+            if cr.said_no_answer:
+                cr.verdict, cr.grounded, cr.reason = "no_answer", True, "答案是兜底话术"
+                continue
+            cr.verdict = base.JUDGE_UNAVAILABLE
+            cr.judge_error = True
+            cr.reason = "判分器不可用（--no-judge）：这一轮只有规则判定有效"
+        if not quiet:
+            print("  ⚠️ --no-judge：语义判分全部记为「没判成」，本轮不可用于比较")
+        return ""
 
     s = get_settings()
     model = s.eval_judge_model or s.llm_model
@@ -489,8 +520,18 @@ def main() -> None:
         default="",
         help="常识兜底开/关。不传则读 .env 的 ALLOW_GENERAL_KNOWLEDGE",
     )
+    ap.add_argument(
+        "--prompt",
+        default="current",
+        help="用哪版 system prompt（见 eval/prompts.py）。A/B 换 prompt 时用",
+    )
     ap.add_argument("--mode", default="fast", choices=["fast", "deep"])
     ap.add_argument("--workers", type=int, default=5)
+    ap.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="判分器不可用时用：只跑规则判定的三条红线，语义指标一律记 UNRELIABLE",
+    )
     args = ap.parse_args()
 
     if args.compare:
@@ -501,7 +542,9 @@ def main() -> None:
     if not cases:
         raise SystemExit("这个范围里一道题都没有，检查 --only")
     cfg = base.Config(
-        mode=args.mode, general={"on": True, "off": False}.get(args.general)
+        prompt=args.prompt,
+        mode=args.mode,
+        general={"on": True, "off": False}.get(args.general),
     )
 
     if args.check:
@@ -528,7 +571,9 @@ def main() -> None:
         general=cfg.general,
     )
     print("── 判分 ──")
-    judge = judge_all(results, cases, workers=args.workers, quiet=False)
+    judge = judge_all(
+        results, cases, workers=args.workers, quiet=False, skip=args.no_judge
+    )
 
     metrics = score(results)
     path = save(tag, meta, cfg, metrics, results, judge)

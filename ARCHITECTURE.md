@@ -149,13 +149,13 @@ export_excel       导出 xlsx
 多轮状态（`profile` / `checklist` / `export_path`）**落在 conversations 表上**，
 不能只放内存：一轮追问跨好几个 HTTP 请求，每个请求都是一次全新的 Agent run。
 
-### 路由（今天是三条路，P13 之后是两条）
+### 路由（今天仍是三条；P13 门禁通过后才会收敛）
 
 ```
 用户提问
  ├─ 寒暄短路（canned）      写死的回复，一次模型调用都不花
  ├─ Agent（灰度白名单）
- └─ 直路 _chat_stream       ← M13 P13 计划删掉，条件见 plan.md
+ └─ 直路 _chat_stream       ← P13 当前未通过门禁，旧路保留；条件见 plan.md
 ```
 
 寒暄那一层**在全 Agent 化之后仍然留着**：「你好」不值得花一次模型调用，

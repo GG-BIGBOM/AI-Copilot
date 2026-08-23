@@ -205,6 +205,51 @@ def test_banned_matcher_catches_real_contamination():
     assert run.banned_hits(answer, ["100×180"]) == ["100×180"]
 
 
+@pytest.mark.parametrize(
+    "answer,banned",
+    [
+        # 2026-08-23 风险边界实测原句（`st-cancel-release-stock`）：
+        # 先照材料讲 JIT 的规则、点明出处，再划清界限。排除句在被禁串**后面**，
+        # 往前看三个字的窗口够不着
+        (
+            "JIT 实时订单占用后 48 小时未核销会自动释放，或按订单创建时间+x 小时后"
+            "当天的夜间定时任务自动释放。[1] 但普通淘宝订单不适用此规则。",
+            ["夜间定时任务"],
+        ),
+        ("材料里讲的是唯品会 JIT 的立即释放规则，与普通淘宝订单无关。", ["立即释放"]),
+        # 划界的话也可能在被禁串**前面**（同一道题的另一种写法）
+        (
+            "以上释放逻辑针对普通订单。JIT 实时订单的库存释放规则不同——"
+            "占用后 48 小时未核销自动释放，或在设置的时间点后由夜间定时任务释放。[1]",
+            ["夜间定时任务"],
+        ),
+    ],
+)
+def test_banned_matcher_skips_terms_that_are_explicitly_excluded(answer, banned):
+    """⭐ 把别家的规则摆出来、再说清「不适用」，正是铁律 8 要的答法。
+
+    判成违规的话，唯一能让指标变好的做法是让模型闭嘴——
+    而「什么都不敢答」恰恰是这套指标最容易被骗过去的失败形态。
+    """
+    assert run.banned_hits(answer, banned) == []
+
+
+def test_exclusion_is_a_window_not_a_pardon_for_the_whole_answer():
+    """赦免只在被禁串近旁生效——隔着一整段的「不适用」不算数。
+
+    ⚠️ 这条钉的是**近似的边界**：这个函数不理解中文，只看被禁串附近有没有划界的话。
+    离得远的排除句救不回一处真串台，正是想要的结果；
+    真正分不开的情形（编完数字紧跟一句"另一家的规则不适用"）留在
+    `banned_hits` 的文档里明写，靠出题时把禁串写具体来兜。
+    """
+    answer = (
+        "Temu 的面单模板尺寸是 100×180，在打印设置里选择模板后保存，"
+        "打印前记得确认打印机型号、纸张方向和面单版本都设置正确，否则会打偏。"
+        "另外补充一句，京东的共享面单规则不适用于 Temu。"
+    )
+    assert run.banned_hits(answer, ["100×180"]) == ["100×180"]
+
+
 def test_banned_content_fails_the_case():
     """dataset.yaml 写着「出现即算错」，代码里现在真的算错了。
 

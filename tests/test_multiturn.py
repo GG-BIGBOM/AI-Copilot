@@ -310,12 +310,21 @@ def test_unknown_mode_falls_back_to_fast():
 
 
 def test_definition_question_rule_keeps_exact_user_term():
-    """概念题须先定义原词，不能用召回到的子功能偷换概念。"""
-    from copilot.qa import system_prompt_for
+    """概念题须先定义原词，不能用召回到的子功能偷换概念。
 
-    prompt = system_prompt_for("fast", general=True)
+    ⚠️ **2026-08-23：这一段从常开改成了只对定义题开。** 常开那版在风险边界
+    A/B 上把高风险幻觉率从 0% 打到 18.2%、跨平台污染率从 0% 打到 20%——
+    模型把「第一句先用通俗的一句话定义」读成了「任何问题都先用自己的话开个头」。
+    这条用例守的仍然是原来那件事（定义题先定义原词），只是判据换成了
+    `definition=True` 那一版 prompt；开关的形状另见 `test_general_knowledge.py`。
+    """
+    from copilot.qa import is_definition_question, system_prompt_for
+
+    prompt = system_prompt_for("fast", general=True, definition=True)
     assert "第一句先用通俗的一句话定义" in prompt
     assert "共享面单" in prompt and "电子面单" in prompt
+    # 真问「电子面单是什么」时这一段确实会被打开
+    assert is_definition_question("电子面单是什么") is True
 
 
 async def test_mode_selects_prompt_and_model(

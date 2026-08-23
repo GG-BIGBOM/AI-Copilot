@@ -19,7 +19,7 @@ import pytest
 
 from copilot.agent.guard import looks_like_kb_answer
 from copilot.config import get_settings
-from copilot.qa import NO_ANSWER, system_prompt_for
+from copilot.qa import NO_ANSWER, is_definition_question, system_prompt_for
 
 
 @pytest.fixture(autouse=True)
@@ -183,3 +183,58 @@ def test_short_replies_are_never_blocked():
     for text in ("要对接哪些平台？", "好的，我记下了。", "仓库是一个还是多个？"):
         assert looks_like_kb_answer(text) is False
         assert looks_like_kb_answer(text, operational_only=True) is False
+
+# ─────────────────────────────────────────────────────────
+# 定义题追加段（原铁律 9）：只对「X 是什么」开，操作题一律见不到
+#
+# ⭐ 它常开过一版，代价在 2026-08-23 的风险边界 A/B 上量了出来：
+#     high_risk_hallucination_rate       0.0% → 18.2%
+#     cross_platform_contamination_rate  0.0% → 20.0%
+# 「第一句先用通俗的一句话定义」被模型读成了「任何问题都先用自己的话开个头」，
+# 于是「Temu 的电子面单怎么取号」不再拒答，改成「按通用理解，通常是在 ERP 中
+# 新建快递……」——一套编出来的操作路径。所以这一组守的是**开关的形状**。
+# ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "电子面单是什么？和以前手写的快递单有什么不一样？",
+        "什么是分销限价",
+        "品牌方又是什么",
+        "共享面单啥意思",
+        "怎么理解一盘货",
+    ],
+)
+def test_definition_questions_are_recognised(question):
+    assert is_definition_question(question) is True
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        # ⭐ 这两句就是 2026-08-23 实测里被常开版打穿的那两道
+        "Temu 的电子面单怎么取号？",
+        "库存周转率低于多少会触发预警？",
+        # 「是什么时候 / 是什么原因」问的是时机和归因，不是定义
+        "自动审核是什么时候触发的",
+        "订单卡住是什么原因",
+        "退货入库怎么操作",
+    ],
+)
+def test_operation_questions_do_not_get_the_definition_hint(question):
+    assert is_definition_question(question) is False
+
+
+def test_definition_hint_is_off_by_default():
+    """默认拼出来的 prompt 里不能有这一段——它一常开就是上面那两个数字。"""
+    assert "第一句先用通俗的一句话定义" not in system_prompt_for("fast")
+    assert "第一句先用通俗的一句话定义" in system_prompt_for("fast", definition=True)
+
+
+def test_definition_hint_does_not_loosen_the_material_only_rules():
+    """开了它，操作步骤仍然只能来自材料——这一段自己也要写清楚这件事。"""
+    prompt = system_prompt_for("fast", definition=True)
+    assert "操作步骤、界面路径、\n  参数取值仍然只能来自材料" in prompt
+    # 铁律 8（另一个平台的材料不是这个问题的材料）一个字都不能因此少
+    assert "材料讲的是另一个平台、另一个客户、另一种单据时" in prompt
