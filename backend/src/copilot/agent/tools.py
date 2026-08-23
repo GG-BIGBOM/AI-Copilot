@@ -303,6 +303,17 @@ async def save_requirement(ctx: RunContext[AgentDeps], field: str, value: str) -
 async def generate_plan(ctx: RunContext[AgentDeps]) -> str:
     """根据已收集的需求生成《实施配置方案》。需求收集齐之后再调。"""
     deps = ctx.deps
+    # ⚠️ **已经有方案了就别再生成一遍。** 2026-08-23 人工验收：方案出完之后
+    # 用户说「你好」「好的谢谢」，模型都照样调了这个工具，于是一句招呼要跑一次
+    # 子 Agent 加二十来次检索，用户收到的是**又一整段方案摘要**——而且每次
+    # 项数还不一样（14 → 15 → 13），看起来像系统在自说自话地改方案。
+    # 真要改需求时，用户会先说改什么，`save_requirement` 更新完 profile
+    # 之后由 runner 的收尾逻辑重新生成；这里挡的是「无理由重跑」。
+    if deps.checklist is not None:
+        return (
+            f"方案《{deps.checklist.title}》本轮已经生成过了，不要重复生成。"
+            "直接回答用户这一句；用户若要修改需求，先用 save_requirement 更新对应字段。"
+        )
     gaps = deps.profile.missing()
     if len(gaps) > 2:
         # 关键信息缺太多时硬生成，只会得到一份「按需配置」的废纸

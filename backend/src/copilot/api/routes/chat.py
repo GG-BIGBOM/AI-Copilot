@@ -680,7 +680,18 @@ async def _use_agent(session: AsyncSession, user, question: str, client_id: str 
 async def _active_plan_flow(
     session: AsyncSession, user_id: uuid.UUID, client_id: str | None
 ) -> bool:
-    """当前会话是否真的在收集实施需求，而不只是恰好走过 Agent。"""
+    """当前会话是否**正在收集**实施需求，而不只是恰好走过 Agent。
+
+    ⚠️ 「收集中」和「出过方案」是两回事（2026-08-23 人工验收撞出来的）。
+    方案已经生成、也导出了之后，用户说「你好」「好的谢谢」——这条判定原来
+    仍然为真，于是寒暄短路被跳过、整句交给 Agent，模型看着一份完整的需求
+    **又把方案重新生成了一遍**（页面上是「已参考 21 条知识内容」加一整段
+    方案摘要，回一句招呼要跑一次子 Agent 加二十来次检索）。
+
+    所以收尾条件是 `checklist`：方案一旦生成，收集流程就结束了，寒暄恢复短路。
+    用户想改需求时照样能继续——那种话（「改成 8 个店」「再加一个仓」）本来
+    就不在寒暄表里，会正常进 Agent。
+    """
     if not client_id:
         return False
     try:
@@ -689,6 +700,8 @@ async def _active_plan_flow(
         return False
     conv = await session.get(Conversation, cid)
     if conv is None or conv.user_id != user_id or conv.profile is None:
+        return False
+    if conv.checklist is not None:
         return False
     return bool(conv.profile) or any(trigger in conv.title for trigger in AGENT_TRIGGERS)
 

@@ -421,6 +421,58 @@ def test_plan_tool_limits_follow_real_flow(profile, title, question, expected):
     assert _needs_plan_limits(conv, question) is expected
 
 
+async def test_generate_plan_refuses_to_rebuild_what_it_already_built(maker, two_users):
+    """第二道闸：就算模型还是调了 generate_plan，也不该重跑一遍。
+
+    重跑一次要开一个子 Agent、二十来次检索，用户等半天收到的是一份
+    项数还不一样的「新」方案。
+    """
+    from types import SimpleNamespace
+
+    from copilot.agent.checklist import Checklist
+    from copilot.agent.tools import generate_plan
+
+    (alice_id, _), _, _ = two_users
+    async with maker() as s:
+        deps = _deps(s, alice_id, profile=Requirement(platforms="淘宝"))
+        deps.checklist = Checklist(title="实施配置清单", summary="12 店 2 仓", items=[])
+        reply = await generate_plan(SimpleNamespace(deps=deps))
+
+    assert "已经生成过" in reply
+    assert "不要重复生成" in reply
+
+
+async def test_small_talk_comes_back_once_the_plan_is_done(maker, two_users):
+    """⭐ 「收集中」和「出过方案」是两回事。
+
+    2026-08-23 人工验收：方案已经生成、也导出了，用户说「你好」——原来仍然
+    算在收集流程里，寒暄短路被跳过、整句交给 Agent，模型看着一份完整需求
+    **又把方案重新生成了一遍**（页面上是「已参考 21 条知识内容」加一整段
+    方案摘要，一句招呼要跑一次子 Agent 加二十来次检索），而且每次项数还不同
+    （14 → 15 → 13），看起来像系统在自说自话地改方案。
+    """
+    from copilot.api.routes.chat import _active_plan_flow
+    from copilot.db.models import Conversation
+
+    (alice_id, _), _, _ = two_users
+    async with maker() as s:
+        conv = Conversation(
+            user_id=alice_id, title="帮我出一个实施方案", profile={"platforms": "淘宝"}
+        )
+        s.add(conv)
+        await s.commit()
+        cid = str(conv.id)
+
+        assert await _active_plan_flow(s, alice_id, cid) is True, "还在收集，寒暄不该短路"
+
+        conv.checklist = {"title": "实施配置清单", "items": []}
+        await s.commit()
+
+        assert await _active_plan_flow(s, alice_id, cid) is False, (
+            "方案已经出完了，收集流程就结束了，寒暄要恢复短路"
+        )
+
+
 @pytest.mark.parametrize(
     ("profile", "note"),
     [
