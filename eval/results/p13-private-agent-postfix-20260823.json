@@ -1,0 +1,935 @@
+{
+  "tag": "p13-private-agent-postfix-20260823",
+  "ran_at": "2026-08-23T13:10:01+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块（M8 清掉 700 块二进制垃圾后）",
+  "config": {
+    "prompt": "current",
+    "path": "agent",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "general": null,
+    "prompt_sha": "3f4cb2d1",
+    "chunk_count": 4568
+  },
+  "judge_model": "moonshot-v1-128k",
+  "reliable": true,
+  "metrics": {
+    "题数": 19,
+    "有效题数": 19,
+    "判分失效": 0,
+    "判对": 19,
+    "判错": 0,
+    "准确率": 100.0,
+    "判分失效率": 0.0,
+    "检索命中率": 100.0,
+    "引用正确率": 100.0,
+    "幻觉率": 0.0,
+    "假阴性率": 0.0,
+    "无据陈述率": 0.0,
+    "可信": true,
+    "分类准确率": {
+      "fact": 100.0,
+      "probe": 100.0,
+      "partial": 0.0,
+      "no_answer": 100.0
+    }
+  },
+  "cases": [
+    {
+      "id": "priv-fact-zhongtong-cap",
+      "kind": "fact",
+      "q": "星辰电商给中通配的日单量上限是多少？",
+      "answer": "星辰电商给中通配的日单量上限是 **800 单**。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.994
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.7523
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.6267
+        },
+        {
+          "n": 4,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1164
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.994,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确，且与材料[1]中的描述一致",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1762
+    },
+    {
+      "id": "priv-fact-warehouse-scope",
+      "kind": "fact",
+      "q": "星辰电商的华南备货仓负责发哪些省份？",
+      "answer": "星辰电商的华南备货仓只发广东、广西、海南三省，其余地区一律由华东主仓发货。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9883
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.7627
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9883,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与材料[1]中的描述完全一致，且所有具体信息均能在材料中找到依据。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1124
+    },
+    {
+      "id": "priv-negation-combo-split",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单需要拆分吗？",
+      "answer": "星辰电商的组合装订单**不需要拆分**。该客户在实施配置约定中明确「组合装拆分：**不启用**」，组合装按整体发货，不拆。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9866
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9866,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确引用了文档中的信息，指出星辰电商的组合装订单不需要拆分。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 578
+    },
+    {
+      "id": "priv-multi-reconciliation",
+      "kind": "fact",
+      "q": "星辰电商的对账以什么为准？多大的差异需要人工复核？",
+      "answer": "星辰电商对账以**平台结算单**为准，不以 ERP 发货单为准 [1]。差异超过 **500 元**的单据挂起人工复核，500 元以内的直接入账 [1]。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.9976
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4984
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.4849
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9976,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案中提到的对账依据和差异金额均与参考材料[1]中的描述一致",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1216
+    },
+    {
+      "id": "priv-noanswer-not-in-fixture",
+      "kind": "no_answer",
+      "q": "星辰电商的退货入库要走哪几个审核节点？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1467
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.1467,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 578
+    },
+    {
+      "id": "priv-probe-inventory-line",
+      "kind": "probe",
+      "q": "星辰的 SKU 库存低到多少会在采购建议里飘红？",
+      "answer": "星辰的 SKU 库存低于 **20 件** 时，会在采购建议里飘红。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9933
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.7817
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0405
+        },
+        {
+          "n": 4,
+          "title": "设置 · 同步设置",
+          "heading": "9.【平台货品库存同步预警值】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/yg3k7xqwrdlrhipi",
+          "score": 0.0295
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 库存同步常见报错及解决方案",
+          "heading": "8、Q：库存同步失败提示:宝贝SKU数量不能低于SKU预扣数量，否则会导致已拍下未付款的买家购买失败同步的数量不能小于平台的预扣数量",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ts8by7gundrlk7zr",
+          "score": 0.0204
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "设置 · 同步设置",
+        "📒常见问题库 · 库存同步常见报错及解决方案"
+      ],
+      "top_score": 0.9933,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确，并且与参考材料[1]中的描述一致。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1885
+    },
+    {
+      "id": "priv-cross-zhongtong-b",
+      "kind": "fact",
+      "q": "远岸家居给中通配的日单量上限是多少？",
+      "answer": "远岸家居给中通配的日单量上限是 **1500 单**。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9947
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.7348
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2783
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9947,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确，且与材料[1]中的信息一致",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-inventory-b",
+      "kind": "fact",
+      "q": "远岸家居的安全库存线是多少件？",
+      "answer": "远岸家居的安全库存线是 SKU 级别统一 **50 件**，低于此数在采购建议里飘红。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9831
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.6374
+        },
+        {
+          "n": 3,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2654
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9831,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确，并且与参考材料[1]中的描述一致。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-stocktake-b",
+      "kind": "fact",
+      "q": "远岸家居每月几号做动碰盘点？",
+      "answer": "远岸家居每月 **25 号**做一次动碰盘点，半年做一次全盘。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.988
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.2454
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1259
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.988,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与材料[1]中的信息一致，指出远岸家居每月25号做一次动碰盘点，半年做一次全盘。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-waybill-a",
+      "kind": "fact",
+      "q": "星辰电商的面单模板用的是几联单？尺寸是多少？",
+      "answer": "星辰电商的面单模板统一用 **76×130 的三联单**，不使用二联单。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9941
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.6009
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.1442
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9941,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确，且与材料[1]中的描述一致",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-cross-warehouse-b",
+      "kind": "fact",
+      "q": "远岸家居的西南备货仓负责发哪些省份？",
+      "answer": "西南备货仓（编码 YA-XN-02）只发四川、重庆、云南、贵州四省，其余地区一律由华北主仓发货。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.986
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0849
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.0303
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.986,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与参考材料[1]中的描述完全一致，且每一条具体说法都能在材料里找到依据。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1567
+    },
+    {
+      "id": "priv-conflict-combo-split-a",
+      "kind": "fact",
+      "q": "星辰电商的组合装订单按什么条件拆分？",
+      "answer": "星辰电商的组合装订单**不拆分**——组合装按整体发货，不启用拆分策略。[1]\n\n材料里没有说明「什么条件下会拆分」这类规则，因为这家客户明确不启用组合装拆分，所以不存在拆分条件。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9343
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9343,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地引用了材料中的信息，指出星辰电商的组合装订单不拆分，并且材料中确实没有提及任何拆分条件。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 578
+    },
+    {
+      "id": "priv-conflict-logistics-switch-a",
+      "kind": "fact",
+      "q": "星辰电商的中通到了日单量上限之后，系统会自动切到韵达吗？",
+      "answer": "不会。星辰电商超出中通日单量上限（800 单）后，**不自动切换快递**，由客服在订单界面手工改派。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.9867
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9641
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0815
+        },
+        {
+          "n": 4,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.0363
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户B-实施配置约定",
+        "客户B-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.9867,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地引用了材料[1]中的信息，指出星辰电商超出中通日单量上限后不自动切换快递，而是由客服手工改派。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1762
+    },
+    {
+      "id": "priv-conflict-reconcile-b",
+      "kind": "fact",
+      "q": "远岸家居的对账以什么为准？差异多少钱要人工复核？",
+      "answer": "远岸家居的对账以 **ERP 发货单** 为准，不以平台结算单为准。差异超过 **200 元** 的单据挂起人工复核，200 元以内的直接入账。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.9939
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.8374
+        },
+        {
+          "n": 3,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4857
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户A-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.9939,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": true,
+      "cited_source": true,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案与参考材料[1]中的描述完全一致",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 1182
+    },
+    {
+      "id": "priv-noanswer-refund-window-b",
+      "kind": "no_answer",
+      "q": "远岸家居约定的售后退款时效是几天？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0607
+        },
+        {
+          "n": 2,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.0519
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定",
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.0607,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 987
+    },
+    {
+      "id": "priv-noanswer-sms-vendor-a",
+      "kind": "no_answer",
+      "q": "星辰电商用的是哪家短信服务商？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0547
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.0547,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 578
+    },
+    {
+      "id": "priv-noanswer-promo-plan-a",
+      "kind": "no_answer",
+      "q": "星辰电商的大促期间订单审核策略是怎么约定的？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.4852
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.1429
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.4852,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 773
+    },
+    {
+      "id": "priv-noanswer-picking-mode-b",
+      "kind": "no_answer",
+      "q": "远岸家居的拣货模式用的是边拣边分还是先拣后分？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户B-实施配置约定",
+          "heading": "远岸家居 · 旗舰版 ERP 实施配置约定（评测夹具） › 二、物流与面单",
+          "url": null,
+          "score": 0.1446
+        }
+      ],
+      "retrieved_titles": [
+        "客户B-实施配置约定"
+      ],
+      "top_score": 0.1446,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 441
+    },
+    {
+      "id": "priv-noanswer-invoice-a",
+      "kind": "no_answer",
+      "q": "星辰电商的发票是随货同行还是电子发票？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具） › 四、对账口径",
+          "url": null,
+          "score": 0.11
+        },
+        {
+          "n": 2,
+          "title": "客户A-实施配置约定",
+          "heading": "星辰电商 · 旗舰版 ERP 实施配置约定（评测夹具）",
+          "url": null,
+          "score": 0.0548
+        }
+      ],
+      "retrieved_titles": [
+        "客户A-实施配置约定",
+        "客户A-实施配置约定"
+      ],
+      "top_score": 0.11,
+      "private_hits": 0,
+      "subject_guard": false,
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "context_chars": 773
+    }
+  ]
+}
