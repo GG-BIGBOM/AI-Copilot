@@ -29,7 +29,6 @@ from test_isolation import PassThroughReranker
 
 from copilot import assets
 from copilot.auth.security import create_access_token
-from copilot.config import get_settings
 from copilot.db.models import Chunk, Document, ImageAsset, User
 from copilot.retrieve import search
 from copilot.sources.images import PUBLIC_PREFIX
@@ -41,17 +40,20 @@ PNG = bytes.fromhex(
 )
 
 
-def _write_png(rel: str) -> None:
-    path = get_settings().image_dir / rel
+def _write_png(rel: str, *, private: bool = False) -> None:
+    # ⚠️ M17 起公私两个根目录：私有图在 `data/private-images/`（nginx 不发它），
+    # 公共图仍在 `data/images/`。写错目录的表现是接口 404——那正是
+    # `/api/images/` 按 owner 选根目录在起作用，别把它当成测试夹具的毛病
+    path = assets.root_for(private=private) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(PNG)
 
 
-def _fresh_image() -> tuple[str, str]:
+def _fresh_image(*, private: bool = False) -> tuple[str, str]:
     """造一张这次测试专用的图，返回（正文里的地址，磁盘相对路径）。"""
     ident = uuid.uuid4().hex[:16]
     rel = f"{ident[:2]}/{ident}.png"
-    _write_png(rel)
+    _write_png(rel, private=private)
     return f"{PUBLIC_PREFIX}/{rel}", rel
 
 
@@ -216,7 +218,7 @@ async def test_deleting_a_document_takes_its_assets(api_client, maker, logged_in
 async def private_doc_with_image(maker, logged_in, flagship_id):
     """一篇带图的私有文档，图有资产行。返回（正文，标题 tag，资产 id）。"""
     tag = uuid.uuid4().hex[:8]
-    url, rel = _fresh_image()
+    url, rel = _fresh_image(private=True)
     body = f"我们仓库的退货入库只走人工复核-{tag}"
 
     async with maker() as s:
@@ -520,14 +522,23 @@ async def test_a_storage_path_that_escapes_the_image_dir_is_refused(
 # ---------- 地址解析 ----------
 
 
-def test_only_the_mirror_prefix_becomes_a_storage_path():
-    """不能凭 Markdown 里写的地址决定这张图能不能看。"""
+def test_only_known_prefixes_become_a_storage_path():
+    """认两种形状，别的一律不认。
+
+    ⚠️ **地址的形状不决定权限**——它只回答「这张图在磁盘上叫什么」。
+    谁能看由 `ImageAsset.owner_id` 说了算。凭 Markdown 里写的东西判权限，
+    等于把权限判断交给了正文内容。
+    """
     assert assets.storage_path_of("/images/ab/cd.png") == "ab/cd.png"
+    # M17：上传文档里解出来的图写成 `asset://`（浏览器不认这个 scheme，
+    # 漏出去的表现是"图裂了"而不是"内容泄漏了"）
+    assert assets.storage_path_of("asset://ab/cd.png") == "ab/cd.png"
     for bad in (
         "https://cdn.nlark.com/x.png",
-        "asset://ab/cd.png",
         "/images/../../etc/passwd",
+        "asset://../../etc/passwd",
         "/images/",
+        "asset://",
         "/uploads/ab/cd.png",
     ):
         assert assets.storage_path_of(bad) is None, bad

@@ -25,6 +25,7 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from copilot import assets
 from copilot.config import get_settings
 from copilot.db.models import Document, Job
 from copilot.db.session import SessionLocal
@@ -102,22 +103,36 @@ async def handle_parse_upload(session: AsyncSession, job: Job, embedder: Embedde
     # 而 `get_vision()` 没配 key 时返回 None，parsers 会给出一句人话
     from copilot.api.providers import get_vision
 
+    # ⭐ 嵌图收集器（M17）。`private=doc.owner_id is not None` 决定图落在哪个
+    # 目录——用户上传的文档一律是私有的，图就一定落进 `data/private-images/`，
+    # 那个目录 nginx 不发。**这一行是公私隔离的物理落点**，写反了不会报错，
+    # 只会让别人 Word 里的截图变成公网可取
+    sink = assets.UploadImageSink(private=doc.owner_id is not None)
+
     try:
         parsed = parse_upload(
             path,
             suffix=Path(doc.original_filename or path.name).suffix,
             vision=get_vision(),
+            sink=sink,
         )
     except ParseError as e:
         raise PermanentError(str(e)) from e
 
-    n = await write_chunks(session, doc, parsed.markdown, embedder)
+    n = await write_chunks(session, doc, parsed.markdown, embedder, image_positions=sink.saved)
     if n == 0:
         raise PermanentError("解析出来的内容太少，切不出可检索的片段")
 
     doc.status = "done"
     doc.error = None
-    return f"{doc.chunk_count} 块" + (f"（{parsed.note}）" if parsed.note else "")
+    note = parsed.note
+    if sink.saved:
+        note = f"{note}，{len(sink.saved)} 张图" if note else f"{len(sink.saved)} 张图"
+    # 被闸门挡掉的也要说出来。不说的话，用户搜不到第 31 张图里的内容时
+    # 只会以为知识库不好用（同扫描件页数上限那一条）
+    if sink.skipped:
+        note = f"{note}，跳过 {sink.skipped} 张（太大/太小/超出张数上限）"
+    return f"{doc.chunk_count} 块" + (f"（{note}）" if note else "")
 
 
 HANDLERS = {queue.PARSE_UPLOAD: handle_parse_upload}

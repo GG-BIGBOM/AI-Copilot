@@ -249,10 +249,14 @@ class ImageAsset(Base):
     冗余下来的拷贝**，只允许 `assets.sync_document_assets()` 一处写值，
     且只能取所属文档的那一个。写成别的值不会报错，只会让越权检查放行。
 
-    暂时没有的列：`page_number` / `slide_number` / `sheet_name` / `anchor` /
-    `vision_text` / `width` / `height`。路线图里都列了，但今天**没有任何一处
-    会往里写值**——解嵌图是 M17 的事。空列会让人以为「解析器忘了填」，
-    等 M17 真解出位置信息时和它的写入方同一个 PR 加，理由同「不提前加 `role`」。
+    ⚠️ **物理位置由 `owner_id` 决定**（M17）：公共图在 `data/images/`
+    （nginx 直发），私有图在 `data/private-images/`（只有 `/api/images/{id}`
+    能取）。见 `assets.root_for()`——这不是"多一道保险"，是让"把私有图写进
+    公共目录"这种代码写不出来。
+
+    仍然没有的列：`vision_text` / `width` / `height`。前者要给每张嵌图打一次
+    视觉模型（一份 PPT 就是几十次付费调用），而它对检索有没有用还没有量过；
+    后两者要解码图片才知道。都等到真有写入方、也真有人要看的时候再加。
     """
 
     __tablename__ = "image_assets"
@@ -285,6 +289,14 @@ class ImageAsset(Base):
     # 同一台机器上），所以历史行是 NULL；此后每次入库由 `assets.py` 补上
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # ===== 这张图在原文档的哪个位置（M17）=====
+    # ⭐ 归属错了不会报错，只会让答案配上另一页的截图——而用户照着点会点不到。
+    # 三个字段互斥地用：PDF 用页码，PPT 用第几张 slide，Excel 用工作表 + 单元格
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    slide_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sheet_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    anchor: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

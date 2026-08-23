@@ -57,7 +57,9 @@ async def get_image(image_id: str, user: OptionalUser, session: SessionDep) -> F
         raise NOT_FOUND
 
     try:
-        path = assets.absolute_path(asset.storage_path)
+        # ⭐ 私有图在**另一个目录**（`data/private-images/`，nginx 不发它）。
+        # 根目录由 owner_id 决定，不由这里选——见 `assets.root_for()`
+        path = assets.absolute_path(asset.storage_path, private=asset.owner_id is not None)
     except ValueError:
         # 库里的路径跑出了 image_dir。正常情况下不可能——真出现了就是
         # 有别的写入方绕过了 `sync_document_assets`，那更不能照着去读文件

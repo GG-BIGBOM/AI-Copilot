@@ -85,7 +85,13 @@ systemctl start copilot-backup.service
 bash deploy/backup-pull.sh
 ```
 
-每天 `pg_dump` + `uploads` 打包，留 14 份，落在 `/var/backups/copilot/`。
+每天 `pg_dump` + `uploads` + `private-images` 打包，留 14 份，
+落在 `/var/backups/copilot/`。
+
+⚠️ `data/private-images/`（M17：上传文档里解出来的截图）**跟 uploads 一档**，
+不跟语雀镜像那一档：它看起来是图片，但**不可再生**——原件在用户自己的
+电脑上，丢了只能让每个人重新传一遍。语雀那 1.1G 镜像相反，
+一条 `copilot sync-yuque` 就能重下。
 
 ### ⭐ 告警渠道只有一个：`deploy.sh` 的「备份体检」
 

@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils";
 // 但对用户是同一条路：传上去、等状态转绿。
 // ⚠️ 要和后端 `upload_allowed_suffixes` 保持一致——这里多写一个类型，
 // 用户传上去只会收到一句「不支持的文件类型」，而他明明是照着提示传的
-const ACCEPT = ".md,.txt,.docx,.pptx,.pdf,.png,.jpg,.jpeg,.webp,.bmp";
+const ACCEPT = ".md,.txt,.docx,.pptx,.xlsx,.pdf,.png,.jpg,.jpeg,.webp,.bmp";
 const POLL_MS = 3000;
 
 /** 状态词面向用户，不是后端枚举（§19.5） */
@@ -215,7 +215,7 @@ export default function DocumentsPage() {
           <div className="flex w-full max-w-md flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-bronze-border p-10 text-center">
             <Upload className="size-5 text-bronze-strong" />
             <p className="text-sm font-medium text-foreground">松手就开始上传</p>
-            <p className="text-[13px] text-muted-foreground">支持 md / txt / docx / pptx / pdf / 图片</p>
+            <p className="text-[13px] text-muted-foreground">支持 md / txt / docx / pptx / xlsx / pdf / 图片</p>
           </div>
         </div>
       )}
@@ -339,7 +339,7 @@ export default function DocumentsPage() {
                 把文件拖到这里，或点击选择
               </span>
               <span className="text-[13px] text-muted-foreground">
-                支持 md / txt / docx / pptx / pdf / 图片，单份不超过 20MB
+                支持 md / txt / docx / pptx / xlsx / pdf / 图片，单份不超过 20MB
               </span>
               <span className="mt-1 text-[13px] text-muted-foreground/70">
                 传一份操作手册上来，提问时就能引用到它

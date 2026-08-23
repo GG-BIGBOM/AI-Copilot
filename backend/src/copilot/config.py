@@ -165,6 +165,13 @@ class Settings(BaseSettings):
     image_rate_limit_per_sec: float = 6.0
     image_max_retries: int = 3
     image_max_bytes: int = 10 * 1024 * 1024  # 单张上限，超了跳过
+    # ===== 上传文档里的嵌图（M17）=====
+    # 一篇文档最多解出几张图。**这是一道内存和磁盘的闸门**：一份 PPT 可以
+    # 塞进几百张图，而 worker 的 MemoryMax=400M，磁盘只有 40G
+    upload_max_images_per_doc: int = 30
+    # 太小的多半是图标、分隔线、logo。收进来只会让答案挂上一堆装饰性小图，
+    # 而每一张都占一行 image_assets
+    upload_image_min_bytes: int = 4 * 1024
     image_allowed_suffixes: tuple[str, ...] = (
         ".png",
         ".jpg",
@@ -237,6 +244,9 @@ class Settings(BaseSettings):
         ".txt",
         ".docx",
         ".pptx",
+        # M17：Excel 走 openpyxl，一个工作表一节。嵌图是「有限支持」
+        # （openpyxl 的 `ws._images` 是私有属性，见 `parsers.parse_xlsx`）
+        ".xlsx",
         ".pdf",
         # 图片走视觉模型转写。**能不能真的解析取决于 VISION_API_KEY 配没配**，
         # 没配时上传会成功、解析会失败并给出一句人话——比在这里默默不列出来好：
@@ -270,6 +280,21 @@ class Settings(BaseSettings):
     def image_dir(self) -> Path:
         """镜像下来的语雀配图。线上由 nginx 直接发，不经过 Python。"""
         return self.data_dir / "images"
+
+    @property
+    def private_image_dir(self) -> Path:
+        """用户上传文档里解出来的图（M17）。**和公共图物理分开。**
+
+        ⚠️⚠️ **这个目录绝不能被 nginx alias 出去。** `/images/` 那个目录是
+        静态直发的，谁猜中文件名谁就能取；把别人 Word 里的截图放进去，
+        等于把私有内容挂在公网上，而且没有任何症状。
+        私有图只有一条出口：`GET /api/images/{id}`，后端逐次校验 owner。
+
+        分目录不是"再加一道保险"，是**让写错的那种代码写不出来**：
+        路径由 `owner_id` 决定（见 `assets.absolute_path`），
+        一张私有图在物理上就落不进公共目录。
+        """
+        return self.data_dir / "private-images"
 
     @property
     def export_dir(self) -> Path:

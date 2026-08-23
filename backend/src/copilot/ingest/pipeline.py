@@ -143,12 +143,17 @@ async def write_chunks(
     markdown: str,
     embedder: Embedder,
     settings=None,
+    image_positions: dict[str, dict] | None = None,
 ) -> int:
     """切分 + 向量化 + 用新块整体替换该文档的旧块。返回块数，0 表示切不出内容。
 
     ⚠️ **这是全项目唯一往 `chunks.owner_id` 写值的地方**，且只能取
     `doc.owner_id`。隔离的地基在这一行上——写成别的值不会报错，
     只会在某天让 A 的私有文档出现在 B 的答案里。
+
+    `image_positions` 是「磁盘相对路径 → 第几页 / 第几张 slide / 哪个工作表」，
+    解析嵌图时攒出来的（M17）。**只有解析器知道这件事**——正文里的
+    `![](asset://…)` 不带位置信息，而位置错了的表现是「答案配了另一页的截图」。
 
     不提交事务，交给调用方：上传那条路径还要在同一个事务里改 `status`。
     """
@@ -188,7 +193,9 @@ async def write_chunks(
     # M14-B 双写：块上的 `images` 仍是事实来源，这里再落一份带 owner 的资产行，
     # 好让私有图能走要鉴权的 `/api/images/{id}`。**放在 add_all 之后**——
     # 它要按这一轮的图去删旧行，得先知道这一轮有哪些图
-    await assets.sync_document_assets(session, doc, [img for c in chunks for img in c.images])
+    await assets.sync_document_assets(
+        session, doc, [img for c in chunks for img in c.images], positions=image_positions
+    )
 
     doc.chunk_count = len(chunks)
     return len(chunks)

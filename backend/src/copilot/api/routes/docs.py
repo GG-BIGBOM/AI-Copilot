@@ -33,6 +33,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import delete, desc, func, select
 
+from copilot import assets
 from copilot.api.schemas import DocumentOut, UploadResult
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
@@ -213,14 +214,19 @@ async def delete_document(document_id: uuid.UUID, user: CurrentUser, session: Se
     if doc is None or doc.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文档不存在")
 
-    stored_path = doc.stored_path
+    stored_path, doc_id = doc.stored_path, doc.id
     # ⭐ 块要显式删。只删 documents 行的话，那篇文档会继续出现在答案的引用里
     await session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
     # 图片资产同理（M14-B）。FK 是 CASCADE，这里仍显式删一遍——同上一行的
     # 理由：删干净是这个接口的承诺，不该依赖别处的配置正确。
-    # ⚠️ **不删磁盘上的图片文件。** 图按内容寻址存（同一张图只有一份），
-    # 很可能还有别的文档在引用它，删了就是把别人的文档搞成裂图。
-    # 真正的物理回收留到 M17——那时私有图才第一次落盘，也才有引用计数可数
+    #
+    # ⭐ **三步的顺序都是有理由的**（M17）：
+    #   1. 先记下这篇文档引用了哪些图片文件——行删了就查不到了
+    #   2. 删行
+    #   3. 再看这些文件还有没有别人引用，没有的才删（图按内容寻址存，
+    #      同一张图可能被两篇文档共用；不数引用就删 = 把别人的图弄没）
+    # 文件删在**提交之后**，理由同下面那个上传原件
+    image_paths = await assets.document_image_paths(session, doc)
     await session.execute(delete(ImageAsset).where(ImageAsset.document_id == doc.id))
     # 还没跑的任务一起撤掉：文档都没了，它跑起来只能得出「文档已被删除」。
     # worker 那边扛得住（不会崩），但留着就是让队列攒一堆注定作废的行。
@@ -239,3 +245,6 @@ async def delete_document(document_id: uuid.UUID, user: CurrentUser, session: Se
     # 文件在**提交之后**才删：反过来的话，一旦提交失败，
     # 库里的记录还在、文件已经没了，那篇文档就永远解析不出来了
     _remove_file(stored_path)
+    orphans = await assets.drop_unreferenced_files(session, image_paths, private=True)
+    if orphans:
+        logger.info("删文档 %s，顺带清掉 %d 个没人引用的私有图片", doc_id, orphans)

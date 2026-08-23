@@ -8,8 +8,14 @@
 # 所以这里分了三档，不是懒，是刻意的：
 #
 #     Postgres      每天，14 份，**要异地**   —— 3 个账号、私有文档、会话、邀请码，全不可再生
-#     data/uploads  每天，14 份，**要异地**   —— 用户上传的原件，丢了就没了
-#     data/images   每周，本地快照 2 份       —— 1.1G，能从语雀重下（一次 11 分钟）
+#     data/uploads         每天，14 份，**要异地**  —— 用户上传的原件，丢了就没了
+#     data/private-images  每天，跟着 uploads 走    —— 上传文档里解出来的截图（M17）
+#     data/images          每周，本地快照 2 份      —— 1.1G，能从语雀重下（一次 11 分钟）
+#
+# ⚠️ **private-images 跟 uploads 一档，不跟 images 一档。** 它看起来是"图片"，
+# 但它和语雀镜像的本质区别是**不可再生**：原件在用户自己的电脑上，
+# 丢了就只能让每个人重新上传一遍（而他们多半已经不记得传过什么了）。
+# 量也完全不同——它是几十 MB 级，不是 1.1G。
 #
 # 把 1.1G 的图片塞进每日异地传输的下场是：两周后你自己把这个任务关掉，
 # 那时候连 PG 的备份也一起停了。**分档是为了让最重要的那一档活下来。**
@@ -63,14 +69,22 @@ mv "$DUMP.part" "$DUMP"
 pg_restore -l "$DUMP" > /dev/null || fail "刚生成的 dump 读不出目录，八成是写坏了"
 echo "    $(basename "$DUMP")  $(du -h "$DUMP" | cut -f1)"
 
-echo "==> [2/4] data/uploads（用户上传的原件）"
+echo "==> [2/4] data/uploads + data/private-images（不可再生的那两个目录）"
 UP="$BACKUP_DIR/uploads-$STAMP.tar.gz"
-if [ -d "$APP_DIR/data/uploads" ]; then
-    tar -czf "$UP.part" -C "$APP_DIR/data" uploads
+# 两个目录打进**同一个包**：保留策略、异地拉取、恢复演练都只认
+# `uploads-*.tar.gz` 这一个名字，多一种文件名就多一处要跟着改的地方，
+# 而漏改的表现是「以为在备份，其实没有」
+DIRS=""
+for d in uploads private-images; do
+    [ -d "$APP_DIR/data/$d" ] && DIRS="$DIRS $d"
+done
+if [ -n "$DIRS" ]; then
+    # shellcheck disable=SC2086  # 目录名是上面这个白名单里的，没有空格
+    tar -czf "$UP.part" -C "$APP_DIR/data" $DIRS
     mv "$UP.part" "$UP"
-    echo "    $(basename "$UP")  $(du -h "$UP" | cut -f1)"
+    echo "    $(basename "$UP") （$DIRS ） $(du -h "$UP" | cut -f1)"
 else
-    echo "    没有 uploads 目录，跳过"
+    echo "    这两个目录都还没有，跳过"
 fi
 
 echo "==> [3/4] data/images（每周一次，只留本地）"

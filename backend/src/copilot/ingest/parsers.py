@@ -12,6 +12,15 @@
 PDF 只做纯文本提取，不上 Docling 那条会拖进 torch 的 ML 管线——
 见 plan.md「一、第 3 条硬约束」。
 
+**文档里的嵌图（M17）**：DOCX / PPTX / XLSX / PDF 里的截图要跟着正文一起
+出来，而且**要落在它说明的那一段旁边**——ERP 操作手册的图就是步骤本身，
+统一堆到文末的话，「第二步长什么样」这个问题就答不了了。
+
+解析器自己不落盘、也不知道图片存到哪里：它把字节交给一个 `ImageSink`
+（见 `copilot.assets.UploadImageSink`），拿回一个能写进 Markdown 的地址。
+这样 parsers 保持可离线单测，而「私有图必须落进私有目录」这条规则
+只有一处实现。`sink=None` 时所有格式**照旧只出文字**，一行都不改。
+
 **图片和扫描件走另一条路**：本地跑不了 OCR（同样是 1.6GB 的约束），
 所以送给视觉模型（Kimi）读成文字。这条路和上面几个解析器有一个本质区别——
 **它要联网、要花钱、还可能编造内容**。所以：
@@ -29,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from copilot.ingest.zipguard import UnsafeArchive, check_zip_safety
 
@@ -37,6 +47,22 @@ from copilot.ingest.zipguard import UnsafeArchive, check_zip_safety
 _HEADING_STYLE_RE = re.compile(r"^(?:Heading|标题)\s*([1-6])$", re.I)
 # Word 大纲级别也可能落在 "Title"/"标题"（无数字）上，那是文档大标题
 _TITLE_STYLES = {"title", "标题", "文档标题"}
+
+
+class ImageSink(Protocol):
+    """解析器往里丢图片的口子。实现在 `copilot.assets.UploadImageSink`。
+
+    `save` 返回**正文里该写的地址**；被闸门挡掉（太大、太小、超出张数上限）
+    时返回 None——这时解析器**不要往正文里写这张图**：写一个取不到的地址
+    比没有图更糟，页面上是一张裂图，而用户不知道为什么。
+    """
+
+    def save(self, data: bytes, suffix: str, **meta) -> str | None: ...
+
+
+def _image_md(ref: str | None, alt: str = "") -> str:
+    """图片的 Markdown。`ref` 为 None（被闸门挡掉）时什么都不写。"""
+    return f"![{alt}]({ref})" if ref else ""
 
 
 class ParseError(Exception):
@@ -100,8 +126,40 @@ def _docx_table_to_markdown(table) -> str:
     return "\n".join(lines)
 
 
-def parse_docx(path: Path) -> ParsedUpload:
-    """.docx → Markdown。标题样式转成 `#`，表格转成 Markdown 表格。
+# DOCX 里的图片：`a:blip` 上的 `r:embed` 指向关系 id，关系表再指到
+# `word/media/*` 的实际字节。命名空间写全，别用 local-name() 那种模糊匹配
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _docx_paragraph_images(para, document, sink: ImageSink | None) -> list[str]:
+    """这一段里嵌的图，按出现顺序。返回若干条 Markdown。
+
+    ⚠️ **按段落取，不是一次性把 word/media 全捞出来。** 后者拿到的是一堆
+    没有位置的图，只能统一贴到文末——而 ERP 手册里图就是步骤本身，
+    「第二步长什么样」会因此答不了。
+    """
+    if sink is None:
+        return []
+    out: list[str] = []
+    for blip in para._element.iter(f"{{{_A_NS}}}blip"):
+        rid = blip.get(f"{{{_R_NS}}}embed")
+        if not rid:
+            continue
+        try:
+            part = document.part.related_parts[rid]
+            data, ext = part.blob, Path(part.partname).suffix
+        except (KeyError, AttributeError):
+            # 关系表里找不到这张图（外链图片、或者文件本身不完整）。
+            # 跳过一张图不该让整篇文档解析失败
+            continue
+        if md := _image_md(sink.save(data, ext or ".png")):
+            out.append(md)
+    return out
+
+
+def parse_docx(path: Path, sink: ImageSink | None = None) -> ParsedUpload:
+    """.docx → Markdown。标题样式转成 `#`，表格转成 Markdown 表格，嵌图跟着段落走。
 
     ⚠️ **必须按文档顺序遍历 body 的 XML 子节点。** python-docx 的
     `document.paragraphs` 和 `document.tables` 是两个独立列表，各自有序但
@@ -135,15 +193,18 @@ def parse_docx(path: Path) -> ParsedUpload:
         if tag == "p":
             para = Paragraph(child, document)
             text = para.text.strip()
-            if not text:
-                continue
             style = (para.style.name or "").strip() if para.style is not None else ""
+            images = _docx_paragraph_images(para, document, sink)
+            if not text and not images:
+                continue
             if m := _HEADING_STYLE_RE.match(style):
                 parts.append(f"{'#' * int(m.group(1))} {text}")
             elif style.lower() in _TITLE_STYLES:
                 parts.append(f"# {text}")
-            else:
+            elif text:
                 parts.append(text)
+            # 图紧跟在它所属的那一段后面
+            parts.extend(images)
         elif tag == "tbl":
             if md := _docx_table_to_markdown(Table(child, document)):
                 parts.append(md)
@@ -157,8 +218,8 @@ def parse_docx(path: Path) -> ParsedUpload:
 # ---------- pptx ----------
 
 
-def parse_pptx(path: Path) -> ParsedUpload:
-    """.pptx → Markdown，一页一节。
+def parse_pptx(path: Path, sink: ImageSink | None = None) -> ParsedUpload:
+    """.pptx → Markdown，一页一节，图绑在它所在的那一页。
 
     每页做成一个 `##` 小节，标题优先用页面自己的标题占位符。PPT 的语义单元
     就是「页」，按页分节后引用能落到「第 7 页 · 面单打印设置」，比整篇一块有用得多。
@@ -190,6 +251,17 @@ def parse_pptx(path: Path) -> ParsedUpload:
 
         body: list[str] = []
         for shape in slide.shapes:
+            # ⭐ 图片绑到**这一页**的小节里（`slide_number`）。绑错页的表现是
+            # 答案配了另一页的截图——用户照着点会点不到，而没有任何报错
+            image = getattr(shape, "image", None)
+            if image is not None and sink is not None:
+                try:
+                    data, ext = image.blob, f".{(image.ext or 'png').lstrip('.')}"
+                except (AttributeError, ValueError):
+                    data = None
+                if data and (md := _image_md(sink.save(data, ext, slide_number=i))):
+                    body.append(md)
+                continue
             if not getattr(shape, "has_text_frame", False):
                 continue
             text = shape.text_frame.text.strip()
@@ -272,11 +344,121 @@ def _pdf_page_images(path: Path, pages: list[int], dpi: int) -> list[bytes]:
     return out
 
 
+# ---------- xlsx ----------
+
+
+# 一个工作表最多读多少行。十万行的流水表转成 Markdown 有几十 MB，
+# 既撑爆 worker 的 400M 内存，也不可能是「知识」
+XLSX_MAX_ROWS = 2000
+
+
+def parse_xlsx(path: Path, sink: ImageSink | None = None) -> ParsedUpload:
+    """.xlsx → Markdown，一个工作表一节，嵌图绑到它所在的工作表。
+
+    ⚠️ **只读值，不读公式**（`data_only=True`）：库里要存的是「这个字段填
+    什么」，不是「它是怎么算出来的」。读公式的话，一张对照表会变成一堆
+    `=VLOOKUP(...)`，检索出来对谁都没用。
+
+    ⚠️ **嵌图走 openpyxl 的 `ws._images`（私有属性），所以这一档标注为
+    「有限支持」**（路线图第 37 节）：它不是公开 API，换个版本可能就没了。
+    但为它引一个重量级依赖不划算——真没了就退回只出文字，
+    下面这个 try 就是干这个的，不会让整篇解析失败。
+
+    行数上限是刻意的：一张十万行的流水表转成 Markdown 有几十 MB，
+    既撑爆 worker 的内存，也不可能是「知识」。
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:  # pragma: no cover
+        raise ParseError("服务端缺少 Excel 解析组件（pip install '.[agent]'）") from e
+
+    # 同 docx/pptx：.xlsx 也是 ZIP，先过安全检查（M13 P9）
+    try:
+        check_zip_safety(path, kind="Excel")
+    except UnsafeArchive as e:
+        raise ParseError(str(e)) from e
+
+    try:
+        wb = load_workbook(str(path), data_only=True, read_only=False)
+    except Exception as e:  # noqa: BLE001
+        raise ParseError(f"打不开这个 Excel 文件（{type(e).__name__}）") from e
+
+    parts: list[str] = []
+    try:
+        for ws in wb.worksheets:
+            rows: list[list[str]] = []
+            for row in ws.iter_rows(max_row=XLSX_MAX_ROWS, values_only=True):
+                cells = ["" if v is None else " ".join(str(v).split()) for v in row]
+                if any(cells):
+                    rows.append(cells)
+
+            section = [f"## {ws.title}"]
+            if rows:
+                width = max(len(r) for r in rows)
+                rows = [r + [""] * (width - len(r)) for r in rows]
+                head, *body = rows
+                table = ["| " + " | ".join(c or "　" for c in head) + " |", "|" + "---|" * width]
+                table += ["| " + " | ".join(c or "　" for c in r) + " |" for r in body]
+                section.append("\n".join(table))
+
+            # 图片：`anchor` 记的是它钉在哪个单元格（"B7"），排查时有用
+            for img in list(getattr(ws, "_images", []) or []):
+                if sink is None:
+                    break
+                try:
+                    data = img._data()
+                    anchor = getattr(getattr(img, "anchor", None), "_from", None)
+                    cell = (
+                        f"R{anchor.row + 1}C{anchor.col + 1}" if anchor is not None else None
+                    )
+                except Exception:  # noqa: BLE001 - 私有 API，坏了就当没有图
+                    continue
+                if md := _image_md(
+                    sink.save(data, ".png", sheet_name=ws.title[:128], anchor=cell)
+                ):
+                    section.append(md)
+
+            if len(section) > 1:
+                parts.append("\n\n".join(section))
+    finally:
+        wb.close()
+
+    markdown = "\n\n".join(parts).strip()
+    if not markdown:
+        raise ParseError("这个 Excel 里没有可提取的内容")
+    return ParsedUpload(markdown=markdown, note=f"共 {len(wb.worksheets)} 个工作表")
+
+
 # ---------- pdf ----------
 
 
-def parse_pdf(path: Path, vision=None) -> ParsedUpload:
-    """.pdf → 纯文本，一页一节。
+def _pdf_embedded_images(page, index: int, sink: ImageSink | None) -> list[str]:
+    """这一页里嵌的图。pypdf 已经把它们解成可直接落盘的字节。
+
+    ⚠️ **只取嵌图，不做整页截图。** 路线图提过「每页生成 page snapshot」，
+    但那要把每一页渲染成位图——一份 200 页的 PDF 就是 200 次渲染、几百 MB
+    的中间位图，而 worker 的 MemoryMax 是 400M。数字版 PDF 的文字本来就
+    提得出来，扫描件那条路（整页渲染 + 视觉识别）已经在下面了。
+    """
+    if sink is None:
+        return []
+    out: list[str] = []
+    try:
+        images = list(page.images)
+    except Exception:  # noqa: BLE001 - 单页的图坏了不该毁掉整篇
+        return []
+    for img in images:
+        try:
+            data, name = img.data, (img.name or "")
+        except Exception:  # noqa: BLE001
+            continue
+        if md := _image_md(sink.save(data, Path(name).suffix or ".png", page_number=index)):
+            out.append(md)
+    return out
+
+
+def parse_pdf(path: Path, vision=None, sink: ImageSink | None = None) -> ParsedUpload:
+    """.pdf → 纯文本，一页一节，嵌图绑到它所在的那一页。
 
     **只做纯文本提取**，不做版面还原：PDF 里没有「标题样式」这种结构信息，
     要还原层级得上 ML 版面分析（Docling），而那会拖进 torch——1.6GB 的机器
@@ -310,9 +492,12 @@ def parse_pdf(path: Path, vision=None) -> ParsedUpload:
         try:
             text = (page.extract_text() or "").strip()
         except Exception:  # noqa: BLE001 - 单页坏了不该毁掉整篇
+            text = ""
+        images = _pdf_embedded_images(page, i, sink)
+        if not text and not images:
             continue
-        if text:
-            parts.append(f"## 第 {i} 页\n\n{text}")
+        body = "\n\n".join([p for p in [text, *images] if p])
+        parts.append(f"## 第 {i} 页\n\n{body}")
 
     markdown = "\n\n".join(parts).strip()
     if markdown:
@@ -369,8 +554,13 @@ PARSERS = {
     ".txt": parse_text,
     ".docx": parse_docx,
     ".pptx": parse_pptx,
+    ".xlsx": parse_xlsx,
     ".pdf": parse_pdf,
 }
+
+# 认 `sink=` 这个参数的解析器。纯文本那两个不认——给它们传等于要求
+# 每个解析器都长一样，而 .txt 里根本不可能有嵌图
+_SINK_PARSERS = {parse_docx, parse_pptx, parse_xlsx}
 
 # 这几个必须有视觉模型才解析得了。单列一份是为了让 `parse_upload` 能在
 # 真正读文件之前就判断「这台机器行不行」
@@ -428,7 +618,9 @@ def _run_with_timeout(fn, *args, timeout: float | None = None, **kwargs) -> Pars
         pool.shutdown(wait=False)
 
 
-def parse_upload(path: Path, suffix: str | None = None, vision=None) -> ParsedUpload:
+def parse_upload(
+    path: Path, suffix: str | None = None, vision=None, sink: ImageSink | None = None
+) -> ParsedUpload:
     """按扩展名解析。
 
     `suffix` 可显式指定——落盘名是 uuid，但后缀保留，一般不用传。
@@ -449,5 +641,7 @@ def parse_upload(path: Path, suffix: str | None = None, vision=None) -> ParsedUp
         raise ParseError(f"不支持的文件类型：{ext or '（无扩展名）'}")
     if parser is parse_pdf:
         # 扫描件 PDF 会走进视觉那条路，同样不能卡本机口径
-        return parse_pdf(path, vision=vision)
+        return parse_pdf(path, vision=vision, sink=sink)
+    if parser in _SINK_PARSERS:
+        return _run_with_timeout(parser, path, sink=sink)
     return _run_with_timeout(parser, path)
