@@ -36,7 +36,7 @@ from sqlalchemy import delete, desc, func, select
 from copilot.api.schemas import DocumentOut, UploadResult
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
-from copilot.db.models import Chunk, Document, Job
+from copilot.db.models import Chunk, Document, ImageAsset, Job
 from copilot.jobs import queue
 
 logger = logging.getLogger(__name__)
@@ -216,6 +216,12 @@ async def delete_document(document_id: uuid.UUID, user: CurrentUser, session: Se
     stored_path = doc.stored_path
     # ⭐ 块要显式删。只删 documents 行的话，那篇文档会继续出现在答案的引用里
     await session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+    # 图片资产同理（M14-B）。FK 是 CASCADE，这里仍显式删一遍——同上一行的
+    # 理由：删干净是这个接口的承诺，不该依赖别处的配置正确。
+    # ⚠️ **不删磁盘上的图片文件。** 图按内容寻址存（同一张图只有一份），
+    # 很可能还有别的文档在引用它，删了就是把别人的文档搞成裂图。
+    # 真正的物理回收留到 M17——那时私有图才第一次落盘，也才有引用计数可数
+    await session.execute(delete(ImageAsset).where(ImageAsset.document_id == doc.id))
     # 还没跑的任务一起撤掉：文档都没了，它跑起来只能得出「文档已被删除」。
     # worker 那边扛得住（不会崩），但留着就是让队列攒一堆注定作废的行。
     # ⚠️ 只撤 pending/failed，**不碰 running**——那条正被 worker 拿着，

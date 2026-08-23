@@ -224,6 +224,76 @@ class Chunk(Base):
     document: Mapped[Document] = relationship(back_populates="chunks")
 
 
+class ImageAsset(Base):
+    """一篇文档引用的一张配图。**图片的鉴权事实来源（M14-B）。**
+
+    在它之前，图片只以 `chunks.images` / `messages.images` 里的一段 JSON 存在，
+    地址是 `/images/ab/xxxx.png`——而那个前缀线上由 nginx 直接发，**不经过
+    Python，也就没有任何鉴权**。公共库的语雀截图这样发没问题（本来人人可见），
+    但 M17 一旦开始从用户上传的 DOCX/PPTX 里解出嵌图，同一条链路就会把
+    别人的私有截图挂在一个只要猜中哈希就能取的公网地址上。
+
+    所以这张表存在的理由只有一个：**让每一张图都有一个能查 owner 的行**，
+    私有图走 `GET /api/images/{id}`，由后端逐次校验。
+
+    ⚠️ **它现在是 `chunks.images` 的派生副本，不是替代品。** 双写期内
+    正文里的标记、块上的对照表都不变，检索仍然从 `chunks.images` 出发，
+    这张表只负责回答「这张图是谁的」。所以 downgrade 直接 drop 是安全的。
+
+    一行 = 一个（文档，磁盘文件）。同一张图出现在两篇文档里就是两行，
+    共用同一个 `storage_path`——盘上的文件按 URL 内容寻址，本来就只有一份。
+    不能合并成一行：M17 之后两个用户可能上传同一张截图，那时「谁的」
+    正是靠所属文档区分的。
+
+    ⚠️ **`owner_id` / `knowledge_space_id` 与 `Chunk` 同理，是从 `Document`
+    冗余下来的拷贝**，只允许 `assets.sync_document_assets()` 一处写值，
+    且只能取所属文档的那一个。写成别的值不会报错，只会让越权检查放行。
+
+    暂时没有的列：`page_number` / `slide_number` / `sheet_name` / `anchor` /
+    `vision_text` / `width` / `height`。路线图里都列了，但今天**没有任何一处
+    会往里写值**——解嵌图是 M17 的事。空列会让人以为「解析器忘了填」，
+    等 M17 真解出位置信息时和它的写入方同一个 PR 加，理由同「不提前加 `role`」。
+    """
+
+    __tablename__ = "image_assets"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    # NULL = 公共库的图（语雀截图），非 NULL = 该用户私有。**鉴权只看这一列。**
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
+    # 相对 `settings.image_dir` 的路径，形如 `ab/abcdef0123456789.png`。
+    # ⚠️ 存相对不存绝对，理由同 `documents.stored_path`（见 config.upload_path）：
+    # 绝对路径会把开发机的 C:\Users\... 写进一个要跨机器用的库
+    storage_path: Mapped[str] = mapped_column(String(512))
+    # 正文里 `[图:a3f9]` 的那个短 id。只用来对照排查，不做主键——
+    # 它只有 4 位十六进制，作用域仅限一篇文档内部
+    marker: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    mime_type: Mapped[str] = mapped_column(String(64), default="image/png")
+    # 尽力而为：回填那个 migration 不读磁盘（跑 migration 时数据目录可能都不在
+    # 同一台机器上），所以历史行是 NULL；此后每次入库由 `assets.py` 补上
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # 同一篇文档里同一个文件只该有一行。重新入库靠它做 upsert
+        Index("ux_image_assets_document_path", "document_id", "storage_path", unique=True),
+    )
+
+
 class Job(Base):
     """后台任务队列。用 Postgres 的 FOR UPDATE SKIP LOCKED 消费，不引入 Redis。"""
 

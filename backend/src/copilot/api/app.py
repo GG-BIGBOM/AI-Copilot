@@ -20,6 +20,7 @@ from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import corrections as corrections_routes
 from copilot.api.routes import docs as docs_routes
 from copilot.api.routes import feedback as feedback_routes
+from copilot.api.routes import images as images_routes
 from copilot.api.routes import invites as invites_routes
 from copilot.api.routes import spaces as spaces_routes
 from copilot.api.routes import verified as verified_routes
@@ -86,8 +87,12 @@ def create_app() -> FastAPI:
     app.include_router(verified_routes.router)
     app.include_router(feedback_routes.router)
     app.include_router(spaces_routes.router)
+    app.include_router(images_routes.router)
 
-    # 镜像下来的语雀配图。
+    # 镜像下来的语雀配图。**只有公共图走这里。**
+    # 私有图（M17 从上传文档里解出来的）一律走 `/api/images/{id}`，
+    # 由后端逐次校验 owner——这个 mount 是没有鉴权的，别往里塞私有内容。
+    #
     # ⚠️ 线上由 **nginx** 直接发（`location /images/ { alias .../data/images/; }`），
     # 根本到不了这里；挂在这儿是给本地开发用的——前端在 3000、后端在 8000，
     # 图片地址拼上 API_BASE 就能取到。1.6GB 的机器上让 Python 发静态文件是浪费。

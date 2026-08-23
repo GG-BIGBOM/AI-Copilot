@@ -27,6 +27,7 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from copilot import assets
 from copilot.config import get_settings
 from copilot.db.models import Chunk as ChunkRow
 from copilot.db.models import Document
@@ -184,6 +185,11 @@ async def write_chunks(
             for c, vec in zip(chunks, vectors, strict=True)
         ]
     )
+    # M14-B 双写：块上的 `images` 仍是事实来源，这里再落一份带 owner 的资产行，
+    # 好让私有图能走要鉴权的 `/api/images/{id}`。**放在 add_all 之后**——
+    # 它要按这一轮的图去删旧行，得先知道这一轮有哪些图
+    await assets.sync_document_assets(session, doc, [img for c in chunks for img in c.images])
+
     doc.chunk_count = len(chunks)
     return len(chunks)
 

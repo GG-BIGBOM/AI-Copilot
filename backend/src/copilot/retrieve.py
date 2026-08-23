@@ -24,6 +24,7 @@ from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from copilot import assets
 from copilot.config import get_settings
 from copilot.db.models import Chunk, KnowledgeSpace
 from copilot.providers.base import Embedder, Reranker
@@ -470,11 +471,18 @@ async def search(
     picked = _private_floor(picked, scored)
     picked = _verified_first(picked)
 
+    # ⚠️ **图片地址在这里定型（M14-B）。** 公共图原样走 `/images/…`（nginx 直发），
+    # 私有图换成要鉴权的 `/api/images/{id}`。放在检索层而不是渲染层：
+    # 这是答案里的图片地址**唯一**的出处（直路和 Agent 都从这里拿），
+    # 挪到上面任何一层都会多出一条绕过它的路——而绕过的表现是私有截图
+    # 挂在一个公网可取的地址上，没有任何报错。
+    serving = await assets.serving_images(session, [chunk for chunk, _ in picked])
+
     return RetrievalResult(
         chunks=[
             RetrievedChunk(
                 content=chunk.content,
-                images=list(chunk.images or []),
+                images=serving.get(chunk.id, []),
                 private=chunk.owner_id is not None,
                 citation=Citation(
                     n=i,
