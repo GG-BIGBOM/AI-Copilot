@@ -260,7 +260,7 @@ async def run_agent_stream(
 
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。
-    if deps.final_answer is None and (text := "".join(drafted).strip()):
+    if deps.final_answer is None and (text := latest_draft(drafted)):
         truncated_reference = deps.history_truncated and _TRUNCATED_REFERENCE_RE.search(
             deps.question
         )
@@ -344,6 +344,37 @@ async def run_agent_stream(
         yield stream.text_end(tid), so_far()
 
 
+# 工具调用会把「模型自己写的正文」切成好几段：调工具**之前**先写一句
+# （「好的，记下了。你们仓库是自营还是外包？」），拿到工具结果**之后**再写一句
+# （「好的，已记录。你们仓库是自营、云仓、委外，还是混合？」）。
+# 这个标记就是那道切口。
+_TOOL_BREAK = "\x00tool\x00"
+
+
+def latest_draft(drafted: list[str]) -> str:
+    """模型自己写的正文里，**最后一次工具调用之后**的那一段。
+
+    ⚠️ **不能把几段拼起来发。** 2026-08-23 的 20 组人工验收里，出方案那几轮
+    每一条回答都是同一句话的两个版本首尾相接：
+
+        好的，记下了。你们仓库是自营还是外包？有几个仓？
+        好的，已记录。你们仓库是自营、云仓、委外，还是混合？有几个仓？
+
+    「我传过哪些文档」更明显——整段文档清单原样出现两遍，连道歉之后那一条
+    也还是两遍。原因就是 `drafted` 跨 step 一直累加，最后 `"".join()` 一把
+    全发了：调工具前的那句是**草稿**，模型看到工具结果后自己重写了一遍，
+    发出去的应该只有重写后的那一段。
+
+    退路：最后一次工具调用之后模型什么都没写（罕见，但不能因此吞掉整条回答），
+    就退回用工具之前写的那些。
+    """
+    text = "".join(drafted)
+    if _TOOL_BREAK not in text:
+        return text.strip()
+    head, _, tail = text.rpartition(_TOOL_BREAK)
+    return tail.strip() or head.replace(_TOOL_BREAK, "").strip()
+
+
 def _translate(event: object, drafted: list[str], used_tools: set[str] | None = None) -> list[str]:
     """一个 Pydantic AI 事件 → 零到多个 SSE 片段。
 
@@ -369,6 +400,8 @@ def _translate(event: object, drafted: list[str], used_tools: set[str] | None = 
         if isinstance(part, ToolCallPart):
             if used_tools is not None:
                 used_tools.add(part.tool_name)
+            # 这一刀之前写的都是草稿，见 `latest_draft`
+            drafted.append(_TOOL_BREAK)
             name = TOOL_LABELS.get(part.tool_name, part.tool_name)
             cid = part.tool_call_id
             out.append(stream.tool_input_start(cid, name))

@@ -138,7 +138,43 @@ def small_talk_kind(question: str) -> str | None:
     for kind, table, _ in _SMALL_TALK_TABLE:
         if q in table:
             return kind
-    return None
+    return _stitched_small_talk(q)
+
+
+# 两句寒暄连着说，中间可以夹标点和空格
+_STITCH_SEP = "，,。.、~～!！ \t"
+
+
+def _stitched_small_talk(q: str) -> str | None:
+    """整句话**全部由寒暄词拼成**时，按最后那一类算。
+
+    ⚠️ 2026-08-23 的 20 组人工验收撞出来的：「好的谢谢」四个字不在表里
+    （表里只有「好的」和「谢谢」），于是它走了检索，命中一条
+    `已订正 · 好的` 的问答对，回了一句寒暄**却在下面挂了 5 条来源**——
+    判据表第 8 条明写这是坏掉的样子。
+
+    ⚠️ **仍然只认「整句都是寒暄」。** 「好的，那采购退货呢」剥掉「好的」
+    还剩「那采购退货呢」，照常走检索——这条边界就是这张表存在的意义：
+    多认一个字，防幻觉的墙上就多一个洞。
+    """
+    rest = q
+    last: str | None = None
+    # 每轮从**开头**剥掉一个最长的寒暄词，直到剥不动。用最长匹配是因为
+    # 「你好吗」不能被「你好」剥成「吗」——那不是两句寒暄拼起来的。
+    while rest:
+        rest = rest.lstrip(_STITCH_SEP)
+        if not rest:
+            break
+        hit = None
+        for kind, table, _ in _SMALL_TALK_TABLE:
+            for word in table:
+                if rest.startswith(word) and (hit is None or len(word) > len(hit[1])):
+                    hit = (kind, word)
+        if hit is None:
+            return None
+        last, word = hit[0], hit[1]
+        rest = rest[len(word) :]
+    return last
 
 
 def canned_reply(kind: str) -> str | None:

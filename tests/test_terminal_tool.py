@@ -137,6 +137,53 @@ def test_preamble_never_reaches_the_stream():
     assert "".join(drafted) == "好的，我查一下。"
 
 
+def test_only_the_draft_after_the_last_tool_call_is_sent():
+    """⭐ 2026-08-23 的 20 组人工验收：出方案那几轮，每条回答都是同一句话的
+    两个版本首尾相接——
+
+        好的，记下了。你们仓库是自营还是外包？有几个仓？
+        好的，已记录。你们仓库是自营、云仓、委外，还是混合？有几个仓？
+
+    调工具**前**写的那句是草稿，模型拿到工具结果后自己重写了一遍；
+    发出去的只能是重写后的那一段。"""
+    from pydantic_ai import FunctionToolCallEvent, PartDeltaEvent, PartStartEvent
+    from pydantic_ai.messages import TextPart, TextPartDelta, ToolCallPart
+
+    from copilot.agent.runner import _translate, latest_draft
+
+    drafted: list[str] = []
+    _translate(PartStartEvent(index=0, part=TextPart("好的，记下了。仓库自营还是外包？")), drafted)
+    _translate(
+        FunctionToolCallEvent(
+            part=ToolCallPart(tool_name="save_requirement", args={}, tool_call_id="c1")
+        ),
+        drafted,
+    )
+    _translate(
+        PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="好的，已记录。仓库是自营、云仓还是委外？")),
+        drafted,
+    )
+
+    assert latest_draft(drafted) == "好的，已记录。仓库是自营、云仓还是委外？"
+
+
+def test_a_draft_survives_when_the_model_says_nothing_after_the_tool():
+    """退路：工具之后模型什么都没写，也不能把整条回答吞掉。"""
+    from pydantic_ai import FunctionToolCallEvent, PartStartEvent
+    from pydantic_ai.messages import TextPart, ToolCallPart
+
+    from copilot.agent.runner import _translate, latest_draft
+
+    drafted: list[str] = []
+    _translate(PartStartEvent(index=0, part=TextPart("我查一下。")), drafted)
+    _translate(
+        FunctionToolCallEvent(part=ToolCallPart(tool_name="whoami", args={}, tool_call_id="c1")),
+        drafted,
+    )
+
+    assert latest_draft(drafted) == "我查一下。"
+
+
 # ---------- 3：没有终结答案时，Agent 自己的话要照常吐 ----------
 
 
