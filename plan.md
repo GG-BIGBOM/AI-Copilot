@@ -10,20 +10,104 @@
   当成这轮修复后的人工验收失败。
 - **P13 已开始，但门禁未通过。** 已创建 tag `p13-start-20260822`，并完成生产数据库
   与上传文件备份；全量评测发现 Agent 与风险边界仍有硬指标问题，旧双路按门禁要求保留。
+- **Gate 0（P13 / M13.1 收口）是后续路线图的唯一入口。** M13.1 Agent 图片回归可以在
+  旧直路仍保留时修复和验证；在严格公共/私有 Agent、风险边界、路由评测和图片同路回归
+  都形成可靠 PASS 前，不启动 M14，也不删除旧路。判分服务 `429` / 网络失败只记
+  `UNRELIABLE`，不能算模型失败或门禁通过。
 
 ## NEXT
 
-1. 修复并重跑公共/私有 Agent 的幻觉与风险边界跨平台污染；评测脚本中
-   `--as-user` 和 `--general off` 的 Agent 接线问题已修正，仍需完成全量严格模式复测。
-2. 重新通过全部硬门槛后，才评估删除 `_chat_stream`、`AGENT_TRIGGERS` 和旧粘性路由；
+1. 取得可用 judge 配额后，完成公共/私有 Agent、风险边界和路由的**全量严格模式**复测；
+   `--as-user` 与 `--general off` 的 Agent 接线已修正，局部结果不能替代完整门禁。
+2. 恢复本机 PostgreSQL 测试环境后，补跑 Agent 路由与消息图片持久化集成回归；当前
+   `postgresql-x64-17` 为 stopped，不能用未执行的测试替代门禁证据。
+3. 完成 M13.1 的 Agent/直路图片链路追踪与同题回归：图片保留、编号、上下文、SSE、
+   持久化和错误引用均需通过；此步骤不授权删除旧路。
+4. Gate 0 全部通过后，才评估删除 `_chat_stream`、`AGENT_TRIGGERS` 和旧粘性路由；
    当前不部署、不删除。
-3. 继续区分质量报告中的历史数据与新部署后的线上趋势，避免用历史样本覆盖本轮
-   人工验收结论。
+5. Gate 0 通过后只进入 M14-A：管理员守卫、KnowledgeSpace、既有文档/会话回填与
+   集中检索隔离；企业版知识库不得提前上传。
 
 ## LATER
 
 - 只有线上数据证明 router 显著拉高首字时间，才把 trace 再拆成
   router / retrieval / rerank / generation 四段；现在不先做缓存或并行化。
+- M14–M20 的顺序固定为：M14-A（空间与隔离）→ M14-B（ImageAsset 兼容迁移）→
+  M15-A（只读管理台）→ M16（AnswerCorrection / VerifiedAnswer）→ M17（嵌图解析）→
+  M19-A（评测契约）→ M18（企业版首次导入）→ M19-B（持续评测）→ M20（生产验证）。
+
+## M14–M20 执行合同（2026-08-22）
+
+本节是项目内 `plan.md` 的主执行入口；详细设计保留在
+[M14–M20 路线图](C:/Users/liushun/Desktop/ERP_Knowledge_Platform_M14_M20_Plan.md)。
+实施时以真实代码、测试和线上行为为准，附件与本节冲突时先记录 delta，再修改计划。
+
+### Gate 0 — P13 / M13.1 收口
+
+Gate 0 未通过前，不启动 M14，不上传企业版知识库，不删除 `_chat_stream`、
+`AGENT_TRIGGERS` 或 `profile is not None` 旧粘性路由。
+
+必须同时满足：
+
+- 公共 Agent、私有 Agent、风险边界、路由全量严格评测为可靠 PASS。
+- judge 配额/网络失败记为 `UNRELIABLE`，不能计入模型失败，也不能当作通过。
+- Agent 与直路在图片保留、编号、上下文、SSE、持久化和错误引用上通过同题回归。
+- `quality-report --route agent --days 7`、20 组人工多轮验收、生产备份和回滚说明可追溯。
+- 旧路保持可用，直到新路通过灰度和回滚演练。
+
+当前执行记录（2026-08-22）：
+
+- 已核对 Agent 图片链路：`answer_kb → emit_images → runner event pump → SSE → _AnswerWriter`；
+  现有测试覆盖了终结工具图片先于正文，但还缺 Agent 路由完整持久化回归。
+- 纯图片单元测试：24 passed。
+- 本机集成测试目前被环境阻塞：PostgreSQL `localhost:5432` 未监听；未因此修改生产配置、
+  启动生产服务或把这次运行当作 Gate 0 证据。
+
+当前执行记录（2026-08-23）：
+
+- **本机测试环境已恢复。** `postgresql-x64-17` 服务仍需管理员权限才能 `Start-Service`，
+  改用 `pg_ctl start -D D:\PostgreSQL\17\data` 以当前用户拉起，未改动服务配置。
+- **M13.1 Agent 图片回归已补齐并通过。** 新增 `tests/test_agent_images.py`（5 条）：
+  Agent 流里的 `data-images` 必须早于正文、Agent 与直路对照表一致、编号只来自本轮上下文、
+  图片随答案落进 `messages.images`、模型写 `[图99]` 时后端不替它造记录。
+  每条都用 `request_trace.route` 断言这一轮真的走了 Agent，避免"钉死路由却没进分支"。
+- 变异验证：把 `deps.emit_images()` 短路后，顺序那条立刻转红（配图掉到正文之后），
+  恢复后重新全绿——这几条测试确实咬住了链路。
+- 证据：后端 `pytest` 488 passed（原 483 + 5），`ruff check` 全通过，
+  前端 `npm test` 4 passed（`inlineImages` 已经把不存在的图号从正文里删掉）。
+- **仍未通过的 Gate 0 项：** 公共/私有 Agent、风险边界、路由的全量严格评测尚未重跑，
+  judge 配额与网络状态待确认；在那之前不启动 M14，也不删除旧路。
+
+### 交付顺序与完成定义
+
+| 阶段 | 主要范围 | 进入条件 | 完成条件 |
+|---|---|---|---|
+| M14-A | 现有管理员守卫、KnowledgeSpace、文档/会话回填、Scoped Retrieval | Gate 0 通过 | 既有数据回填无 NULL；用户/空间隔离和升级/回滚测试通过 |
+| M14-B | ImageAsset、双读/双写、公共/私有图片鉴权 | M14-A 通过 | 旧图片链路兼容；私有图片越权返回 404；无孤儿资产 |
+| M15-A | 只读 Admin Overview、用户、反馈、评测结果 | M14-A 通过 | 所有 `/api/admin/*` 服务端鉴权、分页和敏感信息过滤通过 |
+| M16 | 独立 AnswerCorrection、审核发布、VerifiedAnswer | M15-A 通过 | 未审核不进 RAG；发布同空间生效；不经 LLM 改写；修订可追溯 |
+| M17 | DOCX/PPTX/PDF/XLSX 嵌图解析 | M14-B 通过 | 图片与文本/页/slide 归属正确；超时、大小和私有隔离测试通过 |
+| M19-A | 空间级评测契约、跨空间/图片负例、UNRELIABLE 规则 | M14-A/B 通过 | 旗舰版基线和门禁可重复运行 |
+| M18 | 企业桌面/Web 知识空间首次导入 | M19-A 通过 | 导入前后跨空间污染为 0；回滚和删除链路演练通过 |
+| M19-B | Admin Evaluation Center、持续回归、只读发布 | M18 通过 | 结果版本、配置、corpus hash 和 judge 状态完整 |
+| M20 | 生产验证与 Agent 路由收敛 | 全部阶段通过 | 灰度、回滚、人工验收和路由删除门禁全部留证 |
+
+### 已核对的实现边界
+
+- 当前 `users.is_admin`、`users.is_active`、`documents.source_type` 已存在；M14 不重复添加，也不长期双写 `role` 与 `is_admin`。
+- 当前 `corrections` 是来源文档纠错并会触发重新摄取；答案纠错必须使用独立的 `answer_corrections` 和 `/api/answer-corrections`。
+- 当前没有 `KnowledgeSpace` / `ImageAsset`；现有 `chunks.images`、`messages.images` 和 `/images/` 必须双读兼容，不能一次性删除。
+- 空间过滤必须集中在检索边界，并覆盖直路、Agent `answer_kb`、VerifiedAnswer 和评测；缺少空间上下文时 fail closed。
+- 生产回滚优先使用已验证备份；不要对已写入用户新数据的生产库执行会丢数据的 downgrade。
+- 不引入 Redis、Celery、Elasticsearch、Qdrant/Milvus、Graph RAG、MCP、多 Agent 或新微服务。
+
+### 每阶段执行规则
+
+1. 先用真实代码和现有测试写 implementation delta。
+2. 先补失败测试，再改实现；不得用局部评测替代全量门禁。
+3. 跑相关测试、全量后端测试、ruff，以及前端 lint/build（涉及前端时）。
+4. 记录 migration upgrade/downgrade、回填校验、备份/回滚和线上证据。
+5. 每个逻辑阶段独立 commit，并同步本文件的 NOW/NEXT/LATER/DONE；未通过不得标为 DONE。
 
 ## DONE
 
