@@ -1,0 +1,636 @@
+{
+  "tag": "p13-routing-live-fix-20260823",
+  "ran_at": "2026-08-23T04:59:23+00:00",
+  "dataset_meta": {
+    "built_at": "2026-08-18",
+    "built_for": "M10 P0 —— 全 Agent 化之前的路由基线",
+    "note": "期望路由写的是「应该去哪」，不是「现在会去哪」。两者的差距就是 M10 要补的账。\n今天已知会错的：time 全部（没有工具）、以及少数被关键词误伤的 kb 题。\n"
+  },
+  "metrics": {
+    "total": 63,
+    "route_accuracy": 100.0,
+    "bypass_rate": 0.0,
+    "by_kind": {
+      "闲聊": {
+        "total": 10,
+        "ok": 10,
+        "accuracy": 100.0
+      },
+      "能力": {
+        "total": 8,
+        "ok": 8,
+        "accuracy": 100.0
+      },
+      "时间": {
+        "total": 8,
+        "ok": 8,
+        "accuracy": 100.0
+      },
+      "知识库": {
+        "total": 10,
+        "ok": 10,
+        "accuracy": 100.0
+      },
+      "方案": {
+        "total": 8,
+        "ok": 8,
+        "accuracy": 100.0
+      },
+      "越界": {
+        "total": 8,
+        "ok": 8,
+        "accuracy": 100.0
+      },
+      "追问": {
+        "total": 11,
+        "ok": 11,
+        "accuracy": 100.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "chat-hello",
+      "kind": "闲聊",
+      "q": "你好",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-hello-polite",
+      "kind": "闲聊",
+      "q": "您好！",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-hi-en",
+      "kind": "闲聊",
+      "q": "hi",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-hello-upper",
+      "kind": "闲聊",
+      "q": "HELLO",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-anyone",
+      "kind": "闲聊",
+      "q": "在吗？",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-morning",
+      "kind": "闲聊",
+      "q": "早上好",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-thanks",
+      "kind": "闲聊",
+      "q": "谢谢",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-got-it",
+      "kind": "闲聊",
+      "q": "明白了",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-bye",
+      "kind": "闲聊",
+      "q": "拜拜",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "chat-ok",
+      "kind": "闲聊",
+      "q": "好的",
+      "expected": "smalltalk",
+      "actual": "smalltalk",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-who",
+      "kind": "能力",
+      "q": "你是谁",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-what-can-you-do",
+      "kind": "能力",
+      "q": "你能做什么",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-what-can-you-do-2",
+      "kind": "能力",
+      "q": "你能干嘛？",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-functions",
+      "kind": "能力",
+      "q": "有什么功能",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-howto",
+      "kind": "能力",
+      "q": "怎么用",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-help",
+      "kind": "能力",
+      "q": "帮助",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-intro",
+      "kind": "能力",
+      "q": "介绍一下你自己",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "cap-name",
+      "kind": "能力",
+      "q": "你叫什么",
+      "expected": "capability",
+      "actual": "capability",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-now",
+      "kind": "时间",
+      "q": "现在几点了",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-today",
+      "kind": "时间",
+      "q": "今天几号",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-weekday",
+      "kind": "时间",
+      "q": "今天星期几",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-date-full",
+      "kind": "时间",
+      "q": "今天是几月几号",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-now-2",
+      "kind": "时间",
+      "q": "当前时间是多少",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-year",
+      "kind": "时间",
+      "q": "现在是哪一年",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-month-end",
+      "kind": "时间",
+      "q": "这个月还有几天",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "time-tomorrow",
+      "kind": "时间",
+      "q": "明天是几号",
+      "expected": "time",
+      "actual": "time",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-waybill-jd",
+      "kind": "知识库",
+      "q": "京东电子面单模板怎么设置？",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-return-inbound",
+      "kind": "知识库",
+      "q": "退货入库的操作流程是什么",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-greeting-prefix",
+      "kind": "知识库",
+      "q": "你好，京东电子面单怎么设置",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-thanks-prefix",
+      "kind": "知识库",
+      "q": "谢谢你之前说的那个字段叫什么",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-howto-waybill",
+      "kind": "知识库",
+      "q": "怎么用电子面单",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-help-center",
+      "kind": "知识库",
+      "q": "帮助中心在哪里配置",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-sms-policy",
+      "kind": "知识库",
+      "q": "短信策略在哪里配置",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-reconcile-error",
+      "kind": "知识库",
+      "q": "对账单生成异常怎么排查",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-plan-template",
+      "kind": "知识库",
+      "q": "实施方案模板在哪里下载",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "kb-config-checklist-doc",
+      "kind": "知识库",
+      "q": "配置清单这个功能是干什么的",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-plan-1",
+      "kind": "方案",
+      "q": "帮我出一份实施方案",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-plan-2",
+      "kind": "方案",
+      "q": "给我做个配置方案",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-checklist-1",
+      "kind": "方案",
+      "q": "我需要一份上线清单",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-checklist-2",
+      "kind": "方案",
+      "q": "出个实施清单吧",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-plan-with-context",
+      "kind": "方案",
+      "q": "客户是做美妆的，两个仓，帮我出个实施配置",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-config-check",
+      "kind": "方案",
+      "q": "帮我生成配置检查表",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-online-plan",
+      "kind": "方案",
+      "q": "上线方案怎么给我一份",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "agent-plan-natural",
+      "kind": "方案",
+      "q": "新客户要上线了，需要你给一份配置方案",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "off-weather",
+      "kind": "越界",
+      "q": "明天上海天气怎么样",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-stock",
+      "kind": "越界",
+      "q": "旺店通的股票代码是多少",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-salary",
+      "kind": "越界",
+      "q": "你们公司薪资待遇怎么样",
+      "expected": "kb",
+      "actual": "refuse",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-competitor",
+      "kind": "越界",
+      "q": "旺店通和聚水潭哪个好",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-code",
+      "kind": "越界",
+      "q": "帮我写一段 Python 排序代码",
+      "expected": "kb",
+      "actual": "refuse",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-translate",
+      "kind": "越界",
+      "q": "把这段话翻译成英文",
+      "expected": "kb",
+      "actual": "refuse",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-medical",
+      "kind": "越界",
+      "q": "感冒了吃什么药",
+      "expected": "kb",
+      "actual": "refuse",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "off-math",
+      "kind": "越界",
+      "q": "一百的二次方根是多少",
+      "expected": "kb",
+      "actual": "refuse",
+      "bypassed": false,
+      "accept": [
+        "refuse"
+      ]
+    },
+    {
+      "id": "follow-defective",
+      "kind": "追问",
+      "q": "那不良品呢？",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-step-two",
+      "kind": "追问",
+      "q": "第二步具体怎么做",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-it",
+      "kind": "追问",
+      "q": "它支持哪些触发条件",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-ok-then",
+      "kind": "追问",
+      "q": "好的，那核销异常呢",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-thanks-then",
+      "kind": "追问",
+      "q": "谢谢，那考核周期怎么改",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-plan-in-context",
+      "kind": "追问",
+      "q": "淘宝和抖音两个平台",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-changed-mind",
+      "kind": "追问",
+      "q": "不对，我说的是抖音的",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-wrong-term",
+      "kind": "追问",
+      "q": "那个套餐拆分的条件在哪调",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-second-turn-must-still-search",
+      "kind": "追问",
+      "q": "每一步分别在哪个界面操作",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-vague-then-specific",
+      "kind": "追问",
+      "q": "取号失败",
+      "expected": "kb",
+      "actual": "kb",
+      "bypassed": false,
+      "accept": []
+    },
+    {
+      "id": "follow-yes-in-agent-flow",
+      "kind": "追问",
+      "q": "明白了",
+      "expected": "agent",
+      "actual": "agent",
+      "bypassed": false,
+      "accept": []
+    }
+  ]
+}

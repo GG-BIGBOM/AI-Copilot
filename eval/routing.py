@@ -42,7 +42,7 @@ sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
 # 而不是安静地算成一道永远不过的题
 # `direct` 只会出现在 **实测**结果里（模型一个工具都没调、自己答了），
 # 不是合法的**期望**值——期望「它自己答」的题都归在 smalltalk / capability
-ROUTES = ("smalltalk", "capability", "kb", "agent", "time")
+ROUTES = ("smalltalk", "capability", "kb", "agent", "time", "refuse")
 
 
 @dataclass
@@ -53,10 +53,14 @@ class CaseResult:
     expected: str
     actual: str = ""
     bypassed: bool = False
+    # 除 `expected` 外还接受哪些落点（题面里的 `accept`）。
+    # ⚠️ 只用在**同样正确**的两种行为上，不是给不及格的结果开后门：
+    # 越界题走 `answer_kb` 然后诚实说没有、和当场划一句边界，都是对的。
+    accept: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return self.actual == self.expected
+        return self.actual == self.expected or self.actual in self.accept
 
 
 # ---------- 被测对象：今天的路由 ----------
@@ -95,6 +99,36 @@ def route_of(question: str, *, in_agent_flow: bool = False) -> str:
 # ERP 答案的特征：界面路径、菜单层级、字段名。
 # 一个**没查知识库**却写出这些东西的回答，只可能是编的。
 _ERP_MARKS = ("【", "设置–", "设置-", "点击", "菜单", "字段", "勾选", "输入框")
+
+
+# 划边界的拒答长什么样。⚠️ 这是**评测侧**的近似，生产代码里没有这个概念：
+# Agent 的 instructions 只说了「和这个产品无关的事不做」，怎么说由模型自己写。
+# 所以这里认的是这类回答共有的形状——先说不做/无关，再把话题引回 ERP。
+_REFUSAL_MARKS = (
+    "帮不了",
+    "没法帮",
+    "不能帮",
+    "无关",
+    "超出",
+    "不在",
+    "只负责",
+    "不写代码",
+    "不做",
+    "范围",
+)
+
+
+def looks_like_refusal(answer: str) -> bool:
+    """这句话是「我不做这个」，而不是「这是答案」。
+
+    ⚠️ 附加条件：**不能带 ERP 操作的特征**。一段既写了界面路径、
+    又在末尾补一句「其余的我不负责」的回答，仍然算越过工具直答。
+    """
+    if not answer:
+        return False
+    if any(mark in answer for mark in _ERP_MARKS):
+        return False
+    return any(mark in answer for mark in _REFUSAL_MARKS)
 
 
 def bypassed_tool(answer: str, *, used_kb: bool) -> bool:
@@ -206,9 +240,21 @@ def run_live(cases: list[dict]) -> list[CaseResult]:
     async def main() -> list[CaseResult]:
         out: list[CaseResult] = []
         for i, c in enumerate(cases, 1):
-            r = CaseResult(id=c["id"], kind=c["kind"], q=c["q"], expected=c["route"])
-            # 寒暄短路仍在 Agent **之前**（M10 P2 的定位：缓存层，不是分叉）
-            kind = small_talk_kind(c["q"])
+            r = CaseResult(
+                id=c["id"],
+                kind=c["kind"],
+                q=c["q"],
+                expected=c["route"],
+                accept=list(c.get("accept") or []),
+            )
+            # 寒暄短路仍在 Agent **之前**（M10 P2 的定位：缓存层，不是分叉），
+            # ⚠️ 但**已经在收集需求的会话不走这条**——生产代码里那一行是
+            # `if not plan_flow and small_talk_reply(...)`。少了这个条件，
+            # 「明白了」会被短路成「不客气」，而线上根本不会这样
+            # （`chat.py` 的 `_active_plan_flow`）。评测漏掉它，报出来的是
+            # 一个早就不存在的 bug。
+            in_flow = _history_started_agent(c.get("history") or [])
+            kind = None if in_flow else small_talk_kind(c["q"])
             if kind is not None:
                 r.actual = "capability" if kind == "capability" else "smalltalk"
             else:
@@ -223,11 +269,20 @@ def run_live(cases: list[dict]) -> list[CaseResult]:
                         # 反问 = 开始收集需求。出方案那条路的第一轮本来就
                         # **不该**调工具（M7 验收原话：「没调工具，先问」）
                         r.actual = "agent"
+                    elif looks_like_refusal(said):
+                        # 一个工具都没调，但说的是「这不在我的范围里」。
+                        # ⭐ 这**不是**越过工具直答，恰恰相反：instructions 里
+                        # 「替用户做和这个产品无关的事……这些都不做」就是这么要求的。
+                        # 2026-08-23 实测五道越界题，模型全是这个形态
+                        # （「我只负责旺店通 ERP……不写代码」），却被记成 direct+bypass，
+                        # 报表上看起来像五次越线。**把正确行为记成违规的指标，
+                        # 会逼着人去修一个没坏的东西。**
+                        r.actual = "refuse"
                     else:
                         # ⭐ 一个工具都没调，还给出了陈述句 = 它自己写了答案。
                         # 这就是「越过工具直答」，M10 要盯的那个硬指标
                         r.actual = "direct"
-                        r.bypassed = c["route"] in ("kb", "agent")
+                        r.bypassed = bypassed_tool(said, used_kb=False)
             out.append(r)
             print(f"  [{i:2}/{len(cases)}] {c['id']:34} → {r.actual}")
         return out
@@ -302,7 +357,10 @@ def report(results: list[CaseResult], m: Metrics, tag: str) -> None:
     print("=" * 78)
     print(f"  题数           {m.total}")
     print(f"  路由准确率      {m.route_accuracy}%")
-    print(f"  越过工具直答率   {m.bypass_rate}%（确定性路由下结构上恒为 0，只有 --live 才有意义）")
+    print(
+        f"  越过工具直答率   {m.bypass_rate}%"
+        "（确定性路由下结构上恒为 0；--live 下按答案内容判，划边界的拒答不算）"
+    )
     print()
     print("  分类准确率：", end="")
     for kind, slot in m.by_kind.items():
