@@ -471,6 +471,97 @@ async def test_subject_without_relevant_private_hit_refuses_before_generation(cu
     assert llm.calls == [], "没有私有依据时不该让模型拿公共材料自由发挥"
 
 
+# ---------- 点名主体：公共材料整块拿掉（2026-08-23） ----------
+#
+# ⭐ 这一组守的是私有库那条 0% 红线上最后一个破口。
+# 「星辰电商的退货入库要走哪几个审核节点？」——夹具里没有退货流程，
+# 公共库里却一大把。三轮实测模型都这么答：
+#     「星辰电商的退货入库流程，按公共知识库的标准流程…[1][3]
+#      关于星辰电商是否有额外的审核节点约定，知识库中暂无此内容。」
+# 私有库幻觉率 16.7%，而门槛是 0%。主体约束那段 prompt 里已经写了
+# 「公共知识库不是任何一家的约定」，又补了一条「先按公共流程答一遍、
+# 末尾再说这家没提，也算冒充」——**都没用**。材料在上下文里，模型就会用。
+#
+# 所以改成数据层保证：点名了公司的问题，只留他自己的文档。
+# 第一人称（「我们的电子面单怎么配」）不走这道闸门，理由见 qa.py 那段注释。
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["星辰电商的退货入库要走哪几个审核节点？", "远岸家居每月几号做动碰盘点", "汇金商贸的对账口径"],
+)
+def test_named_subject_questions_are_recognised(question):
+    from copilot.qa import asks_about_named_subject
+
+    assert asks_about_named_subject(question) is True
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        # 第一人称：是主体问题，但**不算点名**——它常常其实在问产品本身
+        "我们的组合装要拆吗",
+        "我们公司的电子面单怎么配",
+        # 纯产品问题
+        "电子面单模板在哪里设置",
+    ],
+)
+def test_first_person_and_product_questions_are_not_named_subjects(question):
+    from copilot.qa import asks_about_named_subject
+
+    assert asks_about_named_subject(question) is False
+
+
+async def test_named_subject_answer_never_sees_public_material(customer_docs):
+    """点名了公司，公共材料就不进上下文——模型想用也没得用。"""
+    from chat_helpers import FakeLLM
+
+    from copilot.qa import ask_stream
+
+    maker, owner_id, tag = customer_docs
+    llm = FakeLLM("星辰电商的组合装不拆[1]。")
+    async with maker() as s:
+        streamed = await ask_stream(
+            s,
+            f"星辰电商的组合装拆分条件说明第1条-{tag}是什么规则？",
+            FakeEmbedder(),
+            RankByKeyword("拆分"),
+            llm,
+            user_id=owner_id,
+        )
+    "".join(piece for kind, piece in streamed.stream if kind == "content")
+
+    assert llm.calls, "这一问有私有材料，不该在生成之前就兜底"
+    context = llm.calls[0][-1]["content"]
+    assert "流程中拆分条件说明" not in context, "公共材料仍然进了上下文"
+    assert "客户A-实施配置约定" in context, "他自己的文档被一起滤掉了"
+    assert all("流程中拆分条件说明" not in c.title for c in streamed.citations)
+
+
+async def test_first_person_question_keeps_public_material(customer_docs):
+    """第一人称那一支不动：把公共材料拿掉会把答得出的题变成「暂无此内容」。"""
+    from chat_helpers import FakeLLM
+
+    from copilot.qa import ask_stream
+
+    maker, owner_id, tag = customer_docs
+    llm = FakeLLM("组合装按条件拆分[1]。")
+    async with maker() as s:
+        streamed = await ask_stream(
+            s,
+            f"我们的组合装拆分条件说明第1条-{tag}是什么规则？",
+            FakeEmbedder(),
+            RankByKeyword("拆分"),
+            llm,
+            user_id=owner_id,
+        )
+    "".join(piece for kind, piece in streamed.stream if kind == "content")
+
+    assert llm.calls
+    context = llm.calls[0][-1]["content"]
+    assert "流程中拆分条件说明" in context
+
+
 # ---------- P4：Agent 白名单 ----------
 
 

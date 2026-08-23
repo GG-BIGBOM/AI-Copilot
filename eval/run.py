@@ -199,12 +199,23 @@ def _guard_suffix(mode: str, general: bool | None = None) -> str:
     才会被拼上去），漏掉哪一段，改了它的两轮就会存出一模一样的 sha——
     2026-08-20 私有库那四轮就是这么丢掉唯一变过的东西的。
     """
+    return _subject_suffix(mode, general) + _definition_suffix(mode, general)
+
+
+def _subject_suffix(mode: str, general: bool | None = None) -> str:
+    """主体约束那一段（M11 P3 第 3 步）。"""
     from copilot.qa import system_prompt_for
 
     base = system_prompt_for(mode, general=general)
-    guard = system_prompt_for(mode, subject_guard=True, general=general)[len(base) :]
-    definition = system_prompt_for(mode, general=general, definition=True)[len(base) :]
-    return guard + definition
+    return system_prompt_for(mode, subject_guard=True, general=general)[len(base) :]
+
+
+def _definition_suffix(mode: str, general: bool | None = None) -> str:
+    """定义题追加段（2026-08-23，原铁律 9）。"""
+    from copilot.qa import system_prompt_for
+
+    base = system_prompt_for(mode, general=general)
+    return system_prompt_for(mode, general=general, definition=True)[len(base) :]
 
 
 @dataclass
@@ -394,8 +405,8 @@ def retrieve_all(
         SiliconFlowEmbedder,
         SiliconFlowReranker,
     )
-    from copilot.qa import needs_subject_guard
-    from copilot.retrieve import search
+    from copilot.qa import asks_about_named_subject, needs_subject_guard
+    from copilot.retrieve import RetrievalResult, search
 
     r = cfg.resolved()
 
@@ -424,6 +435,15 @@ def retrieve_all(
                     rerank_k=r["rerank_k"],
                     score_threshold=r["threshold"],
                 )
+                # ⭐ 和 `ask_stream` 里同一道闸门：主体约束触发、且问题点名了
+                # 第三方主体时，**公共材料整块拿掉**，只留他自己的文档。
+                # 评测这边是两阶段跑（检索一次、生成一次），所以要在这里复现——
+                # 漏了它，私有库那组题量的就不是线上那条路（2026-08-23 踩到：
+                # 生产改完，评测数字一动不动）。判定函数从 `copilot.qa` 引，
+                # 不在这里抄一份。
+                guard_now = await needs_subject_guard(session, case["q"], user_id)
+                if guard_now and res.private_count and asks_about_named_subject(case["q"]):
+                    res = RetrievalResult(chunks=[c for c in res.chunks if c.private])
                 bundle = res.build_context()
                 cr = CaseResult(
                     id=case["id"],
@@ -438,7 +458,7 @@ def retrieve_all(
                 # M11 P3 第 3 步。**调的是线上那个函数**，不是抄一份判定逻辑——
                 # 抄一份的话，改了那边忘了改这边，评测会一直在报告一个
                 # 早就不存在的系统，而私有库这组题量的恰恰就是这条规则
-                cr.subject_guard = await needs_subject_guard(session, case["q"], user_id)
+                cr.subject_guard = guard_now
                 if wants := wanted_sources(case):
                     cr.source_hit = any(w in t for w in wants for t in cr.retrieved_titles)
                 out.append(cr)
@@ -464,7 +484,14 @@ def answer_all(
 ) -> None:
     from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
-    from copilot.qa import EMPTY_CONTEXT, NO_ANSWER, SYSTEM_PROMPT, USER_TEMPLATE, is_no_answer
+    from copilot.qa import (
+        EMPTY_CONTEXT,
+        NO_ANSWER,
+        SYSTEM_PROMPT,
+        USER_TEMPLATE,
+        is_definition_question,
+        is_no_answer,
+    )
 
     # 常识兜底开着时，「一条都没召回」不再是免费的兜底话术——那正是最该问
     # 一次模型的时候。留 None 就读 .env，和线上一致
@@ -475,7 +502,10 @@ def answer_all(
     # 否则指标的变化归不了因（见 eval/prompts.py 的说明）
     prompt = system_prompt or SYSTEM_PROMPT
     # M11 P3 第 3 步的那一段附加约束（只加在标了 subject_guard 的题上）
-    guarded_suffix = _guard_suffix(mode)
+    guarded_suffix = _subject_suffix(mode, general)
+    # 定义题追加段（2026-08-23）。同样是按问题形状开的，评测漏了它就等于
+    # 在定义题上跑了另一版 prompt
+    definition_suffix = _definition_suffix(mode, general)
 
     # httpx.Client 线程安全，一个实例够用
     if mode == "deep":
@@ -502,7 +532,11 @@ def answer_all(
             user_msg = USER_TEMPLATE.format(
                 context=cr.context or EMPTY_CONTEXT, question=cr.q
             )
-            system = prompt + guarded_suffix if cr.subject_guard else prompt
+            system = prompt
+            if cr.subject_guard:
+                system += guarded_suffix
+            if is_definition_question(cr.q):
+                system += definition_suffix
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},

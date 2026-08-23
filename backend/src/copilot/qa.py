@@ -46,7 +46,7 @@ from starlette.concurrency import run_in_threadpool
 from copilot.config import get_settings
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
-from copilot.retrieve import Citation, has_private_chunks, search
+from copilot.retrieve import Citation, RetrievalResult, has_private_chunks, search
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +283,9 @@ _SUBJECT_GUARD = """
 - 如果没有任何一条材料在讲他问的这个主体的这件事，就按铁律 3 的第二种情形办：
   **只回复这一句**「知识库暂无此内容。」——不要罗列材料里都写了些什么，
   也不要解释为什么没有。
+  ⚠️ 「先按公共知识库的标准流程答一遍，末尾再说一句这家的文档里没提」
+  **也算冒充**，不要这么写。用户问的是这一家怎么办，他会照着做；
+  而那套流程是不是这一家的安排，恰恰是材料里没有的那件事。
 
 材料里确实讲到了这个主体的这件事时照常答，这一条不是让你少答。
 
@@ -331,6 +334,28 @@ def asks_about_subject(question: str) -> bool:
     return any(w in question for w in _FIRST_PERSON) or bool(
         _SUBJECT_SUFFIX_RE.search(question)
     )
+
+
+# 第一人称打头的「公司」不是一个公司名：「**我们公司**的电子面单怎么配」
+# 问的多半是产品本身怎么用。⚠️ 这一条不能省——`_SUBJECT_SUFFIX_RE` 的后缀表里
+# 有「公司」，不排掉的话「我们公司」会被当成点名，然后被下面那道闸门
+# 拿掉全部公共材料，一道答得出的题变成「知识库暂无此内容」。
+_SELF_PREFIX = ("我们", "我司", "我方", "咱们", "本", "自己")
+
+
+def asks_about_named_subject(question: str) -> bool:
+    """问题里点名了某一个**第三方主体**（「星辰电商的…」「远岸家居的…」）。
+
+    和 `asks_about_subject` 的区别在第一人称那一支：「我们的组合装要拆吗」
+    「我们公司的电子面单怎么配」算主体问题、但**不算点名**。
+    这个区分是给 `ask_stream` 里那道「只留私有材料」的闸门用的，理由见那里。
+    """
+    for m in _SUBJECT_SUFFIX_RE.finditer(question or ""):
+        name = m.group(0)
+        if any(name.startswith(p) for p in _SELF_PREFIX):
+            continue  # 「我们公司」「本公司」：说的是他自己，不是点名某一家
+        return True
+    return False
 
 
 async def needs_subject_guard(
@@ -665,6 +690,25 @@ async def ask_stream(
         # 这是能由数据结构直接保证的边界，不交给 Prompt 猜。
         if result.private_count == 0:
             return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
+
+        # ⭐ 点了名的第三方主体（「星辰电商的退货入库要走哪几个审核节点」）：
+        # **把公共材料整块拿掉**，只留他自己的文档。
+        #
+        # 为什么不能只靠 prompt：主体约束那段话里已经写了「公共知识库不是任何
+        # 一家的约定」「没有就只回兜底句」，2026-08-23 又补了一条「先按公共流程
+        # 答一遍、末尾再说这家没提，也算冒充」。三轮实测，模型照旧答：
+        #     「星辰电商的退货入库流程，按公共知识库的标准流程…[1][3]
+        #      关于星辰电商是否有额外的审核节点约定，知识库中暂无此内容。」
+        # 私有库幻觉率 16.7%，而门槛是 0%。**材料在上下文里，模型就会用它**；
+        # 唯一能保证的做法是让它看不见。
+        #
+        # ⚠️ 第一人称那一支（「我们的电子面单怎么配」）**不走这道闸门**：
+        # 那种问法多半是在问产品本身怎么用，把公共材料拿掉会把一道答得出的题
+        # 变成「知识库暂无此内容」——假阴性正是主体约束这条规则最贵的失败。
+        # 点名带公司后缀的问法没有这个歧义：他问的就是这一家的约定。
+        if asks_about_named_subject(search_query) or asks_about_named_subject(question):
+            result = RetrievalResult(chunks=[c for c in result.chunks if c.private])
+            context = result.build_context()  # 编号跟着材料一起重排，别留旧的
 
     # 定义题才追加那一段。判据用**原句和改写后的独立问题**两处：
     # 追问经常只写「那这个又是什么」，主体在改写后的句子里
