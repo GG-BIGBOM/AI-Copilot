@@ -64,10 +64,15 @@ GENERAL = "general_knowledge"
 CANNED = "canned"
 TOOL = "tool"
 NO_ANSWER = "no_answer"
+# M16：这一轮直接返回了一条人写定的标准答案，一次模型调用都没花。
+# ⚠️ **不能并进 `kb`**：kb 是「模型看着材料写的」，verified 是「人写的原文」，
+# 两者的质量归因完全不同——把订正的功劳算进模型的准确率，
+# 那个数就再也说明不了模型好不好
+VERIFIED = "verified"
 
 
 def classify_answer_source(
-    *, route: str, tools: list[str], answer: str, no_answer: bool
+    *, route: str, tools: list[str], answer: str, no_answer: bool, verified: bool = False
 ) -> str:
     """这一轮的答案**是从哪来的**（M13 P5）。
 
@@ -94,6 +99,8 @@ def classify_answer_source(
     就是个问题（用户没法溯源，评测里那一条叫引用正确率），
     与其猜它心里想的是什么，不如让这一列如实反映**用户看到的样子**。
     """
+    if verified:
+        return VERIFIED
     if route == "canned":
         return CANNED
     if no_answer:
@@ -132,6 +139,9 @@ class TraceDraft:
     tokens: int = 0
     answer_chars: int = 0
     no_answer: bool = False
+    # 这一轮直接返回了人写定的标准答案（`verified.lookup` 命中）。
+    # 判定在 qa/tools 那边做，这里只负责如实记下来
+    verified: bool = False
     # 答案正文。**只用来判 `answer_source`，不落库**——正文已经在 messages 表里
     # 有一份了，台账再存一份等于把每一条回答存两遍
     answer: str = ""
@@ -211,6 +221,7 @@ class TraceDraft:
                                 tools=self.tools,
                                 answer=self.answer,
                                 no_answer=self.no_answer,
+                                verified=self.verified,
                             ),
                             ok=self.ok,
                             error=self.error,

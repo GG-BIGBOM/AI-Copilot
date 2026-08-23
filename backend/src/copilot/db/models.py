@@ -573,8 +573,13 @@ class VerifiedAnswer(Base):
     单开就意味着两条召回路径、两套 owner_id 隔离规则，而隔离是这个项目里
     唯一一条错了就不可挽回的规则。
 
-    `question` unique：同一个问题只能有一条标准答案。有两条的话，
-    检索会随机命中其中一条，而这种错的样子是「答案时好时坏」，最难查。
+    ⚠️ **M16 起它不再是「谁都能写的东西」。** 在那之前，任何登录用户点
+    「答错了，我来改」就能让一条答案对全站立刻生效、无人审核——那是一个
+    任何注册用户都能往公共库里塞内容的入口。现在它只能由管理员发布，
+    来路是一条走完审核的 `AnswerCorrection`（见下面那个类）。
+
+    唯一键是 **(question, knowledge_space_id)**，不是 question 单独 unique：
+    同一个问题在旗舰版和企业版有两套不同的正确答案，这正是知识版本存在的理由。
     """
 
     __tablename__ = "verified_answers"
@@ -584,10 +589,156 @@ class VerifiedAnswer(Base):
     author_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    question: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
+    question: Mapped[str] = mapped_column(String(1024), index=True)
     answer: Mapped[str] = mapped_column(Text)
 
+    # 这条标准答案属于哪一版 ERP。**发布时从纠错那边抄过来**，
+    # 决定了它进索引时那篇文档落在哪个空间——跨空间命中就是答错产品
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # active | retired。
+    # ⚠️ **只有 active 的才有块在索引里**（见 `routes/verified.py` 的 `_sync_index`）。
+    # 退役不删行：它得留着，才能回答半年后「当初这条是怎么写的、谁发布的」
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+
+    # 来路。发布之后要能一路倒查回「谁在哪一轮问答里提的、谁审的」
+    source_correction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("answer_corrections.id", ondelete="SET NULL"), nullable=True
+    )
+    source_trace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    # 改过几版。每加一版都写一行 `VerifiedAnswerRevision`
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+    # 被终结命中过几次（`verified.lookup`）。
+    # ⚠️ 只统计**直接返回这条答案**的那种命中，不统计「作为材料参与了检索」——
+    # 后者每一轮都可能沾边，混在一起这个数就再也说明不了「这条订正有没有用」
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # 同一个空间里同一个问题只能有一条标准答案。有两条的话，检索会随机
+        # 命中其中一条，而这种错的样子是「答案时好时坏」，最难查
+        Index("ux_verified_question_space", "question", "knowledge_space_id", unique=True),
+    )
+
+
+class VerifiedAnswerRevision(Base):
+    """标准答案的每一版。**「修订可追溯」这句话的落点。**
+
+    为什么不靠 `updated_at` 加一句日志：一条标准答案会被改很多次，
+    半年后有人问「这一步为什么是这样写的」，需要的不是「最后一次是谁改的」，
+    而是**每一次改了什么、谁改的、为什么**。日志会滚掉，这张表不会。
+
+    ⚠️ 写这张表和改 `verified_answers` 必须在**同一个事务**里。
+    分开的话会出现「答案已经变了，但没有任何一版记录说它变过」，
+    而那种缺口恰恰是在事后追查时才会发现的。
+    """
+
+    __tablename__ = "verified_answer_revisions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    verified_answer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("verified_answers.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    question: Mapped[str] = mapped_column(String(1024))
+    answer: Mapped[str] = mapped_column(Text)
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16))
+    # 谁做的这一版。人删号了也要留着这一版的内容，所以是 SET NULL
+    editor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnswerCorrection(Base):
+    """用户提交的答案纠错，**要过审才生效**（M16）。
+
+    ⚠️⚠️ **它和 `Correction` 是两件事，不是同一张表的扩展。**
+
+        Correction        改「哪一篇语雀原文」   立刻重新入库，作者即生效
+        AnswerCorrection  改「这一轮的这个答案」 进审核队列，管理员发布才生效
+
+    在 M16 之前，「答错了，我来改」是**提交即公共生效、无人审核**的——
+    任何注册用户都能往公共知识库里塞任意内容，而站上没有任何地方看得出来。
+    这张表存在的第一目的就是堵掉那个入口。
+
+    ⚠️ **快照字段（`original_*`）写进来之后就不许改。** 审核看的是
+    「当时那个答案错在哪」，而原答案所在的 message 随时可能被用户删掉、
+    trace 也会被 `prune-traces` 清掉。不存快照的话，审核界面在最需要它的时候
+    是空的——而那时已经无从恢复。
+
+    ⚠️ **未审核的纠错一个字都不进 RAG**（路线图第 19 节）。
+    「提交后自己先用」听起来友好，实际是让任何用户都能污染自己的检索结果，
+    而他分辨不出答案是知识库给的还是自己写的。要做也是以后单独设计
+    `personal_draft_override`，不在这一步。
+    """
+
+    __tablename__ = "answer_corrections"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+
+    # ⚠️ 这三个都**不加外键**：消息可以被用户删、trace 会被清理，
+    # 而纠错快照必须活得比它们久（同 `RequestTrace.message_id` 的理由）。
+    # 代价是它们可能指向已经不存在的行，读的时候当它不存在即可
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # 纠的是哪一版 ERP 的答案。从原会话上抄下来，**发布时直接决定
+    # 标准答案落在哪个空间**——抄错了就是把旗舰版的修正发布到企业版
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
+    # ===== 不可变快照 =====
+    original_question: Mapped[str] = mapped_column(Text)
+    original_answer: Mapped[str] = mapped_column(Text)
+    original_citations: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
+    original_images: Mapped[list | None] = mapped_column(NullableJSONB, nullable=True)
+
+    # ===== 用户写的 =====
+    corrected_answer_markdown: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+
+    # pending | approved | rejected | withdrawn | published
+    # 迁移规则由 `copilot.corrections_flow.STATE_MACHINE` 说了算，不在这里写死
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    # 乐观锁。两个管理员同时点「通过」和「拒绝」时，后到的那个必须失败，
+    # 而不是默默覆盖——审核结论被静默覆盖是查不出来的
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

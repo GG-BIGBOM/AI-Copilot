@@ -2,10 +2,14 @@
 
 四个接口，全部只读、全部 `CurrentAdmin`：
 
-    GET /api/admin/overview        全站概览（24h / 7d / 30d）
-    GET /api/admin/users           用户列表，分页
-    GET /api/admin/users/{id}      单个用户的使用情况
-    GET /api/admin/feedback        反馈中心，分页
+    GET  /api/admin/overview          全站概览（24h / 7d / 30d）
+    GET  /api/admin/users             用户列表，分页
+    GET  /api/admin/users/{id}        单个用户的使用情况
+    GET  /api/admin/feedback          反馈中心，分页
+    GET  /api/admin/corrections       纠错审核队列，分页（M16）
+    GET  /api/admin/corrections/{id}  一条纠错的全部内容（M16）
+    POST /api/admin/corrections/{id}/review    通过 / 拒绝（M16）
+    POST /api/admin/corrections/{id}/publish   发布成标准答案（M16）
 
 ⚠️⚠️ **三条规矩，每一条都写着"不这么做会怎样"：**
 
@@ -24,8 +28,11 @@
    今天 285 行没事，攒到几十万行就是一次 OOM，而 OOM 会把**问答服务**
    一起带走。上限写死在 `_MAX_LIMIT`，客户端传再大也没用。
 
-**只读**是这一步的边界：启用/禁用用户、审核纠错都属于 M15-B，那些要配审计
-记录。这里连一个 PATCH 都不给——留一个"暂时没人调用"的写接口，
+**只读**是 M15-A 的边界：启用/禁用用户仍然属于 M15-B，那要配审计记录。
+M16 加进来的两个写接口（review / publish）是例外，而它们各自都在纠错行上留了
+`reviewed_by` / `reviewed_at` / `review_note`，发布还额外留一版
+`VerifiedAnswerRevision`——**那就是这两个动作的审计记录**。
+除此之外这里不该再多一个写接口：留一个"暂时没人调用"的，
 就是留一个没人测过的提权入口。
 
 **没有 `/api/admin/evaluations`。** 路线图把「已发布评测结果」列进了 M15-A，
@@ -45,9 +52,13 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import Select, func, select
 
+from copilot import corrections_flow as flow
 from copilot import metrics
+from copilot import verified as verified_svc
+from copilot.api import providers
 from copilot.auth.deps import CurrentAdmin, SessionDep
 from copilot.db.models import (
+    AnswerCorrection,
     Conversation,
     Document,
     Job,
@@ -651,3 +662,282 @@ async def list_feedback(
             )
         )
     return FeedbackPage(total=total, limit=limit, offset=offset, items=items)
+
+
+# ─────────────────────────── 纠错审核（M16）───────────────────────────
+
+
+class CorrectionRow(BaseModel):
+    """审核队列里的一行。列表只给「该不该点进去」需要的东西。"""
+
+    id: uuid.UUID
+    status: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    submitted_by_email: str | None
+    knowledge_space: str | None
+    original_question: str
+    reason: str
+    reviewed_at: datetime | None
+
+
+class CorrectionDetail(CorrectionRow):
+    """详情：左右对比要用的全部内容。
+
+    ⭐ 原引用和原配图是**提交那一刻的快照**，不是现查的。原答案所在的消息
+    随时可能被用户删掉、trace 也会被 `prune-traces` 清掉——现查的话，
+    审核界面会在最需要它的时候是空的。
+    """
+
+    original_answer: str
+    original_citations: list | None
+    original_images: list | None
+    corrected_answer_markdown: str
+    review_note: str | None
+    trace_id: uuid.UUID | None
+    message_id: uuid.UUID | None
+    markdown: str
+
+
+class CorrectionPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[CorrectionRow]
+
+
+class ReviewIn(BaseModel):
+    """审核一条纠错。
+
+    ⚠️ `corrected_answer_markdown` 是**管理员的二次修改**（路线图 21.1）：
+    用户写的十有八九不能直接发布——错别字、少一步、把客户名写了进去。
+    只给「通过 / 拒绝」两个按钮的话，管理员为了改一个字只能拒绝再让人重提。
+    """
+
+    decision: Literal["approve", "reject"]
+    note: str = ""
+    corrected_answer_markdown: str | None = None
+    # 乐观锁：两个管理员同时点「通过」和「拒绝」，后到的那个必须失败，
+    # 而不是默默覆盖前一个的结论
+    version: int | None = None
+
+
+class PublishIn(BaseModel):
+    version: int | None = None
+
+
+class PublishOut(BaseModel):
+    correction_id: uuid.UUID
+    verified_id: uuid.UUID
+    verified_version: int
+    knowledge_space: str | None
+    chunks: int
+    applied: bool
+    note: str
+
+
+async def _space_codes(session, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return dict(
+        (
+            await session.execute(
+                select(KnowledgeSpace.id, KnowledgeSpace.code).where(KnowledgeSpace.id.in_(ids))
+            )
+        ).all()
+    )
+
+
+def _row(c: AnswerCorrection, email: str | None, space: str | None) -> CorrectionRow:
+    return CorrectionRow(
+        id=c.id,
+        status=c.status,
+        version=c.version,
+        created_at=c.created_at,
+        updated_at=c.updated_at,
+        submitted_by_email=email,
+        knowledge_space=space,
+        original_question=c.original_question,
+        reason=c.reason,
+        reviewed_at=c.reviewed_at,
+    )
+
+
+@router.get("/corrections", response_model=CorrectionPage)
+async def list_corrections(
+    admin: CurrentAdmin,
+    session: SessionDep,
+    status_filter: Annotated[str, Query(alias="status", max_length=16)] = flow.PENDING,
+    limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CorrectionPage:
+    """审核队列。默认只看 `pending`——那是唯一需要人动手的一档。
+
+    `status=all` 看全部。别的值必须是合法状态，否则 422：拼错一个字母就
+    静默返回空列表的话，你会以为「没有待审的」，而其实是查错了。
+    """
+    where = []
+    if status_filter != "all":
+        if status_filter not in flow.STATUSES:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"没有这个状态：{status_filter}（可选 {'/'.join(flow.STATUSES)} 或 all）",
+            )
+        where.append(AnswerCorrection.status == status_filter)
+
+    total = await _count(session, select(AnswerCorrection.id).where(*where))
+    rows = list(
+        (
+            await session.execute(
+                select(AnswerCorrection)
+                .where(*where)
+                .order_by(AnswerCorrection.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+    )
+    emails = (
+        dict(
+            (
+                await session.execute(
+                    select(User.id, User.email).where(
+                        User.id.in_({r.submitted_by for r in rows if r.submitted_by})
+                    )
+                )
+            ).all()
+        )
+        if rows
+        else {}
+    )
+    spaces = await _space_codes(
+        session, {r.knowledge_space_id for r in rows if r.knowledge_space_id}
+    )
+
+    return CorrectionPage(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[
+            _row(c, emails.get(c.submitted_by), spaces.get(c.knowledge_space_id)) for c in rows
+        ],
+    )
+
+
+async def _get_correction(session, correction_id: uuid.UUID) -> AnswerCorrection:
+    row = await session.get(AnswerCorrection, correction_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这条纠错不存在")
+    return row
+
+
+async def _detail(session, c: AnswerCorrection) -> CorrectionDetail:
+    email = (
+        await session.scalar(select(User.email).where(User.id == c.submitted_by))
+        if c.submitted_by
+        else None
+    )
+    spaces = await _space_codes(session, {c.knowledge_space_id} if c.knowledge_space_id else set())
+    base = _row(c, email, spaces.get(c.knowledge_space_id))
+    return CorrectionDetail(
+        **base.model_dump(),
+        original_answer=c.original_answer,
+        original_citations=c.original_citations,
+        original_images=c.original_images,
+        corrected_answer_markdown=c.corrected_answer_markdown,
+        review_note=c.review_note,
+        trace_id=c.trace_id,
+        message_id=c.message_id,
+        markdown=flow.snapshot_markdown(c, submitted_by=email),
+    )
+
+
+@router.get("/corrections/{correction_id}", response_model=CorrectionDetail)
+async def correction_detail(
+    correction_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> CorrectionDetail:
+    return await _detail(session, await _get_correction(session, correction_id))
+
+
+@router.post("/corrections/{correction_id}/review", response_model=CorrectionDetail)
+async def review_correction(
+    correction_id: uuid.UUID, body: ReviewIn, admin: CurrentAdmin, session: SessionDep
+) -> CorrectionDetail:
+    """通过或拒绝。**通过不等于发布**——发布是下一个接口，理由见状态机那一节。"""
+    c = await _get_correction(session, correction_id)
+    if body.version is not None and body.version != c.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "这条纠错刚被人改过，请刷新后再看")
+
+    target = flow.APPROVED if body.decision == "approve" else flow.REJECTED
+    try:
+        flow.check_transition(c.status, target)
+    except flow.TransitionError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+    # 管理员的二次修改（路线图 21.1）。改了什么写在 `review_note` 里——
+    # 提交人回头看自己那条纠错时，得看得出被改过
+    if body.corrected_answer_markdown is not None:
+        if not (text := body.corrected_answer_markdown.strip()):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "修正内容不能为空")
+        c.corrected_answer_markdown = text
+
+    c.status = target
+    c.version += 1
+    c.reviewed_by = admin.id
+    c.reviewed_at = datetime.now(UTC)
+    c.review_note = body.note.strip() or None
+    await session.commit()
+    await session.refresh(c)
+    return await _detail(session, c)
+
+
+@router.post("/corrections/{correction_id}/publish", response_model=PublishOut)
+async def publish_correction(
+    correction_id: uuid.UUID, body: PublishIn, admin: CurrentAdmin, session: SessionDep
+) -> PublishOut:
+    """发布成标准答案：**从这一刻起同一个知识版本下的所有人都用它。**
+
+    ⚠️ 一个事务：改纠错状态、写/更新标准答案、留一版修订、进索引。
+    拆开的话会出现「纠错标成 published、标准答案却没建出来」，
+    而那条纠错从此再也走不到发布——状态机不允许 published 再发布一次。
+    """
+    c = await _get_correction(session, correction_id)
+    if body.version is not None and body.version != c.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "这条纠错刚被人改过，请刷新后再看")
+    if c.knowledge_space_id is None:
+        # 没有空间的标准答案等于「谁都搜不到」（检索缺空间是 fail closed），
+        # 而它看起来是发布成功的
+        raise HTTPException(status.HTTP_409_CONFLICT, "这条纠错没有知识版本，不能发布")
+
+    try:
+        row, chunks = await verified_svc.publish_correction(
+            session, c, admin_id=admin.id, embedder=providers.get_embedder()
+        )
+    except flow.TransitionError as e:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except Exception:
+        # ⚠️ 进索引要打 embedding 接口，是这条路上唯一会因为外部原因失败的一步。
+        # 失败必须**整个回滚**——半发布（状态变了、索引没建）比没发布糟得多：
+        # 那条纠错从此卡在 published，而它的答案一个字都没生效
+        await session.rollback()
+        raise
+
+    await session.commit()
+    spaces = await _space_codes(
+        session, {row.knowledge_space_id} if row.knowledge_space_id else set()
+    )
+    return PublishOut(
+        correction_id=c.id,
+        verified_id=row.id,
+        verified_version=row.version,
+        knowledge_space=spaces.get(row.knowledge_space_id),
+        chunks=chunks,
+        applied=chunks > 0,
+        note=(
+            "已发布。这个知识版本下的所有人，下次问到这个问题就会拿到这个答案。"
+            if chunks > 0
+            else "已发布，但索引没建成——下一次知识库同步会补上。"
+        ),
+    )

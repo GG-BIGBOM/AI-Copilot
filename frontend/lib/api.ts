@@ -279,11 +279,100 @@ export type AdminFeedbackPage = {
 
 /** 答案来源在页面上的说法。后端的枚举是给程序看的，这里是给人看的 */
 export const ANSWER_SOURCE_LABEL: Record<string, string> = {
+  // 人写定、经审核发布的标准答案，命中时**没有经过模型改写**
+  verified: "标准答案（人写定）",
   kb: "知识库回答",
   general_knowledge: "常识回答（无出处）",
   no_answer: "拒答",
   canned: "寒暄",
   tool: "工具（出方案/查文档）",
+};
+
+
+/* ─────────────── 答案纠错（M16）───────────────
+ *
+ * ⚠️ **提交 ≠ 生效。** 用户提交的是一条 `pending` 的纠错，进审核队列；
+ * 管理员通过并发布之后，它才变成这个知识版本下所有人共用的标准答案。
+ * 在 M16 之前这里是"提交即公共生效、无人审核"的——任何注册用户都能往公共
+ * 知识库里塞内容。文案上必须说清这一点，否则用户会以为自己改完就生效了。
+ */
+
+export type CorrectionStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "withdrawn"
+  | "published";
+
+export const CORRECTION_STATUS_LABEL: Record<CorrectionStatus, string> = {
+  pending: "待审核",
+  approved: "已通过，待发布",
+  rejected: "已拒绝",
+  withdrawn: "已撤回",
+  published: "已发布",
+};
+
+export type AnswerCorrection = {
+  id: string;
+  status: CorrectionStatus;
+  version: number;
+  trace_id: string | null;
+  message_id: string | null;
+  knowledge_space_id: string | null;
+  original_question: string;
+  original_answer: string;
+  original_citations: Citation[] | null;
+  original_images: { n: number; url: string }[] | null;
+  corrected_answer_markdown: string;
+  reason: string;
+  review_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** 审核队列里的一行。列表只给「该不该点进去」需要的东西 */
+export type AdminCorrectionRow = {
+  id: string;
+  status: CorrectionStatus;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  submitted_by_email: string | null;
+  knowledge_space: string | null;
+  original_question: string;
+  reason: string;
+  reviewed_at: string | null;
+};
+
+export type AdminCorrectionDetail = AdminCorrectionRow & {
+  original_answer: string;
+  original_citations: Citation[] | null;
+  original_images: { n: number; url: string }[] | null;
+  corrected_answer_markdown: string;
+  review_note: string | null;
+  trace_id: string | null;
+  message_id: string | null;
+  /** 审核快照。可以整段粘走、进 Git、拿两版做 diff */
+  markdown: string;
+};
+
+export type AdminCorrectionPage = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AdminCorrectionRow[];
+};
+
+export type PublishResult = {
+  correction_id: string;
+  verified_id: string;
+  verified_version: number;
+  knowledge_space: string | null;
+  chunks: number;
+  /** 发布了不等于进索引了。只看 200 会骗人——同 `CorrectionSaved.applied` */
+  applied: boolean;
+  note: string;
 };
 
 export class ApiError extends Error {
@@ -511,4 +600,57 @@ export const api = {
       `/api/admin/feedback?kind=${p.kind}&range=${p.range}&limit=${p.limit}&offset=${p.offset}` +
         (p.reason ? `&reason=${p.reason}` : ""),
     ),
+
+  // ─────────────── 答案纠错（M16）───────────────
+
+  /**
+   * 提交一条纠错。**进审核队列，不立刻生效。**
+   *
+   * 只传 `traceId` 和改成什么样：原问题、原回答、原引用、原配图、知识版本
+   * 都由服务端从会话里取。把原答案一起传上去的话，客户端就能伪造一段
+   * 从未存在过的"原答案"，而审核界面上看不出真假。
+   */
+  submitCorrection: (body: { traceId: string; correctedAnswer: string; reason: string }) =>
+    request<AnswerCorrection>("/api/answer-corrections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  myCorrections: () => request<AnswerCorrection[]>("/api/answer-corrections/mine"),
+
+  withdrawCorrection: (id: string) =>
+    request<AnswerCorrection>(`/api/answer-corrections/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action: "withdraw" }),
+    }),
+
+  adminCorrections: (p: { status: string; limit: number; offset: number }) =>
+    request<AdminCorrectionPage>(
+      `/api/admin/corrections?status=${p.status}&limit=${p.limit}&offset=${p.offset}`,
+    ),
+
+  adminCorrection: (id: string) =>
+    request<AdminCorrectionDetail>(`/api/admin/corrections/${id}`),
+
+  /** 通过 / 拒绝。`correctedAnswer` 是管理员的二次修改，可以顺手改一版再通过 */
+  reviewCorrection: (
+    id: string,
+    body: {
+      decision: "approve" | "reject";
+      note?: string;
+      corrected_answer_markdown?: string;
+      version?: number;
+    },
+  ) =>
+    request<AdminCorrectionDetail>(`/api/admin/corrections/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** 发布成标准答案：同一个知识版本下的所有人，下次问到就拿这个答案 */
+  publishCorrection: (id: string, version?: number) =>
+    request<PublishResult>(`/api/admin/corrections/${id}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
 };

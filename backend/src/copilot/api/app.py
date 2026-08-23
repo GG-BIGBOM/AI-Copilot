@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from copilot.api import logging_setup, providers, ratelimit
 from copilot.api.routes import admin as admin_routes
+from copilot.api.routes import answer_corrections as answer_correction_routes
 from copilot.api.routes import auth as auth_routes
 from copilot.api.routes import chat as chat_routes
 from copilot.api.routes import corrections as corrections_routes
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_routes.router)
     app.include_router(docs_routes.router)
     app.include_router(corrections_routes.router)
+    app.include_router(answer_correction_routes.router)
     app.include_router(invites_routes.router)
     app.include_router(verified_routes.router)
     app.include_router(feedback_routes.router)

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from copilot import verified
 from copilot.config import get_settings
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
@@ -703,6 +704,9 @@ class StreamedAnswer:
     # 私有题答错时，先看这里是 0（检索就没捞到）还是非 0（捞到了但模型没用），
     # 两种失败的修法完全不同，只看答案文本分不出来
     private_hits: int = 0
+    # 这一轮是**直接返回了一条人写定的标准答案**（`verified.lookup` 命中），
+    # 一次模型调用都没花。调用方靠它把 `answer_source` 记成 `verified`
+    verified_id: uuid.UUID | None = None
 
 
 async def ask_stream(
@@ -738,6 +742,30 @@ async def ask_stream(
     # 会被下面那道闸门变成一句「知识库暂无此内容」
     if (canned := small_talk_reply(question)) is not None:
         return StreamedAnswer(stream=iter([("content", canned)]), citations=[])
+
+    # ⭐⭐ **人写定的标准答案：命中就直接返回，不再交给模型改写（M16）。**
+    #
+    # 路线图第 26 节那句话的落点：人工确认过的答案不能再被模型改一遍。
+    # 走正常检索的话，这条答案只是上下文里的一块材料，模型会照自己的写法
+    # 重述——重述就有可能改掉事实，而这恰恰是「已经有人确认过」的那一段。
+    #
+    # ⚠️ 命中条件是**同一个知识版本 + 归一化后的问题完全一致**，不是相似度。
+    # 宁可漏（退回正常检索，答案照样出得来），不可错：错了就是拿另一个问题的
+    # 标准答案糊在用户脸上。语义匹配要拿 `eval/verified_answers.yaml` 标定阈值，
+    # 那是 M19-A 的事（见 `verified.normalize_question`）。
+    #
+    # ⚠️ 放在改写之前用**用户原话**匹配：改写是给检索用的，它会把
+    # 「那这个呢」补成一句完整的问题，而那句是模型编的，不该拿来当命中键。
+    if (hit := await verified.lookup(session, question, space_id)) is not None:
+        logger.info("命中标准答案 verified=%s q=%r", hit.id, question[:60])
+        # 统计而已：失败只记日志。**任何统计都不许影响答案**
+        try:
+            await verified.mark_hit(session, hit)
+        except Exception:  # noqa: BLE001
+            logger.warning("标准答案命中计数没记上 verified=%s", hit.id, exc_info=True)
+        return StreamedAnswer(
+            stream=iter([("content", hit.answer)]), citations=[], verified_id=hit.id
+        )
 
     # 只有检索词用改写后的版本；给模型看的问题仍是用户原话
     search_query = (

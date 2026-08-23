@@ -1,19 +1,23 @@
 "use client";
 
 /**
- * 答案订正：**这条答得不对 → 我直接改 → 下次就照我改的答。**
+ * 答案纠错：**这条答得不对 → 我直接改 → 提交给管理员审核。**
  *
- * 它替掉了原来那个「勘误」对话框。那个要选一篇语雀文档、把整篇正文重写一遍，
- * 为了改一句话重写一整篇——重到没人会用，而没人用的订正功能等于没有。
+ * ⚠️⚠️ **M16 改掉了这里最要紧的一句话：提交不再等于生效。**
+ * 在那之前，任何登录用户点一下保存，那段文字就对全站立刻生效、无人审核——
+ * 任何注册用户都能往公共知识库里塞内容，而站上没有任何地方看得出来。
+ * 现在它进审核队列，管理员通过并发布之后才是这个知识版本下的标准答案。
  *
- * 所以这里做的是三件事，一件不多：
+ * 所以这个弹窗的文案有一条硬要求：**不许让人以为改完就生效了。**
+ * 说错的代价不是体验问题——他会改完就走，以为下次就对了，而实际上
+ * 那条纠错可能永远没人审。按钮上写「提交纠错」，回执里写「已提交，等待审核」。
+ *
+ * 它做四件事，一件不多：
  *
  *   1. 把**现在这条回答**原样放进一个可编辑的框
- *   2. 用户改哪儿改哪儿，点保存
- *   3. 服务端当场进索引，回执里说清楚**生效没有**
- *
- * ⚠️ 「已保存」和「已生效」是两回事，这里必须分开说。只说保存成功的话，
- * 用户改完再问一遍发现答案没变，只会认定这个功能是假的（后端 `applied` 字段）。
+ *   2. 收一句「哪里不对」——审核的人需要它，否则只能把两段文字读一遍自己猜
+ *   3. 提交（带 traceId，原问答快照由服务端自己取）
+ *   4. 回执里说清楚**这只是提交**
  */
 
 import { useState } from "react";
@@ -25,7 +29,7 @@ import { api, ApiError } from "@/lib/api";
 
 const POPUP =
   "fixed left-1/2 top-[8vh] z-[60] flex max-h-[84vh] w-[min(680px,calc(100vw-2rem))] " +
-  "-translate-x-1/2 flex-col rounded-2xl border border-border bg-popover p-5 " +
+  "-translate-x-1/2 flex-col overflow-y-auto rounded-2xl border border-border bg-popover p-5 " +
   "text-popover-foreground outline-hidden transition-[opacity,scale] duration-200 " +
   "ease-[cubic-bezier(0.16,1,0.3,1)] data-starting-style:scale-[0.98] " +
   "data-starting-style:opacity-0 data-ending-style:scale-[0.98] data-ending-style:opacity-0";
@@ -35,15 +39,19 @@ export function VerifyDialog({
   onOpenChange,
   question,
   answer,
+  traceId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 用户当初问的那句话。它是这条订正的键——下次问到同类问题就命中它 */
+  /** 用户当初问的那句话。只用来显示——服务端会自己从会话里取一份权威的 */
   question: string;
   /** 模型这次给的答案，作为编辑起点 */
   answer: string;
+  /** 这一轮在 request_trace 里的行号。**没有它就提交不了**（见下） */
+  traceId?: string | null;
 }) {
   const [draft, setDraft] = useState(answer);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -55,80 +63,86 @@ export function VerifyDialog({
     setWasOpen(open);
     if (open) {
       setDraft(answer);
+      setReason("");
       setError(null);
       setDone(null);
     }
   }
 
-  async function save() {
+  async function submit() {
+    if (!traceId) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await api.saveVerified({ question, answer: draft });
-      setDone(r.note);
-      // 生效了才自动关。没生效的话留在原地，让那句解释有人看见
-      if (r.applied) setTimeout(() => onOpenChange(false), 1200);
+      await api.submitCorrection({
+        traceId,
+        correctedAnswer: draft,
+        reason,
+      });
+      setDone("已提交，等待管理员审核。审核通过并发布后，所有人都会用你改的这版。");
+      setTimeout(() => onOpenChange(false), 2200);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "保存失败");
+      setError(e instanceof ApiError ? e.message : "提交失败");
     } finally {
       setBusy(false);
     }
   }
 
   const unchanged = draft.trim() === answer.trim();
-  // ⚠️ 和后端 `MIN_VERIFIED_QUESTION` 保持一致。**在这儿拦，不是在保存时拦**：
-  // 让人写完整段答案、点了保存才说"这题不能改"，比一开始就说糟得多
-  const tooShort = question.trim().length < 2;
+  // ⚠️ **在这儿拦，不是在提交时拦**：让人写完整段答案、点了提交才说
+  // "这一轮没法纠"，比一开始就说糟得多。
+  // 没有 traceId 的来路：老会话，或者这一轮的台账没记上消息 id
+  const cannot = !traceId;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/25 transition-opacity duration-150 data-starting-style:opacity-0 data-ending-style:opacity-0" />
-        <Dialog.Popup
-          className={POPUP}
-          style={{ boxShadow: "var(--shadow-floating)" }}
-        >
+        <Dialog.Popup className={POPUP} style={{ boxShadow: "var(--shadow-floating)" }}>
           <Dialog.Title className="text-base font-semibold text-foreground">
-            改成正确的答案
+            纠错这条回答
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-            {tooShort ? (
-              <>
-                这一轮的提问只有
-                <span className="mx-1 rounded-sm bg-surface-muted px-1.5 py-0.5 font-medium text-foreground">
-                  {question.trim() || "空"}
-                </span>
-                ——太短了，当不了订正的依据。订正是按
-                <span className="font-medium text-foreground">问题</span>
-                存的，下次要靠这句话把你的答案找回来。换一句问清楚点的，再来改。
-              </>
+            {cannot ? (
+              <>这一轮是从历史里读出来的，没有可追溯的记录，没法纠错。可以重新问一次再改。</>
             ) : (
               <>
-                改完保存，下次问到
+                改完提交给管理员审核。通过并发布后，问到
                 <span className="mx-1 rounded-sm bg-surface-muted px-1.5 py-0.5 font-medium text-foreground">
-                  {question.length > 40
-                    ? `${question.slice(0, 40)}…`
-                    : question}
+                  {question.length > 40 ? `${question.slice(0, 40)}…` : question}
                 </span>
-                这类问题，就照你改的答。
+                的人都会拿到你改的这版。
               </>
             )}
           </Dialog.Description>
 
-          {!tooShort && (
+          {!cannot && (
             <>
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 spellCheck={false}
-                className="mt-4 min-h-[16rem] flex-1 resize-none rounded-lg border border-border bg-surface-subtle px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
+                className="mt-4 min-h-[14rem] resize-none rounded-lg border border-border bg-surface-subtle px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
                 aria-label="正确的答案"
               />
 
+              <label
+                className="mt-3 text-[13px] font-medium text-foreground"
+                htmlFor="correction-reason"
+              >
+                哪里不对
+              </label>
+              <input
+                id="correction-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="例如：第二步的菜单路径错了，实际在【物流管理】下面"
+                className="mt-1 rounded-lg border border-border bg-surface-subtle px-3 py-2 text-[13px] text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
+              />
               <p className="mt-2 text-[12px] text-muted-foreground">
-                支持 Markdown。这条订正对
-                <span className="font-medium text-foreground">所有人</span>
-                生效，也随时可以撤销。
+                支持 Markdown。
+                <span className="font-medium text-foreground">提交不等于生效</span>
+                ——要管理员审核通过并发布之后，它才会对这个知识版本下的所有人生效。
               </p>
             </>
           )}
@@ -139,10 +153,7 @@ export function VerifyDialog({
             </p>
           )}
           {done && (
-            <p
-              className="mt-3 flex items-center gap-1.5 text-[13px] text-success"
-              role="status"
-            >
+            <p className="mt-3 flex items-center gap-1.5 text-[13px] text-success" role="status">
               <Check className="size-3.5" />
               {done}
             </p>
@@ -150,15 +161,12 @@ export function VerifyDialog({
 
           <div className="mt-4 flex items-center justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              {tooShort ? "知道了" : "取消"}
+              {cannot ? "知道了" : "取消"}
             </Button>
-            {!tooShort && (
-              <Button
-                onClick={save}
-                disabled={busy || unchanged || !draft.trim()}
-              >
+            {!cannot && (
+              <Button onClick={submit} disabled={busy || unchanged || !draft.trim() || !reason.trim()}>
                 {busy && <Loader2 className="size-3.5 animate-spin" />}
-                {unchanged ? "还没有改动" : "保存并生效"}
+                {unchanged ? "还没有改动" : !reason.trim() ? "还差一句「哪里不对」" : "提交纠错"}
               </Button>
             )}
           </div>

@@ -101,6 +101,9 @@ class AgentDeps:
     # 原始材料，也就没有机会用它自由发挥（M7 掉 12 个点的四条成因都在这里）。
     emit: Emitter | None = None  # runner 注入，见文件头的 Emitter
     final_answer: str | None = None  # 非 None = 本轮已经有终结答案
+    # 这一轮 answer_kb 直接返回了人写定的标准答案（M16）。
+    # 路由层靠它把 `answer_source` 记成 verified
+    verified_hit: bool = False
     images_sent: bool = False  # 配图已经在正文之前发过了，路由层别再发一次
     # 本轮 `save_requirement` 空转了几次（字段已填、用户又没要求改）。
     # 连着空转说明模型把一句普通问题当成了需求，见 tools.save_requirement

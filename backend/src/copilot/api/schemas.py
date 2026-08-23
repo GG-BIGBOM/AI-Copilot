@@ -288,6 +288,9 @@ class VerifiedIn(BaseModel):
 
     question: str = Field(max_length=1024)
     answer: str = Field(min_length=1)
+    # 写给哪一版 ERP。不传就是旗舰版——今天只有它有语料（企业版 M18 才导入），
+    # 而**必填一个当前只有一个合法取值的字段**，只会让每个调用方都写一遍同样的话
+    space: str | None = Field(default=None, max_length=32)
 
     @field_validator("question")
     @classmethod

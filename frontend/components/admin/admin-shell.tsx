@@ -19,6 +19,7 @@ const NAV = [
   { href: "/admin", label: "概览" },
   { href: "/admin/users", label: "用户" },
   { href: "/admin/feedback", label: "反馈" },
+  { href: "/admin/corrections", label: "纠错审核" },
 ] as const;
 
 // 后端只认这三个（`Range` 是 Literal），多写一个会当场 422

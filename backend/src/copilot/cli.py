@@ -1001,6 +1001,7 @@ async def _quality_report(
         # 恰恰是判断「常识兜底放开之后，到底有多少回答没有出处」
         by_source = stat.by_source
         label = {
+            trace_mod.VERIFIED: "标准答案（人写定，未经模型改写）",
             trace_mod.KB: "知识库回答",
             trace_mod.GENERAL: "常识回答（无出处）",
             trace_mod.NO_ANSWER: "拒答",

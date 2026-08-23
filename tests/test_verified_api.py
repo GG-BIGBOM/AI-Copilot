@@ -1,5 +1,10 @@
 """答案订正：/api/verified，以及它在检索里的优先级。
 
+⚠️ **M16 之后这条路只对管理员开放**（普通用户走 `/api/answer-corrections`，
+提交进审核队列）。所以下面那个 `author` 夹具注册完会把自己升成管理员——
+它测的是「管理员直接写一条标准答案」这条路。普通用户被挡住的那一条，
+在 `test_answer_corrections.py` 里。
+
 这一路的承诺只有一句话：**「我改了答案，下次就照我改的答」**。
 所以这里测的重点不是「存下来了没有」，而是这句承诺的三个落点：
 
@@ -19,7 +24,14 @@ from chat_helpers import PASSWORD
 from sqlalchemy import delete, select
 
 from copilot.auth.invites import create_invite_codes
-from copilot.db.models import Chunk, Document, InviteCode, User, VerifiedAnswer
+from copilot.db.models import (
+    Chunk,
+    Document,
+    InviteCode,
+    User,
+    VerifiedAnswer,
+    VerifiedAnswerRevision,
+)
 from copilot.retrieve import VERIFIED_PROMOTE_SCORE, _verified_first
 
 QUESTION = "退货入库的不良品要怎么处理"
@@ -36,6 +48,10 @@ async def author(api_client, maker):
     )
     assert r.status_code == 201, r.text
     user_id = uuid.UUID(r.json()["id"])
+    # M16：写标准答案是管理员的事。这个夹具测的就是管理员那条路
+    async with maker() as s:
+        (await s.get(User, user_id)).is_admin = True
+        await s.commit()
 
     yield user_id
 
@@ -48,6 +64,7 @@ async def author(api_client, maker):
         for d in docs:
             await s.execute(delete(Chunk).where(Chunk.document_id == d.id))
             await s.delete(d)
+        await s.execute(delete(VerifiedAnswerRevision))
         await s.execute(delete(VerifiedAnswer))
         await s.execute(delete(InviteCode).where(InviteCode.code == code))
         await s.execute(delete(User).where(User.id == user_id))
@@ -123,12 +140,17 @@ async def test_second_save_replaces_instead_of_piling_up(api_client, author, fak
 
 
 async def test_delete_takes_it_out_of_the_index(api_client, author, fake_providers, maker):
-    """撤销之后，知识库要**真的**回到原来的样子——索引里那份也得删干净。"""
+    """撤销之后，知识库要**真的**回到原来的样子——索引里那份也得删干净。
+
+    ⚠️ M16 起「撤销」是**退役**：行留着（半年后要能查当初写了什么、谁发布的），
+    块必须删干净。留着块的表现是「我撤销了，答案却没变」。
+    """
     vid = (await api_client.post("/api/verified", json=_payload())).json()["verified"]["id"]
     assert (await api_client.delete(f"/api/verified/{vid}")).status_code == 204
 
     async with maker() as s:
-        assert list((await s.execute(select(VerifiedAnswer))).scalars()) == []
+        rows = list((await s.execute(select(VerifiedAnswer))).scalars())
+        assert len(rows) == 1 and rows[0].status == "retired", "退役不该把行抹掉"
         docs = list(
             (
                 await s.execute(
@@ -150,7 +172,8 @@ async def test_everyone_sees_every_verified(api_client, author, fake_providers):
 
 
 async def test_requires_login(api_client):
-    """未登录一律 401——订正改的是所有人都会看到的内容。"""
+    """未登录一律 401（登录这一关在管理员那一关**之前**：没登录时不该
+    因为「不是管理员」而收到 403，那会让人以为登录了也没用）。"""
     assert (await api_client.post("/api/verified", json=_payload())).status_code == 401
     assert (await api_client.get("/api/verified")).status_code == 401
 

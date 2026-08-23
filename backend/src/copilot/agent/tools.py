@@ -82,6 +82,7 @@ async def answer_kb_for_deps(deps: AgentDeps) -> str:
             mode=deps.mode,
             general=deps.general,
         )
+        deps.verified_hit = streamed.verified_id is not None
         # 配图在正文之前发，理由见 deps.emit_images()
         deps.images = list(streamed.images)
         await deps.emit_images()

@@ -263,6 +263,8 @@ async def _chat_stream(
             citations = streamed.citations
             draft.retrieval(citations)
             draft.private_hits = streamed.private_hits
+            # 命中标准答案时这一轮**没有调过模型**，answer_source 记 verified
+            draft.verified = streamed.verified_id is not None
             draft.model = getattr(providers.get_llm_for(mode), "model", None)
 
             buf: list[str] = []
@@ -489,6 +491,7 @@ async def _agent_stream(
             draft.tools = sorted(deps.used_tools)
             draft.retrieval(deps.citations)
             draft.private_hits = deps.private_hits
+            draft.verified = deps.verified_hit
             draft.tokens = tokens
             draft.answer = answer
             draft.answer_chars = len(answer)

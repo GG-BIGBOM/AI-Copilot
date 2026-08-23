@@ -37,6 +37,7 @@ GENERAL = "general_knowledge"
 CANNED = "canned"
 TOOL = "tool"
 NO_ANSWER = "no_answer"
+VERIFIED = "verified"
 
 # 老数据（M13 P5 之前没有 answer_source 这一列）在报表里的键
 LEGACY = "（M13 之前的老数据）"

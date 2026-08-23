@@ -151,6 +151,7 @@ export function MessageActions({
             onOpenChange={setCorrecting}
             question={question}
             answer={text}
+            traceId={traceId}
           />
         </>
       )}
