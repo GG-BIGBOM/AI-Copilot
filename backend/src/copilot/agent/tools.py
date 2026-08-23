@@ -270,6 +270,18 @@ async def save_requirement(ctx: RunContext[AgentDeps], field: str, value: str) -
         # 已确认的「淘宝、拼多多」。没有明确更正语气时，已填字段只读；让模型
         # 转去记录真正缺失的字段，避免一轮误判污染整条会话。
         label = REQUIREMENT_FIELDS[field][0]
+        ctx.deps.noop_saves += 1
+        # ⚠️ **第二次空转就必须叫停。** 2026-08-23 线上：一条收集过需求的会话里，
+        # 用户问「星辰电商的对账以什么为准」，模型把这句话当成需求，一个字段
+        # 一个字段地试着记，每次都被这里挡回去、每次都换一个字段再试，
+        # 一路撞穿 `tool_calls_limit`，整轮炸掉、一个字都没答。
+        # 而挡回去时给的话是「请记录其他缺失字段」——那正是让它继续试的指令。
+        if ctx.deps.noop_saves >= 2:
+            return (
+                f"`{field}`（{label}）已记录为「{current}」，未覆盖。"
+                "⚠️ 本轮**不要再调用 save_requirement**：用户这一句不是在补充需求。"
+                "直接回答用户的问题；如果是知识库问题，调用 answer_kb。"
+            )
         return (
             f"`{field}`（{label}）已记录为「{current}」，用户本轮没有明确要求修改，"
             "因此未覆盖。请记录本轮对应的其他缺失字段。"

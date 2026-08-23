@@ -119,6 +119,41 @@ async def test_agent_does_not_get_to_add_a_closing_remark(maker, public_chunk):
     assert "希望对你有帮助" not in text_of(chunks)
 
 
+async def test_a_usage_limit_blowout_still_answers(maker, public_chunk, monkeypatch):
+    """⭐ 撞到工具额度上限，不能变成「一个字都没有」。
+
+    2026-08-23 线上：组 8 一句话给全七个字段，模型连调 7 次 `save_requirement`
+    冲破上限，这一轮抛异常、页面上只剩一个步骤徽章。**更糟的是那条会话从此
+    废了**——之后每一句（连「你好」）都在同一个位置炸。
+
+    额度上限的本意是「别让跑飞的模型烧光额度」，不是「这一轮不许有答案」。
+    """
+    from copilot.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("AGENT_MAX_TOOL_CALLS", "1")
+    monkeypatch.setenv("AGENT_MAX_TOOL_CALLS_QA", "1")
+
+    _, body = public_chunk
+    try:
+        async with maker() as s:
+            deps = _deps(s, plan_flow=True)
+            # 两次工具调用，上限是 1——第二次必炸
+            chunks, answer = await drain(
+                body,
+                deps,
+                scripted(
+                    call("save_requirement", field="platforms", value="淘宝"),
+                    call("save_requirement", field="shop_count", value="5"),
+                ),
+            )
+    finally:
+        get_settings.cache_clear()
+
+    assert answer, "撞上限之后一个字都没发出来"
+    assert text_of(chunks), "协议流里没有任何正文"
+
+
 def test_preamble_never_reaches_the_stream():
     """「我查一下」是在工具跑完**之前**产生的。边流边发就收不回来了。
 

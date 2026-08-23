@@ -48,6 +48,7 @@ from pydantic_ai import (
     PartDeltaEvent,
     PartStartEvent,
 )
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -229,8 +230,24 @@ async def run_agent_stream(
     if final_id is not None:
         yield stream.text_end(final_id), so_far()
 
-    if failure is not None:
+    # ⚠️ **撞到额度上限不能等于「一个字都没有」。**
+    # 2026-08-23 线上：组 8 一句话给全七个字段，模型连调 7 次 `save_requirement`
+    # 冲破 `tool_calls_limit`；这一轮抛异常、整条流只剩一个步骤徽章。更糟的是
+    # **那条会话从此废了**——之后每一句（连「你好」）都在同一个位置炸，
+    # 用户看到的永远是「已完成 7 个步骤」加一片空白。
+    #
+    # 额度上限的本意是「别让跑飞的模型烧光额度」，不是「这一轮不许有答案」。
+    # 这里把它降级成**这一轮到此为止**：下面的收尾照跑——该出方案的出方案、
+    # 该退回检索的退回检索、模型已经写下的草稿照发。真正的错误（模型挂了、
+    # 数据库断了）仍然照抛不误。
+    if failure is not None and not isinstance(failure, UsageLimitExceeded):
         raise failure
+    if failure is not None:
+        logger.warning(
+            "Agent 撞到额度上限，按「这一轮到此为止」收尾：question=%r tools=%s",
+            deps.question[:60],
+            sorted(used_tools),
+        )
 
     # 方案字段齐全后的收尾不再交给模型碰运气。线上 G5 出现过 profile 已经完整，
     # 模型却在「导出来」这轮继续调 save_requirement，随后口头声称还缺四项。
@@ -341,6 +358,28 @@ async def run_agent_stream(
         yield stream.text_start(tid), so_far()
         answer.append(text)
         yield stream.text_delta(tid, text), so_far()
+        yield stream.text_end(tid), so_far()
+        return
+
+    # ⭐ **最后一道兜底：这一轮一个字都没发出去。**
+    # 到这里说明既没有终结答案、模型也没写下任何草稿——正常路径下不该发生，
+    # 但撞额度上限那一轮就是这个样子（额度全花在反复调工具上了）。
+    # 线上表现是一个步骤徽章加一片空白，用户分不清是系统坏了还是该继续等。
+    # 宁可慢一点，也要退回**现有的同一条直路**给一个真答案。
+    if not so_far():
+        from copilot.agent.tools import answer_kb_for_deps
+
+        used_tools.add("answer_kb")
+        deps.emit = None
+        await answer_kb_for_deps(deps)
+        if deps.images:
+            deps.images_sent = True
+            yield stream.data_part("images", {"images": deps.images}), so_far()
+        replacement = deps.final_answer or NO_ANSWER
+        tid = stream.new_id("txt")
+        yield stream.text_start(tid), so_far()
+        answer.append(replacement)
+        yield stream.text_delta(tid, replacement), so_far()
         yield stream.text_end(tid), so_far()
 
 

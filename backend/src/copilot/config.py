@@ -219,7 +219,11 @@ class Settings(BaseSettings):
     # 没有它，一个循环调用工具的模型能把额度和时间都烧光。
     # 这一组是**出方案**那条路的额度（多轮收集需求要留余量）
     agent_max_requests: int = 8
-    agent_max_tool_calls: int = 10
+    # ⚠️ 这个数**不能小于「一次给全」那条路的开销**：七个需求字段各一次
+    # `save_requirement`，加 `generate_plan`、`export_excel`，正好 9 次。
+    # 上限 10 意味着任何一次工具重试都会炸掉整轮——2026-08-23 线上组 8 就是
+    # 这么炸的，而且那条会话从此每一句都在同一个位置炸。留到 16。
+    agent_max_tool_calls: int = 16
     # 普通问答（M10）。正常形态就是「决策 → answer_kb → 结束」，
     # 留一次给工具失败后的重试。给多了等于允许它多烧几次才被拦住
     agent_max_requests_qa: int = 3

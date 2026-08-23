@@ -97,6 +97,9 @@ class AgentDeps:
     emit: Emitter | None = None  # runner 注入，见文件头的 Emitter
     final_answer: str | None = None  # 非 None = 本轮已经有终结答案
     images_sent: bool = False  # 配图已经在正文之前发过了，路由层别再发一次
+    # 本轮 `save_requirement` 空转了几次（字段已填、用户又没要求改）。
+    # 连着空转说明模型把一句普通问题当成了需求，见 tools.save_requirement
+    noop_saves: int = 0
 
     async def emit_text(self, chunk: str) -> None:
         """终结工具吐正文。没接 emitter 时（评测、单测）静默丢弃。"""
