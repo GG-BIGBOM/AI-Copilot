@@ -713,6 +713,10 @@ async def ask_stream(
     llm: ChatLLM,
     *,
     user_id: uuid.UUID | None = None,
+    # ⚠️ 哪一版 ERP。**不传 = 一条都检索不到**（fail closed，见
+    # `retrieve._space_filter`）。不给默认值是故意的：给了默认值，
+    # 一个忘了传的调用方会静静地把企业版的提问送进旗舰版材料里
+    space_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
     mode: str = DEFAULT_MODE,
     general: bool | None = None,
@@ -740,7 +744,9 @@ async def ask_stream(
         await run_in_threadpool(rewrite_query, llm, question, history) if history else question
     )
 
-    result = await search(session, search_query, embedder, reranker, user_id=user_id)
+    result = await search(
+        session, search_query, embedder, reranker, user_id=user_id, space_id=space_id
+    )
 
     # 第一道闸门：一条都没召回。
     #
@@ -826,6 +832,10 @@ async def ask(
     llm: ChatLLM,
     *,
     user_id: uuid.UUID | None = None,
+    # ⚠️ 哪一版 ERP。**不传 = 一条都检索不到**（fail closed，见
+    # `retrieve._space_filter`）。不给默认值是故意的：给了默认值，
+    # 一个忘了传的调用方会静静地把企业版的提问送进旗舰版材料里
+    space_id: uuid.UUID | None = None,
     history: list[tuple[str, str]] | None = None,
     mode: str = DEFAULT_MODE,
     general: bool | None = None,
@@ -837,6 +847,7 @@ async def ask(
         reranker,
         llm,
         user_id=user_id,
+        space_id=space_id,
         history=history,
         mode=mode,
         general=general,

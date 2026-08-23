@@ -66,6 +66,12 @@ def call(name: str, **args) -> dict[int, DeltaToolCall]:
 
 
 def _deps(session, **kw) -> AgentDeps:
+    # ⚠️ `space_id` 不给默认值就是 fail closed（检索一条都不返回）。
+    # 这里补上旗舰版，理由同 conftest 的填充器：这一组测试验的是终结工具的
+    # 机制，不是空间隔离；跨空间那几条在 test_isolation.py 里单独验。
+    from conftest import flagship_space_id
+
+    kw.setdefault("space_id", flagship_space_id())
     return AgentDeps(
         session=session,
         user_id=uuid.uuid4(),
@@ -75,6 +81,7 @@ def _deps(session, **kw) -> AgentDeps:
         llm=kw.pop("llm", None) or FakeLLM(KB_REPLY),
         **kw,
     )
+
 
 
 async def drain(question: str, deps: AgentDeps, model: FunctionModel) -> tuple[list[dict], str]:

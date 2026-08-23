@@ -169,12 +169,20 @@ async def _ask(question: str, show_chunks: bool) -> None:
 
     # ChatLLM 是同步上下文管理器，不能混进 async with
     async with SessionLocal() as session:
+        # 命令行没有会话，也就没有「这条会话钉在哪一版」。用默认空间（旗舰版）。
+        # ⚠️ 不能不传：检索缺空间时是 fail closed 的，表现会是「这条命令
+        # 突然什么都查不到」，而它正是部署完当场验一句用的工具。
+        from copilot import spaces
+
+        space_id = await spaces.default_id(session)
         llm = ChatLLM()
         try:
             if show_chunks:
                 from copilot.retrieve import search
 
-                result = await search(session, question, embedder, reranker)
+                result = await search(
+                    session, question, embedder, reranker, space_id=space_id
+                )
                 typer.secho("── 召回的原文 ──", fg=typer.colors.BRIGHT_BLACK)
                 for rc in result.chunks:
                     typer.secho(
@@ -183,7 +191,9 @@ async def _ask(question: str, show_chunks: bool) -> None:
                     )
                     typer.secho(f"    {rc.content[:180]}…\n", fg=typer.colors.BRIGHT_BLACK)
 
-            answer = await ask_stream(session, question, embedder, reranker, llm)
+            answer = await ask_stream(
+                session, question, embedder, reranker, llm, space_id=space_id
+            )
             # ⚠️ `ask_stream` 吐的是 `(kind, text)`，kind 是 `reasoning`（模型草稿）
             # 或 `content`（正文）。**草稿不是答案**：落库、判「暂无此内容」都只看
             # content（见 qa.StreamedAnswer）。

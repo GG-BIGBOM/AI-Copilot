@@ -53,6 +53,41 @@ def _uuid_pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
+class KnowledgeSpace(Base):
+    """知识版本。一个空间 = 一套互不相干的 ERP 知识。
+
+    ⚠️ **这是 M14 起隔离的第二根轴。** 第一根是 `owner_id`（谁的文档），
+    这一根是「哪一版 ERP」——旗舰版、客户端企业版、网页版企业版是三套不同的
+    产品，同一个问题在三边有三套不同的答案。混在一起答，用户照着点会点不到。
+
+    `code` 是稳定标识，程序里一律用它，不用 id 也不用中文名：
+        flagship            旗舰版（现有语雀语料全部属于它）
+        enterprise_desktop  客户端企业版
+        enterprise_web      网页版企业版
+        common              通用知识（跨版本都适用，只作为**检索范围**存在，
+                            不是用户能选来聊天的空间）
+
+    `status`：
+        active    正常。用户可选（`common` 除外）、可检索、可上传
+        inactive  预置但还没导入语料。不出现在用户可选列表里，也不参与检索
+        archived  已下线。历史会话仍能读到它的名字，但不再检索、不再可选
+    """
+
+    __tablename__ = "knowledge_spaces"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # ⚠️ 唯一。回填和 `common` 的判定都靠它，重复一个就意味着两套"通用知识"
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -101,6 +136,16 @@ class Document(Base):
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # 这篇文档属于哪一版 ERP。
+    # ⚠️ 先建成可空，回填完再加 NOT NULL——见 alembic 那两个 migration。
+    # 建完之后**不允许再出现 NULL**：没有空间的文档在检索里是 fail closed 的，
+    # 也就是谁都搜不到它，而那种失败没有任何症状（文档在列表里好好的）。
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     source_type: Mapped[str] = mapped_column(String(16))  # yuque | upload
     title: Mapped[str] = mapped_column(String(512))
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
@@ -145,6 +190,15 @@ class Chunk(Base):
     # 从 Document 冗余下来，检索时直接过滤，避免 join
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
+    )
+    # ⭐ 同上，隔离的第二根轴。**必须等于所属 document 的那一个**——
+    # 写成别的值不会报错，只会让这一块出现在错误的 ERP 版本的答案里。
+    # 和 owner_id 一样，只允许 `ingest/pipeline.write_chunks` 一处写值。
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
     )
 
     ordinal: Mapped[int] = mapped_column(Integer)  # 在文档内的序号
@@ -342,6 +396,15 @@ class Conversation(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(512), default="新对话")
+    # ⭐ 会话创建时**钉死**在一个知识版本上，中途不许换。
+    # 换版本 = 新建会话。理由：同一段对话里前三轮讲旗舰版、第四轮改成企业版，
+    # 追问「那这个呢」时模型手里是两套互相矛盾的材料，而用户看不出这一点。
+    knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # ===== M7 Agent：多轮收集的状态 =====

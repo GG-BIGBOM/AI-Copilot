@@ -170,6 +170,9 @@ async def write_chunks(
                 document_id=doc.id,
                 # ⚠️ 隔离红线：必须跟着文档走，不能是别的值
                 owner_id=doc.owner_id,
+                # ⚠️ 同 owner_id：只能取所属文档的那一个。写成别的值不会报错，
+                # 只会让这一块出现在错误的 ERP 版本的答案里
+                knowledge_space_id=doc.knowledge_space_id,
                 ordinal=c.ordinal,
                 content=c.content,
                 embedding=vec,

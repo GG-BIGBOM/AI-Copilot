@@ -58,6 +58,34 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def require_admin(user: CurrentUser) -> User:
+    """管理员专用。**服务端唯一的判据是 `users.is_admin`。**
+
+    ⚠️ **前端的 `/admin` guard 只负责体验，不是安全边界。** 它挡的是
+    「点进去看到一片报错」，挡不住任何一个会开控制台的人。所有
+    `/api/admin/*` 必须在服务端过这一关。
+
+    ⚠️ **不新增 `role` 字段。** 现在 `is_admin` 就是唯一的真源；再加一个
+    `role` 意味着两个字段长期并存，而它们迟早会漂移——漂移之后
+    「谁是管理员」这个问题有两个互相矛盾的答案，而生效的是哪一个取决于
+    这段代码读了哪一个。真要多角色时，单独设计一次性迁移和回滚方案（见 plan.md）。
+
+    停用判定不在这里重复：`get_current_user_optional` 已经卡了 `is_active`，
+    被停用的账号连 `CurrentUser` 都拿不到。**两处都写等于两处都要维护**，
+    而漏掉一处的表现是「停用了还能用管理台」。
+
+    ⚠️ 越权返回 **403 不是 404**：这条路径上「有没有这个接口」不是秘密，
+    藏起来只会让排查变难。私有**数据**的越权才用 404（见 `/api/images/`），
+    那里 404 和 403 的区别本身就会泄露「这个 id 存在」。
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    return user
+
+
+CurrentAdmin = Annotated[User, Depends(require_admin)]
+
+
 # ---------- cookie 读写 ----------
 
 

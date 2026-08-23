@@ -62,6 +62,11 @@ class AgentDeps:
     # 「京东电子面单怎么配」改写成「电子面单 模板 设置」，然后召回了得物那篇。
     # 让它成为工具入参就等于把漂移的机会还回去，所以它在 deps 里。
     question: str = ""
+    # ⭐ 这条会话钉死的知识版本。**和 user_id 同级的隔离输入**：只能从会话记录来，
+    # 绝不能变成工具的入参——让模型能指定它，等于一句 prompt injection
+    # 就能把提问切到另一版 ERP 的材料上。
+    # None 时检索一条都不返回（fail closed，见 retrieve._space_filter）
+    space_id: uuid.UUID | None = None
 
     # 多轮收集的状态。进来时从 conversations 表读，出去时写回
     profile: Requirement = field(default_factory=Requirement)

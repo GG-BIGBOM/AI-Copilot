@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from copilot.config import get_settings
-from copilot.db.models import Chunk
+from copilot.db.models import Chunk, KnowledgeSpace
 from copilot.providers.base import Embedder, Reranker
 
 # 与 ingest/chunker.py 的标记格式一致：正文里存 `[图:a3f9]`
@@ -205,6 +205,32 @@ def _visibility_filter(
     return public_only | (Chunk.owner_id == user_id)
 
 
+def _space_filter(
+    space_id: uuid.UUID | None, common_id: uuid.UUID | None
+) -> ColumnElement[bool]:
+    """知识版本过滤——**全项目唯一一处**，和 `_visibility_filter` 同一条规矩。
+
+        knowledge_space_id = space_id     这一版 ERP 自己的材料
+        knowledge_space_id = common_id    跨版本都适用的通用知识
+
+    ⚠️⚠️ **没有 space_id 时返回恒假（fail closed）。**
+
+    这是这个函数最重要的一行。缺少空间上下文的来路只有两种：一条 M14 之前
+    建的老会话，或者某个调用方忘了往下传——两种都不该退回「全库搜」。
+    退回全库搜的表现是：一个企业版的会话安安静静地拿旗舰版的材料作答，
+    界面路径全对不上，而**没有任何报错**。宁可这一轮答不出来。
+
+    ⚠️ `common` 那一支是可选的：种子没建过 `common` 时 `common_id` 是 None，
+    这时只搜本空间。不要因此放宽成「搜全部」。
+    """
+    if space_id is None:
+        return false()
+    own = Chunk.knowledge_space_id == space_id
+    if common_id is None:
+        return own
+    return own | (Chunk.knowledge_space_id == common_id)
+
+
 # 人工订正要排到第几位。**不是无条件置顶**：
 # 只有重排分到了这条线，才认为「这条订正确实是在回答用户这次问的问题」。
 # 无条件置顶的错法很难查——一条为别的问题写的订正会挤掉真正对的那一篇，
@@ -327,6 +353,7 @@ async def search(
     reranker: Reranker | None = None,
     *,
     user_id: uuid.UUID | None = None,
+    space_id: uuid.UUID | None = None,
     top_k: int | None = None,
     rerank_k: int | None = None,
     score_threshold: float | None = None,
@@ -335,6 +362,8 @@ async def search(
 
     Args:
         user_id: 当前用户。None 表示只搜公共库
+        space_id: 这一轮属于哪个知识版本。**None 会一条都搜不到**（fail closed，
+            见 `_space_filter`）——调用方必须显式传，不许靠默认值兜底
         top_k: 向量召回数量
         rerank_k: 重排后保留数量
         score_threshold: 低于此分丢弃。**只是滤掉明显垃圾的下限**，
@@ -354,9 +383,22 @@ async def search(
     # uvicorn 下，别人正在进行的 SSE 流会一起停住。丢线程池里跑。
     query_vec = await anyio.to_thread.run_sync(embedder.embed_query, query)
 
+    # ⭐ 空间过滤和可见性过滤**在同一个 where 里**，缺一不可：
+    # 前者管「哪一版 ERP」，后者管「谁的文档」。两根轴互不替代——
+    # 只过滤 owner 会让企业版的会话读到旗舰版的材料，
+    # 只过滤空间会让 A 读到 B 上传的文档。
+    from copilot.spaces import COMMON
+
+    common = (
+        await session.execute(
+            select(KnowledgeSpace.id).where(KnowledgeSpace.code == COMMON)
+        )
+    ).scalar_one_or_none()
+
     # 向量召回。cosine_distance 越小越近
     stmt = (
         select(Chunk)
+        .where(_space_filter(space_id, common))
         .where(_visibility_filter(user_id))
         .order_by(Chunk.embedding.cosine_distance(query_vec))
         .limit(top_k)
@@ -381,6 +423,12 @@ async def search(
     if user_id is not None:
         private_stmt = (
             select(Chunk)
+            # ⚠️⚠️ **空间过滤在这里也要有。** 这是第二条召回路径，漏掉它的
+            # 表现是：用户自己传在旗舰版下的文档，会出现在他的企业版会话里。
+            # 2026-08-23 写 `test_private_document_respects_space` 时当场撞到——
+            # 上面主查询已经按空间过滤了，唯独这一支是"补捞私有块"的旁路，
+            # 而旁路正是隔离最容易漏的地方（M11 P3 的保底名额本身就是个旁路）。
+            .where(_space_filter(space_id, common))
             .where(_visibility_filter(user_id, private_only=True))
             .order_by(Chunk.embedding.cosine_distance(query_vec))
             .limit(PRIVATE_RECALL_K)

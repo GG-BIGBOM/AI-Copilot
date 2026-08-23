@@ -120,7 +120,7 @@ def test_logged_in_sees_public_plus_own():
 # ---------- 真库检索 ----------
 
 
-async def test_alice_cannot_see_bobs_document(two_users_with_docs):
+async def test_alice_cannot_see_bobs_document(two_users_with_docs, flagship_id):
     """核心用例：A 搜不到 B 的私有文档。"""
     maker, alice_id, bob_id, tag = two_users_with_docs
     async with maker() as s:
@@ -130,6 +130,7 @@ async def test_alice_cannot_see_bobs_document(two_users_with_docs):
             FakeEmbedder(),
             PassThroughReranker(),
             user_id=alice_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=20,
         )
@@ -137,7 +138,7 @@ async def test_alice_cannot_see_bobs_document(two_users_with_docs):
     assert not any("鲍勃" in t for t in titles), f"泄漏了！爱丽丝看到了：{titles}"
 
 
-async def test_bob_cannot_see_alices_document(two_users_with_docs):
+async def test_bob_cannot_see_alices_document(two_users_with_docs, flagship_id):
     maker, alice_id, bob_id, tag = two_users_with_docs
     async with maker() as s:
         result = await search(
@@ -146,6 +147,7 @@ async def test_bob_cannot_see_alices_document(two_users_with_docs):
             FakeEmbedder(),
             PassThroughReranker(),
             user_id=bob_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=20,
         )
@@ -153,7 +155,7 @@ async def test_bob_cannot_see_alices_document(two_users_with_docs):
     assert not any("爱丽丝" in t for t in titles), f"泄漏了！鲍勃看到了：{titles}"
 
 
-async def test_owner_can_see_own_document(two_users_with_docs):
+async def test_owner_can_see_own_document(two_users_with_docs, flagship_id):
     """隔离不能矫枉过正——自己得看得到自己的。"""
     maker, alice_id, bob_id, tag = two_users_with_docs
     async with maker() as s:
@@ -163,6 +165,7 @@ async def test_owner_can_see_own_document(two_users_with_docs):
             FakeEmbedder(),
             PassThroughReranker(),
             user_id=alice_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=20,
         )
@@ -170,7 +173,7 @@ async def test_owner_can_see_own_document(two_users_with_docs):
     assert any("爱丽丝" in t for t in titles), "自己的文档反而搜不到了"
 
 
-async def test_anonymous_sees_neither_private_document(two_users_with_docs):
+async def test_anonymous_sees_neither_private_document(two_users_with_docs, flagship_id):
     maker, alice_id, bob_id, tag = two_users_with_docs
     async with maker() as s:
         result = await search(
@@ -179,6 +182,7 @@ async def test_anonymous_sees_neither_private_document(two_users_with_docs):
             FakeEmbedder(),
             PassThroughReranker(),
             user_id=None,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=20,
         )
@@ -186,7 +190,7 @@ async def test_anonymous_sees_neither_private_document(two_users_with_docs):
     assert not any("爱丽丝" in t or "鲍勃" in t for t in titles), f"匿名看到了私有文档：{titles}"
 
 
-async def test_public_document_visible_to_everyone(two_users_with_docs):
+async def test_public_document_visible_to_everyone(two_users_with_docs, flagship_id):
     maker, alice_id, bob_id, tag = two_users_with_docs
     async with maker() as s:
         for uid in (None, alice_id, bob_id):
@@ -196,6 +200,7 @@ async def test_public_document_visible_to_everyone(two_users_with_docs):
                 FakeEmbedder(),
                 PassThroughReranker(),
                 user_id=uid,
+                space_id=flagship_id,
                 top_k=20,
                 rerank_k=20,
             )
@@ -279,7 +284,7 @@ async def alice_uploaded(api_client, maker):
     shutil.rmtree(get_settings().upload_dir / str(alice_id), ignore_errors=True)
 
 
-async def test_uploaded_document_never_reaches_another_user(alice_uploaded, maker):
+async def test_uploaded_document_never_reaches_another_user(alice_uploaded, maker, flagship_id):
     """⭐ 本里程碑最不能红的一条。用 A 的原文去搜，是最严苛的情形。"""
     alice_id, bob_id, secret, _ = alice_uploaded
     async with maker() as s:
@@ -290,7 +295,7 @@ async def test_uploaded_document_never_reaches_another_user(alice_uploaded, make
     assert not any(secret in h for h in hits), f"泄漏了！鲍勃搜到了爱丽丝上传的内容：{hits}"
 
 
-async def test_uploaded_document_is_findable_by_its_owner(alice_uploaded, maker):
+async def test_uploaded_document_is_findable_by_its_owner(alice_uploaded, maker, flagship_id):
     """隔离不能矫枉过正——自己传的东西自己得搜得到，否则上传功能等于没有。"""
     alice_id, _, secret, _ = alice_uploaded
     async with maker() as s:
@@ -300,13 +305,14 @@ async def test_uploaded_document_is_findable_by_its_owner(alice_uploaded, maker)
             FakeEmbedder(),
             PassThroughReranker(),
             user_id=alice_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=20,
         )
     assert any(secret in c.content for c in result.chunks), "自己上传的文档反而搜不到"
 
 
-async def test_anonymous_never_reaches_uploaded_documents(alice_uploaded, maker):
+async def test_anonymous_never_reaches_uploaded_documents(alice_uploaded, maker, flagship_id):
     alice_uploaded_ids = alice_uploaded
     _, _, secret, _ = alice_uploaded_ids
     async with maker() as s:
@@ -316,7 +322,7 @@ async def test_anonymous_never_reaches_uploaded_documents(alice_uploaded, maker)
     assert not any(secret in c.content for c in result.chunks)
 
 
-async def test_every_chunk_owner_matches_its_document(engine):
+async def test_every_chunk_owner_matches_its_document(engine, flagship_id):
     """全库体检：chunks.owner_id 与所属 document 必须一致。
 
     这两个字段是冗余的，一旦写入时漏同步，隔离就形同虚设，且没有任何报错。

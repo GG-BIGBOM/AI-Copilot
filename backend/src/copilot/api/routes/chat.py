@@ -96,7 +96,16 @@ async def _resolve_conversation(
                 return existing
             cid = None  # 被别人占了，另发一个
 
-    conv = Conversation(id=cid or uuid.uuid4(), user_id=user_id, title=_title_from(question))
+    # ⭐ 新会话在这里**钉死**知识版本，之后不许改（换版本 = 新建会话）。
+    # 老会话（M14 回填过的）已经带着 flagship，不会走到这一行。
+    from copilot import spaces
+
+    conv = Conversation(
+        id=cid or uuid.uuid4(),
+        user_id=user_id,
+        title=_title_from(question),
+        knowledge_space_id=await spaces.default_id(session),
+    )
     session.add(conv)
     await session.flush()
     return conv
@@ -235,6 +244,10 @@ async def _chat_stream(
                 providers.get_reranker(),
                 providers.get_llm_for(mode),
                 user_id=user_id,
+                # ⚠️ 这一轮属于哪一版 ERP，只能来自会话记录。
+                # 缺了它检索一条都不返回（fail closed）——那是故意的，
+                # 见 `retrieve._space_filter`
+                space_id=conv.knowledge_space_id,
                 history=history,
                 mode=mode,
             )
@@ -402,6 +415,9 @@ async def _agent_stream(
                 # 不可用；缺了 history / mode 它就退化成「单轮 + 简答档」，
                 # 而消灭这种双路差异正是 M10 的目的
                 llm=providers.get_llm_for(mode),
+                # ⚠️ 和 user_id 同级的隔离输入：只能来自会话记录，
+                # 绝不能让模型指定（见 AgentDeps.space_id）
+                space_id=conv.knowledge_space_id,
                 history=history,
                 history_truncated=(history_total or 0) > len(history),
                 plan_flow=_needs_plan_limits(conv, question),

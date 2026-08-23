@@ -64,7 +64,14 @@ async def _gather_material(deps: AgentDeps) -> str:
         query = f"{filled[field]} {topic}"
         try:
             result = await search(
-                deps.session, query, deps.embedder, deps.reranker, user_id=deps.user_id
+                deps.session,
+                query,
+                deps.embedder,
+                deps.reranker,
+                # ⚠️ 出方案也要钉在这条会话的知识版本上：旗舰版的实施清单里
+                # 混进企业版的配置项，交付出去就是错的
+                user_id=deps.user_id,
+                space_id=deps.space_id,
             )
         except Exception as e:  # noqa: BLE001 - 少一段材料也能生成，别整个失败
             logger.warning("生成方案时检索失败 topic=%s：%s", topic, e)

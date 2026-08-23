@@ -119,6 +119,11 @@ async def two_users(maker):
 
 
 def _deps(session, user_id, **kw) -> AgentDeps:
+    # ⚠️ 不传 `space_id` 就是 fail closed（检索一条都不返回）。这一组验的是
+    # Agent 工具的隔离红线（谁的文档），空间那根轴在 test_spaces.py 里单独验。
+    from conftest import flagship_space_id
+
+    kw.setdefault("space_id", flagship_space_id())
     return AgentDeps(
         session=session,
         user_id=user_id,

@@ -10,14 +10,101 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from copilot.auth.invites import create_invite_codes
 from copilot.config import get_settings
-from copilot.db.models import Chunk, Conversation, Document, InviteCode, Message, User
+from copilot.db.models import (
+    Chunk,
+    Conversation,
+    Document,
+    InviteCode,
+    KnowledgeSpace,
+    Message,
+    User,
+)
 from copilot.providers.base import RerankResult
+
+# ─────────────────────────────────────────────────────────
+# 知识版本（M14-A）
+#
+# `documents` / `chunks` / `conversations` 上的 `knowledge_space_id` 是 NOT NULL，
+# 而这份测试里有二十几处直接 new 出这些对象的地方。给每一处都手写一个 id，
+# 改动大、噪声大，而且和绝大多数测试想验的东西无关。
+#
+# ⚠️⚠️ **所以这里装一个只在测试里生效的填充器：没写空间的，自动补 flagship。**
+# 它的危险是显而易见的——**生产代码忘了传空间，测试也不会红**。
+# 所以真正要守的那几条写入路径，各自有不依赖这个填充器的断言：
+#
+#     ingest 写块        test_isolation.py::test_ingested_chunks_inherit_the_document_space
+#     新建会话           test_multiturn.py::test_a_new_conversation_is_pinned_to_a_space
+#     用户上传           test_api_documents.py::test_an_upload_lands_in_the_chat_space
+#
+# 那三条断言直接读库里的值，填充器补出来的和真代码写进去的在它们眼里不一样
+# （填充器补的是 flagship，而它们验的是"跟着来源走"）。
+# ─────────────────────────────────────────────────────────
+_FLAGSHIP_ID: uuid.UUID | None = None
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _seed_spaces() -> None:
+    """建库时把四个知识版本补齐，并记住 flagship 的 id 给填充器用。"""
+    import asyncio
+
+    from copilot import spaces
+
+    async def go() -> uuid.UUID:
+        eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            async with maker() as s:
+                await spaces.ensure_seeded(s)
+                return await spaces.default_id(s)
+        finally:
+            await eng.dispose()
+
+    global _FLAGSHIP_ID
+    _FLAGSHIP_ID = asyncio.run(go())
+
+
+@event.listens_for(Document, "before_insert", propagate=True)
+@event.listens_for(Chunk, "before_insert", propagate=True)
+@event.listens_for(Conversation, "before_insert", propagate=True)
+def _fill_space(mapper, connection, target) -> None:  # noqa: ARG001 - SQLAlchemy 的签名
+    if getattr(target, "knowledge_space_id", None) is None:
+        target.knowledge_space_id = _FLAGSHIP_ID
+
+
+def flagship_space_id() -> uuid.UUID:
+    """旗舰版的 id，**给不能用夹具的地方**（同步的工厂函数）用。
+
+    夹具版本在下面。两个入口取的是同一个值。
+    """
+    assert _FLAGSHIP_ID is not None, "_seed_spaces 没跑到"
+    return _FLAGSHIP_ID
+
+
+@pytest.fixture
+def flagship_id() -> uuid.UUID:
+    """旗舰版的 id。要显式指定空间的测试用它。"""
+    assert _FLAGSHIP_ID is not None, "_seed_spaces 没跑到"
+    return _FLAGSHIP_ID
+
+
+@pytest.fixture
+async def other_space(maker) -> KnowledgeSpace:
+    """另一个**活着的**知识版本，用来验跨空间隔离。
+
+    用 `enterprise_desktop`：种子里它是 inactive（语料还没导入），
+    这里只把它取出来，不改状态——隔离测试要的是「另一个空间」，
+    和它能不能被用户选中无关。
+    """
+    from copilot import spaces
+
+    async with maker() as s:
+        return await spaces.by_code(s, spaces.ENTERPRISE_DESKTOP)
 
 
 @pytest.fixture

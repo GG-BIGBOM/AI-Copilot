@@ -75,8 +75,9 @@ async def answer_kb_for_deps(deps: AgentDeps) -> str:
             deps.embedder,
             deps.reranker,
             deps.llm,
-            # ⚠️ 隔离红线：同 search_kb，owner 过滤只能来自 deps
+            # ⚠️ 隔离红线：同 search_kb，owner 和知识版本都只能来自 deps
             user_id=deps.user_id,
+            space_id=deps.space_id,
             history=deps.history,
             mode=deps.mode,
             general=deps.general,
@@ -201,8 +202,9 @@ async def search_kb(ctx: RunContext[AgentDeps], query: str) -> str:
             query,
             deps.embedder,
             deps.reranker,
-            # ⚠️ 隔离红线：owner 过滤只能来自 deps，不能是入参
+            # ⚠️ 隔离红线：owner 和知识版本都只能来自 deps，不能是入参
             user_id=deps.user_id,
+            space_id=deps.space_id,
         )
     except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
         logger.warning("search_kb 失败 query=%r：%s", query[:60], e, exc_info=True)

@@ -181,7 +181,7 @@ def test_context_text_carries_the_attribution(customer_docs):
 # ---------- 第 2 步：私有块保底名额 ----------
 
 
-async def test_private_chunk_survives_being_outranked(customer_docs):
+async def test_private_chunk_survives_being_outranked(customer_docs, flagship_id):
     """⭐ 五块公共材料把私有那块整个挤出 top-5 —— 保底名额要把它捞回来。
 
     这就是 `priv-negation-combo-split` 的形态：用户问「我们的组合装要不要拆」，
@@ -197,6 +197,7 @@ async def test_private_chunk_survives_being_outranked(customer_docs):
             FakeEmbedder(),
             RankByKeyword("条件说明"),
             user_id=owner_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=5,
         )
@@ -207,7 +208,7 @@ async def test_private_chunk_survives_being_outranked(customer_docs):
     assert result.private_count == 1
 
 
-async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(customer_docs, maker):
+async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(customer_docs, maker, flagship_id):
     """⭐⭐ **私有库的召回名额。这道题是实测逼出来的，不是设计出来的。**
 
     M11 定稿时的判断是「私有文档被 4 个公共块整个挤出 **top-5**」——以为发生在
@@ -256,6 +257,7 @@ async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(custome
                 emb,
                 RankByKeyword("不启用"),  # 重排会给私有那块最高分——只要它进得了候选池
                 user_id=owner_id,
+                space_id=flagship_id,
                 top_k=20,
                 rerank_k=5,
             )
@@ -270,7 +272,7 @@ async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(custome
             await s.commit()
 
 
-async def test_private_recall_does_not_widen_visibility(customer_docs):
+async def test_private_recall_does_not_widen_visibility(customer_docs, flagship_id):
     """⚠️ 多一次召回**不等于**多一条可见性的路。
 
     `_visibility_filter(user_id, private_only=True)` 仍然是那**唯一一处**
@@ -291,7 +293,7 @@ async def test_private_recall_does_not_widen_visibility(customer_docs):
     assert not any("客户A" in t for t in titles), f"泄漏了：{titles}"
 
 
-async def test_floor_never_lets_through_a_chunk_below_threshold(customer_docs):
+async def test_floor_never_lets_through_a_chunk_below_threshold(customer_docs, flagship_id):
     """⚠️ **保底只重排，不放行。**
 
     低于阈值的私有块一个都不能被捞回来——否则「用户传了什么就答什么」，
@@ -305,13 +307,14 @@ async def test_floor_never_lets_through_a_chunk_below_threshold(customer_docs):
             FakeEmbedder(),
             AllBelowThreshold(),
             user_id=owner_id,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=5,
         )
     assert result.chunks == [], "全都不及格时该一块都不返回"
 
 
-async def test_floor_does_nothing_for_a_user_without_documents(customer_docs):
+async def test_floor_does_nothing_for_a_user_without_documents(customer_docs, flagship_id):
     """没传过文档的人（以及评测公共库那 55 题走的 user_id=None）不受影响。"""
     maker, _owner_id, tag = customer_docs
     async with maker() as s:
@@ -321,6 +324,7 @@ async def test_floor_does_nothing_for_a_user_without_documents(customer_docs):
             FakeEmbedder(),
             RankByKeyword("条件说明"),
             user_id=None,
+            space_id=flagship_id,
             top_k=20,
             rerank_k=5,
         )
@@ -328,7 +332,7 @@ async def test_floor_does_nothing_for_a_user_without_documents(customer_docs):
     assert all(not c.private for c in result.chunks)
 
 
-async def test_floor_does_not_reach_into_other_peoples_documents(customer_docs, maker):
+async def test_floor_does_not_reach_into_other_peoples_documents(customer_docs, maker, flagship_id):
     """⚠️ 保底名额**绝不能**变成一条绕过可见性的路。
 
     这是全项目唯一一条错了就不可挽回的规则，所以每加一处排序逻辑都要再验一次：
@@ -410,7 +414,7 @@ def test_both_modes_share_the_same_guard():
     assert deep.endswith(tail)
 
 
-async def test_guard_no_longer_depends_on_whether_a_private_chunk_was_recalled(customer_docs):
+async def test_guard_no_longer_depends_on_whether_a_private_chunk_was_recalled(customer_docs, flagship_id):
     """⭐ **原来还有第三个条件「这一轮一个私有块都没召回」，实测删掉了。**
 
     删的理由不是嫌它严，是它**和第 2 步互相拆台**：保底名额保证了至少有一个
@@ -434,7 +438,7 @@ async def test_guard_no_longer_depends_on_whether_a_private_chunk_was_recalled(c
         assert not await needs_subject_guard(s, "京东电子面单模板怎么设置", owner_id)
 
 
-async def test_has_private_chunks_is_the_hard_boundary(customer_docs):
+async def test_has_private_chunks_is_the_hard_boundary(customer_docs, flagship_id):
     """⭐ 这个判断是主体约束**结构上碰不到公共库那 55 题**的保证。
 
     评测公共库走的是 `user_id=None`，这个函数恒为 False，
@@ -448,7 +452,7 @@ async def test_has_private_chunks_is_the_hard_boundary(customer_docs):
         assert await has_private_chunks(s, owner_id) is True
 
 
-async def test_subject_without_relevant_private_hit_refuses_before_generation(customer_docs):
+async def test_subject_without_relevant_private_hit_refuses_before_generation(customer_docs, flagship_id):
     """公共默认规则不能被模型改写成某家公司的专属约定。"""
     from chat_helpers import FakeLLM
 
@@ -464,6 +468,7 @@ async def test_subject_without_relevant_private_hit_refuses_before_generation(cu
             AllBelowThreshold(),
             llm,
             user_id=owner_id,
+            space_id=flagship_id,
         )
 
     answer = "".join(piece for kind, piece in streamed.stream if kind == "content")
@@ -512,7 +517,7 @@ def test_first_person_and_product_questions_are_not_named_subjects(question):
     assert asks_about_named_subject(question) is False
 
 
-async def test_named_subject_answer_never_sees_public_material(customer_docs):
+async def test_named_subject_answer_never_sees_public_material(customer_docs, flagship_id):
     """点名了公司，公共材料就不进上下文——模型想用也没得用。"""
     from chat_helpers import FakeLLM
 
@@ -528,6 +533,7 @@ async def test_named_subject_answer_never_sees_public_material(customer_docs):
             RankByKeyword("拆分"),
             llm,
             user_id=owner_id,
+            space_id=flagship_id,
         )
     "".join(piece for kind, piece in streamed.stream if kind == "content")
 
@@ -552,7 +558,7 @@ async def test_named_subject_answer_never_sees_public_material(customer_docs):
     # 这里留着是为了在整条链路上再确认一次，两处缺一不可。
 
 
-async def test_first_person_question_keeps_public_material(customer_docs):
+async def test_first_person_question_keeps_public_material(customer_docs, flagship_id):
     """第一人称那一支不动：把公共材料拿掉会把答得出的题变成「暂无此内容」。"""
     from chat_helpers import FakeLLM
 
@@ -568,6 +574,7 @@ async def test_first_person_question_keeps_public_material(customer_docs):
             RankByKeyword("拆分"),
             llm,
             user_id=owner_id,
+            space_id=flagship_id,
         )
     "".join(piece for kind, piece in streamed.stream if kind == "content")
 
@@ -610,7 +617,7 @@ def test_empty_allowlist_lets_nobody_in(monkeypatch):
         get_settings.cache_clear()
 
 
-async def test_allowlisted_user_takes_the_agent(maker, monkeypatch):
+async def test_allowlisted_user_takes_the_agent(maker, monkeypatch, flagship_id):
     """点名的那个人，普通问答也走 Agent——这就是白名单灰度的形态。"""
     from copilot.api.routes.chat import _use_agent
     from copilot.config import get_settings
