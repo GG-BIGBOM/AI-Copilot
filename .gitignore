@@ -36,3 +36,8 @@ dist/
 build/
 *.log
 logs/
+
+# 浏览器自动化的产物（UI 自测时留下的 console 日志、页面快照、截图）。
+# 不是项目文件，也不该进版本库——每跑一次就多几十个 M。
+.playwright-cli/
+output/
