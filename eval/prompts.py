@@ -86,36 +86,34 @@ V4_SUBJECT_SCOPE_REJECTED = V3_M8.replace(
    不要把通用流程当成这家的安排讲出来。""",
 )
 
-# ⭐ A/B 专用：**线上这一版，只减掉铁律 9**（定义题先给一句通俗定义）。
+# ⭐ A/B 专用：**线上这一版，把定义题那一段改成常开**（= 2026-08-23 之前的铁律 9）。
 #
-# 2026-08-23 查 P13 门禁时的线索：风险边界题集在 `566fcb56`（刚加完铁律 8）上
-# 三条硬指标全 0，到 `ae2fdb78` 变成高风险幻觉 18.2% / 跨平台污染 20%，
-# 而这两版之间 qa 的 prompt **只差铁律 9**。所以要一次干净的 A/B：
-# 不是抄一份旧文本（那样连别处的改动也一起回退了），而是拿现行 prompt
-# 原地删掉这一条——差值才只归因于它。
+# 怎么来的：风险边界题集在 `566fcb56`（刚加完铁律 8）上三条硬指标全 0，
+# 到 `ae2fdb78` 变成高风险幻觉 18.2% / 跨平台污染 20%，而两版之间 qa 的 prompt
+# **只差铁律 9**。拿现行 prompt 原地删掉那一条一跑，三条硬指标全部回到 0，
+# 指纹也正好回到 `566fcb56`——两头对上了。
+#
+# 之后铁律 9 从 `_TEMPLATE` 里搬走，改成由 `qa.is_definition_question()` 按问题
+# 形状追加（见 `qa._DEFINITION_HINT`）。所以“回到改动之前”今天的写法是
+# **把那一段常开**，而不是删掉它——两者拼出来的文本一模一样。
 #
 # ⚠️ 它是**动态**从 `copilot.qa` 拼出来的，不是存档字符串：线上 prompt 以后再改，
-# 这一版跟着变，A/B 的两边始终只差铁律 9 这一条。
-def current_minus_rule9(mode: str = "fast") -> str:
-    from copilot.qa import _TEMPLATE, system_prompt_for
+# 这一版跟着变，A/B 的两边始终只差“这一段开不开”。
+def current_definition_always(mode: str = "fast") -> str:
+    from copilot.qa import system_prompt_for
 
-    start = _TEMPLATE.find("9. 用户问「X 是什么")
-    end = _TEMPLATE.find("\n\n写法要求：", start)
-    if start < 0 or end < 0:  # 铁律 9 被改写或删掉了，这一版就没有意义了
+    prompt = system_prompt_for(mode, definition=True)
+    if "第一句先用通俗的一句话定义" not in prompt:
         raise SystemExit(
-            "current-no-rule9：在 qa._TEMPLATE 里找不到铁律 9——"
-            "prompt 已经变了，先确认要 A/B 的还是不是同一条规则"
+            "current-definition-always：拼出来的 prompt 里没有定义题那一段——"
+            "`_DEFINITION_HINT` 已经变了，先确认要 A/B 的还是不是同一条规则"
         )
-    rule9 = _TEMPLATE[start:end]
-    full = system_prompt_for(mode)
-    if rule9 not in full:
-        raise SystemExit("current-no-rule9：拼出来的 prompt 里没有铁律 9，检查 system_prompt_for")
-    return full.replace(rule9, "").replace("\n\n\n", "\n\n")
+    return prompt
 
 
 ARCHIVE = {
     "v1-m5": V1_M5,
     "v3-m8": V3_M8,
     "v4-subject-rejected": V4_SUBJECT_SCOPE_REJECTED,
-    "current-no-rule9": current_minus_rule9(),
+    "current-definition-always": current_definition_always(),
 }

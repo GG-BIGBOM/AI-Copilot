@@ -346,6 +346,33 @@ def test_plain_answer_is_not_no_answer():
     assert not is_no_answer("批量换货一次最多 500 单 [1]。")
 
 
+def test_general_knowledge_answer_with_a_closing_caveat_is_not_no_answer():
+    """⭐ 常识兜底打开后的第三种形态（2026-08-23 评测撞出来的）。
+
+    M12 的铁律 1 规定常识回答**不许标来源编号**，于是「全文没有 [n]」这个
+    条件对它恒成立；末尾再补一句「产品里具体怎么算，知识库暂无此内容」，
+    整段正确的解释就被判成拒答。实测原句（`gk-inventory-turnover`）：
+    189 字的回答，那句话在第 180 字，评测报「常识题不该拒答」，
+    线上会把 `answer_source` 记成 `no_answer`——答得好好的问题记成没答上。
+    """
+    from copilot.qa import is_no_answer
+
+    assert not is_no_answer(
+        "库存周转率是衡量库存周转速度的指标，反映一定时期内库存商品被销售并补充的频率。"
+        "知识库里没有专门针对“库存周转率”的说明，按通用理解：它通常用"
+        "“销售成本 ÷ 平均库存”来计算，数值越高说明周转越快、资金占用越少，"
+        "但过高也可能意味着备货不足。\n"
+        "关于旺店通旗舰版 ERP 中库存周转率的具体计算口径或配置路径，知识库暂无此内容。"
+    )
+
+
+def test_a_short_preface_before_the_phrase_is_still_no_answer():
+    """位置条件不能把 M7 那种形态放过去——它的前缀只有一句话。"""
+    from copilot.qa import is_no_answer
+
+    assert is_no_answer("我查到的是发货单打印，不是你问的退款单。知识库暂无此内容。")
+
+
 # ---------- 删除会话 ----------
 
 

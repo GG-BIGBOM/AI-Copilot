@@ -143,6 +143,31 @@ _EXCLUDERS = (
 _EXCLUDE_WINDOW = 60
 
 
+def missing_facts(answer: str, wanted: list) -> list[str]:
+    """`must_include` 里没在答案中出现的那几条。
+
+    一条可以写成**一组同义写法**（列表），命中其中任意一个就算数：
+
+        must_include: ['快速入库', ['批量入库', '批量采购入库', '采购批量入库']]
+
+    ⚠️ 为什么需要它：2026-08-23 `proc-purchase-inbound-ways` 判错，
+    要的是「批量入库」，而答案写的是「**批量采购入库**」、语料原文的标题是
+    「采购**批量**入库」——三种词序说的是同一件事，裸子串匹配只认一种。
+    这道题量的是「有没有漏掉这条入库方式」，不是「词序对不对」。
+
+    ⚠️ 它**不是**用来放宽事实判定的：数字、界面路径这类仍然写死一个字串，
+    「答案换个说法也算对」正是这份题集最不想要的松动。只有**同一个功能名的
+    不同词序**才该写成一组。
+    """
+    out: list[str] = []
+    low = answer.lower()
+    for want in wanted or []:
+        variants = [want] if isinstance(want, str) else list(want)
+        if not any(v.lower() in low for v in variants if v):
+            out.append(variants[0])
+    return out
+
+
 def banned_hits(answer: str, banned: list[str]) -> list[str]:
     """答案里真的出现了被禁内容的那几条。
 
@@ -688,9 +713,7 @@ def judge_all(
         by_id = {c["id"]: c for c in cases}
         for cr in results:
             case = by_id[cr.id]
-            cr.missing_facts = [
-                f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
-            ]
+            cr.missing_facts = missing_facts(cr.answer, case.get("must_include") or [])
             cr.banned_hits = banned_hits(cr.answer, case.get("must_not_include") or [])
             if cr.banned_hits:
                 cr.unsupported = f"出现了禁止内容：{cr.banned_hits}"
@@ -717,9 +740,7 @@ def judge_all(
     def one(cr: CaseResult) -> None:
         case = by_id[cr.id]
         # 确定性判定先做完，判分器不参与这部分
-        cr.missing_facts = [
-            f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
-        ]
+        cr.missing_facts = missing_facts(cr.answer, case.get("must_include") or [])
         cr.banned_hits = banned_hits(cr.answer, case.get("must_not_include") or [])
         if cr.banned_hits:
             cr.unsupported = f"出现了禁止内容：{cr.banned_hits}"

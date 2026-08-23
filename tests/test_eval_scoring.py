@@ -179,6 +179,31 @@ def test_hallucination_rate_ignores_invalid_denominator():
 
 
 # ─────────────────────────────────────────────────────────
+# must_include：一条事实可以有几种写法
+# ─────────────────────────────────────────────────────────
+
+
+def test_a_fact_can_be_written_several_ways():
+    """⭐ 2026-08-23 判错的原句：题面要「批量入库」，答案写的是「批量采购入库」，
+    语料原文的标题是「采购批量入库」——三种词序说的是同一件事。
+    这道题量的是有没有漏掉这条入库方式，不是词序对不对。"""
+    wanted = ['快速入库', ['批量入库', '批量采购入库', '采购批量入库']]
+    assert run.missing_facts('支持快速入库，也支持批量采购入库。', wanted) == []
+    assert run.missing_facts('支持快速入库和采购批量入库。', wanted) == []
+
+
+def test_a_missing_fact_is_still_missing():
+    """同义组不是给放宽事实判定开的口子：一个都没出现就还是漏。"""
+    wanted = ['快速入库', ['批量入库', '批量采购入库']]
+    assert run.missing_facts('只讲了快速入库。', wanted) == ['批量入库']
+
+
+def test_plain_string_facts_still_match_exactly():
+    assert run.missing_facts('上限是 4320 分钟。', ['4320']) == []
+    assert run.missing_facts('上限是 3 天。', ['4320']) == ['4320']
+
+
+# ─────────────────────────────────────────────────────────
 # must_not_include：出现即算错，但别把否定句判成违规
 # ─────────────────────────────────────────────────────────
 

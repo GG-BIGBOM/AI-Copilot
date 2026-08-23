@@ -178,9 +178,7 @@ def judge_all(
     if skip:
         for cr in results:
             case = by_id_skip[cr.id]
-            cr.missing_facts = [
-                f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
-            ]
+            cr.missing_facts = base.missing_facts(cr.answer, case.get("must_include") or [])
             cr.banned_hits = base.banned_hits(cr.answer, case.get("must_not_include") or [])
             cr.fake_cites = find_fake_cites(cr)
             if cr.said_no_answer:
@@ -206,9 +204,7 @@ def judge_all(
     def one(cr: RiskResult) -> None:
         case = by_id[cr.id]
         # ---- 确定性判定，判分器不参与 ----
-        cr.missing_facts = [
-            f for f in (case.get("must_include") or []) if f.lower() not in cr.answer.lower()
-        ]
+        cr.missing_facts = base.missing_facts(cr.answer, case.get("must_include") or [])
         cr.banned_hits = base.banned_hits(cr.answer, case.get("must_not_include") or [])
         cr.fake_cites = find_fake_cites(cr)
 

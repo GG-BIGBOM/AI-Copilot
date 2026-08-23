@@ -563,6 +563,12 @@ def _history_messages(history: list[tuple[str, str]] | None) -> list[dict]:
     ]
 
 
+# 兜底话术前面最多允许多长的铺垫，超过就说明前面那段是**答案**，不是解释。
+# M7 那种「我查到的是 X，不是你问的」是一句话（十几到几十字），
+# 而常识回答动辄一百多字才收尾——80 字把两者分得开，且留了余量。
+_NO_ANSWER_PREFACE_MAX = 80
+
+
 def is_no_answer(text: str) -> bool:
     """判断模型是否给出了「不知道」。
 
@@ -582,12 +588,28 @@ def is_no_answer(text: str) -> bool:
     「模板在【设置–策略设置–短信策略】里建 [1]。短信费用怎么收，知识库暂无此内容。」
     那是**答出来了**的，引用必须照常显示。带 `[n]` 就说明有据可依，
     不能因为末尾提了一句「某部分没有」就把整条来源清单丢掉。
+
+    ⚠️ **第 2 条还要加一个位置条件（2026-08-23）。** 常识兜底打开之后出现了
+    第三种形态：一段**没有引用标记**的常识回答，末尾补一句「产品里具体怎么算，
+    知识库暂无此内容」——按 M12 的铁律 1，常识回答本来就**不许标来源编号**，
+    于是「没有 [n]」这个条件对它恒成立，整段正确的解释被判成拒答。
+    实测（`gk-inventory-turnover`，「库存周转率是什么」）：189 字的答案，
+    那句话出现在第 180 字，评测报「常识题不该拒答」，线上则会把
+    `answer_source` 记成 `no_answer`——一个答得好好的问题被记成没答上。
+
+    所以只有**开头附近**就出现那句话时才算拒答：M7 那种形态是「我查到的是 X，
+    不是你问的。知识库暂无此内容。」，前缀是一句话；而常识回答是先讲完再补一句。
+    ⚠️ 这是个近似。它保守的方向是对的：判错成「有答案」最多让台账少记一条
+    no_answer，判错成「拒答」却会把一整段有用的回答从统计里抹掉。
     """
     body = text.strip()
     needle = NO_ANSWER.rstrip("。")
     if body.startswith(needle):
         return True
-    return needle in body and not _CITE_MARK_RE.search(body)
+    if _CITE_MARK_RE.search(body):
+        return False
+    at = body.find(needle)
+    return 0 <= at <= _NO_ANSWER_PREFACE_MAX
 
 
 @dataclass(slots=True)
