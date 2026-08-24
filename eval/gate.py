@@ -226,8 +226,12 @@ def main() -> None:
     for req in contract["requirements"]:
         run = newest(runs, req)
         stale = sum(1 for r in runs if r["_suite"] == req["suite"]) if run is None else 0
-        # 私有范围的指纹带着某个用户自己的文档，换个人跑就不一样——不核对它
+        # 两种情况不核对语料指纹：
+        #   私有范围   指纹带着某个用户自己的文档，换个人跑就不一样
+        #   与语料无关 路由题一块语料都不读（见 gate.yaml 里那条注释）
         want_sha = corpus_sha if req.get("scope", "public") == check_scope else None
+        if not req.get("corpus_check", True):
+            want_sha = None
         verdict, notes = judge_one(run, req, want_sha, stale)
         verdicts.append(verdict)
         mark = {PASS: "✓", FAIL: "⛔", UNRELIABLE: "？"}[verdict]

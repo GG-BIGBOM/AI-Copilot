@@ -96,6 +96,10 @@ requirements:
     label: 路由
     suite: routing
     max_age_days: 30
+    # ⚠️ 路由题量的是「模型选了哪个工具」，**一块语料都不读**（见 eval/routing.py
+    # 的 _live_probe：工具是探针，不真的检索）。要求它带语料指纹的话，这一条会
+    # 永远停在 UNRELIABLE——而理由是个假的，久了就没人看门禁了
+    corpus_check: false
     thresholds:
       route_accuracy: ">=95"
       bypass_rate: "==0"     # 红线：越过工具直答（不查材料就回答）

@@ -292,3 +292,16 @@ def test_a_healthy_run_is_all_zeros_and_a_full_control():
     assert m["banned_leak_rate"] == 0.0
     assert m["refusal_failure_rate"] == 0.0
     assert m["control_answer_rate"] == 100.0
+
+
+def test_a_corpus_independent_suite_is_not_asked_for_a_fingerprint():
+    """路由题一块语料都不读——要它带语料指纹，这一条会永远停在 UNRELIABLE。
+
+    而理由是个假的：这一轮的数字和语料变没变毫无关系。门禁里挂着一条
+    永远亮着的黄灯，久了就没人看门禁了。
+    """
+    req = {**REQ, "suite": "routing", "corpus_check": False}
+    del req["scope"], req["path"], req["space"]
+    routing_run = run(_suite="routing", _corpus_sha="", _scope="unknown")
+    assert gate.matches(routing_run, req)
+    assert gate.judge_one(routing_run, req, None)[0] == gate.PASS
