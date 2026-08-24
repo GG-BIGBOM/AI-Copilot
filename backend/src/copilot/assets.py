@@ -56,6 +56,35 @@ _MIME_BY_SUFFIX = {
 }
 DEFAULT_MIME = "application/octet-stream"
 
+# ⭐ 魔数白名单（M17.1）。**用户传上来的东西，扩展名和 Content-Type 都是他写的。**
+# 这一层判的是文件头，不是文件名——一个叫 `x.png`、内容是 HTML 的文件，
+# 会被我们以 `image/png` 发回给别人的浏览器。`nosniff` 挡住了大部分后果，
+# 但真正该做的是**一开始就不收**。
+#
+# ⚠️ **SVG 不在白名单里，而且不能加进来。** SVG 是可以带 `<script>` 的 XML，
+# 存起来再原样发出去等于开了一个存储型 XSS 的口子。它没有魔数，
+# 这条白名单顺带把它挡在了外面。
+_MAGIC: tuple[tuple[bytes, str, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", ".png", "image/png"),
+    (b"\xff\xd8\xff", ".jpg", "image/jpeg"),
+    (b"GIF87a", ".gif", "image/gif"),
+    (b"GIF89a", ".gif", "image/gif"),
+    (b"BM", ".bmp", "image/bmp"),
+)
+
+
+def sniff_image(data: bytes) -> tuple[str, str] | None:
+    """按文件头认图片，返回 (后缀, mime)；不是认识的图片就返回 None。
+
+    WebP 单独判：它的头是 `RIFF....WEBP`，中间四个字节是长度，不能整段比。
+    """
+    for magic, suffix, mime in _MAGIC:
+        if data.startswith(magic):
+            return suffix, mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    return None
+
 
 def storage_path_of(url: str) -> str | None:
     """把正文里的图片地址还原成磁盘相对路径。认两种形状，别的一律 None：
@@ -255,6 +284,9 @@ async def sync_document_assets(
             session.add(
                 ImageAsset(
                     document_id=doc.id,
+                    # 文档图。**不是从 document_id 反推**：纠错图解绑之后
+                    # 两个 id 都是空，那时只有这一列说得清它本来是哪一类
+                    source="document",
                     owner_id=doc.owner_id,
                     knowledge_space_id=doc.knowledge_space_id,
                     storage_path=rel,

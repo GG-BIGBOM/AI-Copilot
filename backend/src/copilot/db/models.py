@@ -17,6 +17,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -262,9 +263,27 @@ class ImageAsset(Base):
     __tablename__ = "image_assets"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    # ⚠️ 可空（M17.1）：纠错稿里的截图在**被发布之前根本没有文档**可挂——
+    # 发布时才建 `source_type='verified'` 那一篇。挂在哪由下面两列二选一，
+    # 且**不能同时有值**（DB 上有 CHECK）：同时有值意味着"这张图算谁的"
+    # 有两个答案，而鉴权和删除各按各的走
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
+    # 属于哪条答案纠错（M17.1）。两个归属列都为空 = 刚传上来、还没提交，
+    # 由 `copilot prune-junk` 按时间清掉
+    correction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("answer_corrections.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # document | correction。**不是从两个 id 反推**：悬空的那种两个 id 都是空，
+    # 而"它本来该挂到哪儿"是清理和排查时唯一分得开的依据
+    source: Mapped[str] = mapped_column(String(16), default="document", server_default="document")
     # NULL = 公共库的图（语雀截图），非 NULL = 该用户私有。**鉴权只看这一列。**
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
@@ -303,6 +322,18 @@ class ImageAsset(Base):
     __table_args__ = (
         # 同一篇文档里同一个文件只该有一行。重新入库靠它做 upsert
         Index("ux_image_assets_document_path", "document_id", "storage_path", unique=True),
+        # 同一条纠错里同理。部分索引：文档图和悬空图不进这个索引
+        Index(
+            "ux_image_assets_correction_path",
+            "correction_id",
+            "storage_path",
+            unique=True,
+            postgresql_where=text("correction_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "NOT (document_id IS NOT NULL AND correction_id IS NOT NULL)",
+            name="ck_image_assets_one_owner",
+        ),
     )
 
 

@@ -763,6 +763,96 @@ TRACE_RETENTION_DAYS = 30
 TRACE_KEEP_LONGER_DAYS = 90
 
 
+# 悬空截图保留多久。24 小时是「写一段纠错稿最长会花多久」的宽裕估计——
+# 传了图、写到一半去开会、回来接着写，这条路要活得下来
+ORPHAN_IMAGE_HOURS = 24
+
+
+@app.command(name="prune-images")
+def prune_images(
+    apply: bool = typer.Option(False, "--apply", help="真的删。默认只看不动"),
+    hours: int = typer.Option(
+        ORPHAN_IMAGE_HOURS, "--hours", help=f"悬空多久算过期（默认 {ORPHAN_IMAGE_HOURS} 小时）"
+    ),
+) -> None:
+    """清掉**没人认领**的纠错截图（M17.1）。**默认只预演。**
+
+    纠错里的图是「先传、后绑」：用户贴图的时候还没有 correction 行可挂，
+    所以那一刻它两个归属列都是空的。提交时才绑上——而**没提交的那些
+    永远不会有人来绑**：写了一半关掉页面、传完又删掉、改稿时换了一张。
+    库里没有任何一行指向它们，磁盘上却一直留着。
+
+    这和 2026-08-24 上传事故里那两个孤儿文件是同一类问题：
+    **没有任何地方看得出来它们存在。**
+
+        copilot prune-images            # 看看会删多少
+        copilot prune-images --apply    # 真删
+
+    ⚠️ **文件只在没有别的行引用同一个路径时才删。** 图按内容寻址，
+    同一张截图可能同时属于另一条纠错或另一篇文档——删早了，
+    那边就变成一个指向空文件的行（表现是"图裂了"）。
+    """
+    import asyncio
+
+    asyncio.run(_prune_images(apply=apply, hours=hours))
+
+
+async def _prune_images(*, apply: bool, hours: int, maker=None) -> None:
+    """`maker` 是给测试用的会话工厂，同 `_prune_traces`。"""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete, select
+
+    from copilot import assets
+    from copilot.db.models import ImageAsset
+    from copilot.db.session import SessionLocal
+
+    maker = maker or SessionLocal
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+
+    async with maker() as session:
+        orphans = list(
+            (
+                await session.execute(
+                    select(ImageAsset).where(
+                        ImageAsset.document_id.is_(None),
+                        ImageAsset.correction_id.is_(None),
+                        ImageAsset.created_at < cutoff,
+                    )
+                )
+            ).scalars()
+        )
+        typer.echo(f"悬空超过 {hours} 小时的截图：{len(orphans)} 张")
+        if not orphans:
+            typer.secho("没有要清的。", fg=typer.colors.GREEN)
+            return
+        if not apply:
+            typer.secho("这是预演，什么都没删。确认无误后加 --apply。", fg=typer.colors.YELLOW)
+            return
+
+        ids = [row.id for row in orphans]
+        paths = {row.storage_path for row in orphans}
+        # 先删行，再看还有没有别的行用着同一个文件
+        await session.execute(delete(ImageAsset).where(ImageAsset.id.in_(ids)))
+        await session.flush()
+        still_used = set(
+            (
+                await session.execute(
+                    select(ImageAsset.storage_path).where(ImageAsset.storage_path.in_(paths))
+                )
+            ).scalars()
+        )
+        removed = 0
+        for path in paths - still_used:
+            try:
+                assets.absolute_path(path, private=True).unlink(missing_ok=True)
+                removed += 1
+            except (OSError, ValueError) as e:  # noqa: PERF203 - 一张删不掉不该停下
+                typer.secho(f"删不掉 {path}：{e}", fg=typer.colors.YELLOW)
+        await session.commit()
+        typer.secho(f"已清 {len(ids)} 行、{removed} 个文件。", fg=typer.colors.GREEN)
+
+
 @app.command(name="prune-traces")
 def prune_traces(
     apply: bool = typer.Option(False, "--apply", help="真的删。默认只看不动"),

@@ -1,5 +1,5 @@
 [Unit]
-Description=Copilot 台账保留清理：request_trace（由 copilot-prune.timer 触发）
+Description=Copilot 到期清理：request_trace + 没人认领的纠错截图（由 copilot-prune.timer 触发）
 After=postgresql.service
 Wants=postgresql.service
 
@@ -19,6 +19,10 @@ Environment=HOME=/tmp
 # 保留天数用 CLI 的默认值（普通 30 天 / 差评与出错 90 天），
 # 那两个数和它们的理由写在 cli.py 里，只有一个出处。
 ExecStart=/opt/copilot/.venv/bin/copilot prune-traces --apply
+# 纠错里贴的截图是「先传、后绑」：写了一半关掉页面的那些永远不会有人来绑，
+# 库里没有任何一行指向它们，磁盘上却一直留着（同 2026-08-24 上传事故里那两个
+# 孤儿文件）。同样必须显式 --apply
+ExecStart=/opt/copilot/.venv/bin/copilot prune-images --apply
 
 # 一条 DELETE，正常一秒内。五分钟还没完说明库出问题了
 TimeoutStartSec=300

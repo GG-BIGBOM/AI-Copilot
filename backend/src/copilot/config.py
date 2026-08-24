@@ -172,6 +172,14 @@ class Settings(BaseSettings):
     # 太小的多半是图标、分隔线、logo。收进来只会让答案挂上一堆装饰性小图，
     # 而每一张都占一行 image_assets
     upload_image_min_bytes: int = 4 * 1024
+    # ===== 纠错里贴的截图（M17.1）=====
+    # 比文档嵌图小一档：这是人手动截的一张图，不是一份 PPT 里的原图。
+    # 上限本身不是安全边界（真正的边界是魔数白名单和私有目录），
+    # 它挡的是"一个注册用户慢慢把 40G 磁盘填满"
+    correction_image_max_bytes: int = 5 * 1024 * 1024
+    # 每人**还没提交**的悬空图上限。传了不提交的图没有任何行指向它，
+    # 只能靠时间清理——没有这道闸，清理之前的那段时间是敞开的
+    correction_images_pending_max: int = 20
     image_allowed_suffixes: tuple[str, ...] = (
         ".png",
         ".jpg",

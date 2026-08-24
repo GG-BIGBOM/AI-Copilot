@@ -1,6 +1,7 @@
 """答案纠错：用户提交，管理员审核（M16，用户这一侧）。
 
     POST   /api/answer-corrections            提交（只能纠自己会话里的回答）
+    POST   /api/answer-corrections/images     贴一张截图（先传，提交时才绑定）
     GET    /api/answer-corrections/mine       我提过的
     GET    /api/answer-corrections/{id}       看一条（自己的，或管理员）
     GET    /api/answer-corrections/{id}/markdown   审核快照
@@ -22,17 +23,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from copilot import assets
 from copilot import corrections_flow as flow
 from copilot.auth.deps import CurrentUser, SessionDep
-from copilot.db.models import AnswerCorrection, Conversation, Message, RequestTrace
+from copilot.config import get_settings
+from copilot.db.models import AnswerCorrection, Conversation, ImageAsset, Message, RequestTrace
 
 router = APIRouter(prefix="/api/answer-corrections", tags=["corrections"])
 
@@ -112,6 +117,169 @@ async def _owned(session, correction_id: uuid.UUID, user) -> AnswerCorrection:
     return row
 
 
+class CorrectionImageOut(BaseModel):
+    """传完一张图之后给前端的东西。
+
+    `markdown` 是一段可以直接插进光标处的文本——前端不该自己去拼这个格式，
+    拼错了（比如少个感叹号）表现是正文里出现一段裸链接，而不是一张图。
+    """
+
+    id: uuid.UUID
+    url: str
+    markdown: str
+
+
+# 正文里引用一张纠错图的形状：`/api/images/{uuid}`。
+# ⚠️ 只认这一种。用户可以在 Markdown 里写任何图片地址（外链、公共图路径），
+# 那些**不进绑定流程**：绑定的意思是"这张图归这条纠错管，删纠错时一起删"，
+# 而我们只对自己收下来的那些负这个责
+_IMAGE_REF_RE = re.compile(r"/api/images/([0-9a-fA-F-]{36})")
+
+
+def referenced_image_ids(markdown: str) -> list[uuid.UUID]:
+    """正文里引用到的纠错图 id，按出现顺序去重。"""
+    out: list[uuid.UUID] = []
+    for raw in _IMAGE_REF_RE.findall(markdown or ""):
+        try:
+            ident = uuid.UUID(raw)
+        except ValueError:  # pragma: no cover - 正则已经限定了形状
+            continue
+        if ident not in out:
+            out.append(ident)
+    return out
+
+
+async def bind_images(session, row: AnswerCorrection, user) -> None:
+    """把正文里引用到的图绑到这条纠错上，并解绑已经被删掉的那些。
+
+    ⚠️ **别人的图一律拒绝，而且是 400 不是"悄悄忽略"。** 悄悄忽略的表现是
+    审核界面上有一张图、而它属于另一个用户——图片本身仍然由
+    `/api/images/{id}` 按 owner 鉴权（管理员也看不到别人的私有图），
+    于是审核的人看到的是一个裂图，还以为是自己网络的问题。
+
+    ⚠️ **解绑不删文件。** 用户改稿时删掉一张图、又改回来是常事；
+    行留着（悬空），由 `prune-junk` 按时间清。这里立刻删的话，
+    撤销一步就再也找不回来了。
+    """
+    wanted = referenced_image_ids(row.corrected_answer_markdown)
+    if wanted:
+        rows = list(
+            (
+                await session.execute(select(ImageAsset).where(ImageAsset.id.in_(wanted)))
+            ).scalars()
+        )
+        found = {r.id for r in rows}
+        if missing := [i for i in wanted if i not in found]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"引用了不存在的图片：{missing[0]}")
+        for asset in rows:
+            if asset.owner_id != user.id:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "引用了不属于你的图片")
+            if asset.correction_id not in (None, row.id):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "这张图已经挂在另一条纠错上了")
+            asset.correction_id = row.id
+            asset.source = "correction"
+
+    # 稿子里已经不再引用的，解回悬空
+    for asset in list(
+        (
+            await session.execute(
+                select(ImageAsset).where(ImageAsset.correction_id == row.id)
+            )
+        ).scalars()
+    ):
+        if asset.id not in wanted:
+            asset.correction_id = None
+
+
+@router.post(
+    "/images", response_model=CorrectionImageOut, status_code=status.HTTP_201_CREATED
+)
+async def upload_image(
+    file: UploadFile, user: CurrentUser, session: SessionDep
+) -> CorrectionImageOut:
+    """贴一张截图。**先传、后绑**：这一刻还没有 correction 行可挂。
+
+    ⚠️ **按魔数收，不按扩展名收**（`assets.sniff_image`）。文件名和
+    Content-Type 都是上传方写的——一个叫 `x.png`、内容是 HTML 的文件，
+    会被我们以 `image/png` 发回给别人的浏览器。
+
+    ⚠️ **落在私有目录**（`data/private-images/`），和上传文档里的嵌图同一处。
+    公共目录是 nginx 直发的，谁猜中文件名谁就能取；纠错稿在**审核通过之前**
+    只有本人和管理员该看得到。发布时才搬到公共目录去（那一步在 M17.1 P1）。
+    """
+    s = get_settings()
+    data = await file.read(s.correction_image_max_bytes + 1)
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "文件是空的")
+    if len(data) > s.correction_image_max_bytes:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            f"图片超过 {s.correction_image_max_bytes // 1024 // 1024}MB 上限",
+        )
+    kind = assets.sniff_image(data)
+    if kind is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "只收 png / jpg / gif / webp / bmp 图片")
+    suffix, mime = kind
+
+    # 悬空图的配额。传了不提交的图没有任何行指向它，只能靠时间清——
+    # 没有这道闸，清理之前的那段时间是敞开的
+    pending = await session.scalar(
+        select(func.count(ImageAsset.id)).where(
+            ImageAsset.owner_id == user.id,
+            ImageAsset.correction_id.is_(None),
+            ImageAsset.document_id.is_(None),
+        )
+    )
+    if (pending or 0) >= s.correction_images_pending_max:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"还没提交的截图太多了（上限 {s.correction_images_pending_max} 张），先把纠错提交掉",
+        )
+
+    rel, _url = assets.store_bytes(data, suffix, private=True)
+    # ⭐ 同一张图传两次只留一行。图按内容寻址，两次传同一张截图落的是同一个
+    # 文件——再建一行的话，两行指着同一个文件，删掉其中一条纠错时另一行就
+    # 指向了一个已经被删掉的文件。而且同一条纠错里绑两行同路径会直接撞上
+    # `ux_image_assets_correction_path`，表现是"再传一次就 500"。
+    if existing := (
+        await session.execute(
+            select(ImageAsset).where(
+                ImageAsset.owner_id == user.id,
+                ImageAsset.storage_path == rel,
+                ImageAsset.correction_id.is_(None),
+                ImageAsset.document_id.is_(None),
+            )
+        )
+    ).scalars().first():
+        return CorrectionImageOut(
+            id=existing.id,
+            url=f"{assets.API_PREFIX}/{existing.id}",
+            markdown=f"![截图]({assets.API_PREFIX}/{existing.id})",
+        )
+
+    row = ImageAsset(
+        document_id=None,
+        correction_id=None,
+        source="correction",
+        # ⚠️ 鉴权只看这一列（见 `routes/images.py`）。写成 None 就是把这张
+        # 截图变成公共图——而它现在物理上躺在私有目录里，表现会是"图裂了"，
+        # 但那是运气好：路径规则一变就是真泄漏
+        owner_id=user.id,
+        storage_path=rel,
+        mime_type=mime,
+        sha256=hashlib.sha256(data).hexdigest(),
+        file_size=len(data),
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return CorrectionImageOut(
+        id=row.id,
+        url=f"{assets.API_PREFIX}/{row.id}",
+        markdown=f"![截图]({assets.API_PREFIX}/{row.id})",
+    )
+
+
 @router.post("", response_model=CorrectionOut, status_code=status.HTTP_201_CREATED)
 async def submit(body: CorrectionIn, user: CurrentUser, session: SessionDep) -> AnswerCorrection:
     """提交一条纠错。**进审核队列，不立刻生效。**"""
@@ -182,6 +350,9 @@ async def submit(body: CorrectionIn, user: CurrentUser, session: SessionDep) -> 
         status=flow.PENDING,
     )
     session.add(row)
+    # 先 flush 拿到 id，图才有东西可绑
+    await session.flush()
+    await bind_images(session, row, user)
     await session.commit()
     await session.refresh(row)
     return row
@@ -256,6 +427,9 @@ async def edit(
         if not (text := body.corrected_answer_markdown.strip()):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "修正内容不能为空")
         row.corrected_answer_markdown = text
+        # 改了稿子就要重新绑一遍：新贴的图要挂上，删掉的那些要解回悬空。
+        # 漏了这一步的表现是"删掉的图在审核界面上还在"——审的和发的不是同一份
+        await bind_images(session, row, user)
     if body.reason is not None:
         if not (reason := body.reason.strip()):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "修改原因不能为空")
