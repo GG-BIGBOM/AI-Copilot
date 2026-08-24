@@ -356,9 +356,10 @@ def test_clean_run_has_zero_contamination():
 
 
 def test_case_d_wrong_image_context_is_counted():
-    """Case D：配图编号真实存在，但那张图出自另一篇文档。
+    """Case D：配图编号真实存在，但那张图出自**答案没引用过**的文档。
 
-    正文可以完全正确，引用也可以完全正确——用户看到的却是另一个平台的界面。
+    正文可以完全正确、引用也可以完全正确——用户看到一张界面截图，
+    却在正文里找不到任何一个 `[n]` 指向它所在的那篇，**无处可考**。
     这类失败在准确率、引用正确率、配图带出率上一个数都不会动。
     """
     cases = [case("pic", source="微信视频号电子面单")]
@@ -368,6 +369,7 @@ def test_case_d_wrong_image_context_is_counted():
             answer="按 [图1] 里的位置点开。[1]",
             verdict="correct",
             grounded=True,
+            citations=[{"n": 1, "title": "微信视频号电子面单"}],
             context_images=[{"n": 1, "url": "/images/ab/1.png", "title": "抖音电子面单"}],
         )
     ]
@@ -380,21 +382,53 @@ def test_case_d_wrong_image_context_is_counted():
     assert results[0].status == "correct"
 
 
-def test_image_from_expected_source_is_not_contamination():
-    """出自期望来源的配图不算串台——否则这个指标会永远是 100%。"""
-    cases = [case("pic", source="微信视频号")]
+def test_an_image_from_another_cited_document_is_not_contamination():
+    """⚠️⚠️ **这条是第一版判据的墓碑。**
+
+    第一版判的是「图出自题目声明的期望来源以外的文档」，在 75 道真题上
+    量出 40%——逐条看下去一条真的都没有。最典型的是 `proc-purchase-settle`：
+
+        正文写「生成一条对应的应付单 [2][图5]」，[2] 就是《账款 · 应收应付》，
+        图5 也正是那一篇里的截图——严丝合缝，却被判成串台。
+
+    答案本来就跨文档作答。期望来源是出题人标的"该命中哪一篇"，
+    **从来不是"只许用这一篇的图"**。一个天天误报的指标比没有更糟：
+    人会学会忽略它，然后连真的那一次也一起忽略。
+    """
+    cases = [case("pic", source="采购流程")]
     results = [
         result(
             "pic",
-            answer="见 [图1]。[1]",
+            answer="结算后生成应付单 [2][图5]",
             verdict="correct",
             grounded=True,
-            context_images=[{"n": 1, "url": "/i/1.png", "title": "微信视频号电子面单"}],
+            citations=[{"n": 1, "title": "采购 · 采购流程"}, {"n": 2, "title": "账款 · 应收应付"}],
+            context_images=[{"n": 5, "url": "/i/5.png", "title": "账款 · 应收应付"}],
         )
     ]
     m = run.score(results, cases)
     assert results[0].foreign_image_refs == []
     assert m["配图串台率"] == 0.0
+
+
+def test_an_image_from_a_retrieved_but_uncited_document_is_contamination():
+    """召回了、但正文没引用的那一篇，它的图同样是"无处可考"。
+
+    分母只看正文里的 `[n]`，不看召回清单——用户能溯源的只有正文里的编号。
+    """
+    cases = [case("pic")]
+    results = [
+        result(
+            "pic",
+            answer="照着 [图2] 操作即可。[1]",
+            verdict="correct",
+            grounded=True,
+            citations=[{"n": 1, "title": "采购 · 采购流程"}, {"n": 2, "title": "仓储 · 图片验货"}],
+            context_images=[{"n": 2, "url": "/i/2.png", "title": "仓储 · 图片验货"}],
+        )
+    ]
+    m = run.score(results, cases)
+    assert results[0].foreign_image_refs == [2]
 
 
 def test_invalid_image_reference_is_a_deterministic_failure():
@@ -438,6 +472,7 @@ def test_wrong_image_context_needs_titles_to_be_judgeable():
             answer="见 [图1]。[1]",
             verdict="correct",
             grounded=True,
+            citations=[{"n": 1, "title": "微信视频号电子面单"}],
             context_images=[{"n": 1, "url": "/i/1.png"}],  # 没有 title
         )
     ]
@@ -479,3 +514,74 @@ def test_space_and_corpus_are_part_of_the_archived_config():
     """
     assert run.Config().resolved()["space"] == run.DEFAULT_SPACE
     assert run.Config(space="enterprise_web").resolved()["space"] == "enterprise_web"
+
+
+# ─────────────────────────────────────────────────────────
+# 重算与重判：口径改了，答案不用重跑
+# ─────────────────────────────────────────────────────────
+
+
+def test_rescore_does_not_lose_the_context_length(tmp_path, monkeypatch):
+    """`--rescore` 只重算指标，**不许顺手弄丢诊断信息**。
+
+    `context_chars` 只在第一次存档时算得出来（那时 `context` 还在）。
+    重算一次就把它抹成 0，是一个报告上完全看不出来的静默损失。
+    """
+    import json
+
+    monkeypatch.setattr(run, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(run, "load_cases", lambda **kw: ({}, [case("a")]))
+    (tmp_path / "t.json").write_text(
+        json.dumps(
+            {
+                "tag": "t",
+                "suite": "dataset",
+                "scope": "public",
+                "config": {"space": "flagship"},
+                "metrics": {},
+                "cases": [
+                    {
+                        "id": "a",
+                        "kind": "fact",
+                        "q": "问题",
+                        "answer": "答案[1]",
+                        "verdict": "correct",
+                        "grounded": True,
+                        "context_chars": 2500,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    run.rescore("t")
+    after = json.loads((tmp_path / "t.json").read_text(encoding="utf-8"))
+    assert after["cases"][0]["context_chars"] == 2500
+    assert after["metrics"]["准确率"] == 100.0
+    assert after["rescored_at"]
+
+
+def test_judging_again_clears_the_previous_judge_error(monkeypatch):
+    """判分是可以重跑的：这一次判成了，上一次的「没判成」就必须被清掉。
+
+    留着的话，一条已经判成功的结果会继续被算成 invalid——准确率的分母
+    悄悄少一题，而报告上看不出来。
+    """
+    from copilot.providers import llm as llm_module
+
+    class FakeJudge:
+        def __init__(self, *a, **kw):
+            pass
+
+        def complete(self, messages, temperature=0.0):
+            return '{"verdict": "correct", "grounded": true, "unsupported": "", "reason": "ok"}'
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(llm_module, "ChatLLM", FakeJudge)
+    stuck = result("a", answer="答案[1]", verdict="judge_error", judge_error=True, context="材料")
+    run.judge_all([stuck], [case("a")], workers=1, quiet=True)
+    assert stuck.judge_error is False
+    assert stuck.verdict == "correct"

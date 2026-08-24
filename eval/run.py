@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 import sys
@@ -437,18 +438,42 @@ def bad_image_refs(answer: str, images: list[dict]) -> list[int]:
     return [n for n in cited_pics(answer) if n not in have]
 
 
-def foreign_image_refs(answer: str, images: list[dict], wants: list[str]) -> list[int]:
-    """引用到的配图里，出自期望来源以外那几张的编号（M19-A）。
+def cited_titles(answer: str, citations: list[dict]) -> set[str]:
+    """答案正文里 `[n]` 真的引用到的那几篇的标题。
 
-    量的是「配图串台」：编号真实存在、图也打得开，但它是另一篇文档的截图。
-    这类错误在现有指标上**全部隐形**——准确率、引用正确率、配图带出率
-    一个都不会动，而用户照着一张别的平台的界面去点。
-
-    只在题目声明了期望来源（`source`）时判；`title` 未知的图（私有图的地址
-    会被换成 `/api/images/{id}`，对不回文档）一律**不算串台**，
-    宁可漏判也不能凭"我不知道它是谁的"给系统记一笔错。
+    ⚠️ 是**引用到的**，不是"召回的"。召回 5 篇、正文只引了 2 篇是常态，
+    而用户能溯源的只有正文里带编号的那 2 篇。
     """
-    if not wants:
+    used = {int(n) for n in _CITE_RE.findall(answer or "")}
+    return {c.get("title") or "" for c in citations or [] if c.get("n") in used} - {""}
+
+
+def foreign_image_refs(answer: str, images: list[dict], titles: set[str]) -> list[int]:
+    """配图出自**答案自己没有引用过**的那几篇的编号（M19-A）。
+
+    量的是「配图串台」：编号真实存在、图也打得开，但用户**无处可考**——
+    正文里没有任何一个 `[n]` 指向这张图所在的那篇文档。他看到一张
+    界面截图，却查不到它是哪一篇里的哪一步。
+
+    ⚠️⚠️ **第一版的判据是错的，量出来的 40% 是假的。**
+    那一版判的是「图出自题目声明的期望来源（`source`）以外的文档」。
+    在 75 题上量出 15 题可判、6 题"串台"——逐条看下去**一条真的都没有**：
+
+        proc-purchase-settle   图5 出自《账款 · 应收应付》，而正文写的是
+                               「生成一条对应的应付单 [2][图5]」，[2] 正是那一篇
+
+    答案本来就跨文档作答，图出自它引用的另一篇，编号和引用严丝合缝。
+    期望来源是**出题人标的"该命中哪一篇"**，从来不是"只许用这一篇的图"。
+    按新判据重算，同一批结果是 0/15——而这才是真话。
+
+    留下这段记录是因为：一个天天误报 40% 的指标，比没有这个指标更糟——
+    人会学会忽略它，然后连真的那一次也一起忽略。
+
+    `title` 未知的图（Agent 路上 `deps.images` 没有出处；私有图的地址被换成
+    `/api/images/{id}`，对不回文档）一律**不算串台**：宁可漏判，
+    也不能凭"我不知道它是谁的"给系统记一笔错。
+    """
+    if not titles:
         return []
     by_n = {img.get("n"): img for img in images or []}
     out: list[int] = []
@@ -459,7 +484,7 @@ def foreign_image_refs(answer: str, images: list[dict], wants: list[str]) -> lis
         title = img.get("title")
         if not title:
             continue
-        if not any(w in title for w in wants):
+        if title not in titles:
             out.append(n)
     return out
 
@@ -936,6 +961,11 @@ def judge_all(
 
     def one(cr: CaseResult) -> None:
         case = by_id[cr.id]
+        # ⭐ 先清掉上一轮的判分结论。判分**是可以重跑的**（同一份答案、同一个
+        # prompt），而重跑一次却留着上次的 `judge_error=True`，会让一条判成功的
+        # 结果继续被算成"没判成"——分母悄悄少一题，而报告上看不出来
+        cr.judge_error = False
+        cr.verdict = ""
         # 确定性判定先做完，判分器不参与这部分
         cr.missing_facts = missing_facts(cr.answer, case.get("must_include") or [])
         cr.banned_hits = banned_hits(cr.answer, case.get("must_not_include") or [])
@@ -1023,7 +1053,9 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
         # 配图的两条规则判定（M19-A）。放在三态之前算：下面「无效配图」
         # 要和漏事实、禁止内容一样算**确定性失败**，判分器挂了也照样成立
         cr.bad_image_refs = bad_image_refs(cr.answer, cr.context_images)
-        cr.foreign_image_refs = foreign_image_refs(cr.answer, cr.context_images, wants)
+        cr.foreign_image_refs = foreign_image_refs(
+            cr.answer, cr.context_images, cited_titles(cr.answer, cr.citations)
+        )
 
         # 答案里 [n] 标注的编号，是否有一个指向期望的那篇
         if wants and cr.citations:
@@ -1145,13 +1177,13 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
     if with_pics:
         m["无效配图率"] = pct(sum(bool(r.bad_image_refs) for r in with_pics), len(with_pics))
         m["带图答案数"] = len(with_pics)
-    # 串台只在「题目声明了期望来源」且「图对得回出处」时判得了。
+    # 串台只在「答案里有 [n] 引用」且「用到的图对得回出处」时判得了。
     # ⚠️ 分母单独打出来（`可判串台数`）：Agent 路上图片没有出处，
     # 分母会缩到很小甚至 0——那时 0.0% 意味着"没量到"，不是"没串台"
     judgeable = [
         r
         for r in with_pics
-        if wanted_sources(by_id[r.id])
+        if cited_titles(r.answer, r.citations)
         and any(i.get("title") for i in r.context_images if i.get("n") in cited_pics(r.answer))
     ]
     m["可判串台数"] = len(judgeable)
@@ -1209,7 +1241,8 @@ METRIC_HELP = {
     "另一个 ERP 版本的步骤混进答案，没有任何报错",
     "无效配图率": "写了 [图N] 的答案里，N 在上下文里根本不存在的比例。"
     "**配图版的假引用**，目标 0%。规则判定，判分器挂了也算得出",
-    "配图串台率": "配图编号真实存在、但那张图出自期望来源以外的文档的比例。"
+    "配图串台率": "配图编号真实存在、但那张图出自**答案自己没引用过**的文档的比例"
+    "（用户无处可考）。"
     "这类错误在准确率/引用正确率/配图带出率上**全部隐形**，而用户照着"
     "另一个平台的界面去点。⚠️ 看它必须连 `可判串台数` 一起看："
     "Agent 路上图片没有出处，分母会是 0，那时 0.0% 是「没量到」不是「没串台」",
@@ -1262,6 +1295,65 @@ def save(
     path = RESULTS_DIR / f"{tag}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def rescore(tag: str) -> None:
+    """拿已经存下来的答案，用**现在这版判分口径**重算一遍指标。
+
+    ⭐ 判分口径会改（`配图串台率` 的判据 2026-08-24 就整个换过一次），而
+    重跑一次全量是两百多次付费调用。答案、引用、配图对照表都在结果文件里，
+    `score()` 又是纯函数——重算不需要再问任何一次模型。
+
+    ⚠️ **它覆盖同一个 tag 的文件，但不动任何一个"答案"**：改的只有派生指标，
+    并写下 `rescored_at`。这不是篡改证据——证据是答案，指标是从证据算出来的
+    结论，口径变了结论就该跟着变。原来的数字在 git 里留着。
+
+    ⚠️ 用的是**今天的** `dataset.yaml`。题集删过题的话，那几条结果会被丢掉
+    （score 要用题目上的 `must_include` / `procedural` 这些判据），
+    丢了几条会打出来——别让它悄悄地把分母变小。
+
+    ⚠️ **没有 `--rejudge`，而且不该有。** 判分器要看「参考材料」，而存档时
+    `context` 被 `_slim` 剥掉了（5 块材料约 2500 字 × 75 题，存下来就是把语料
+    复制一份进版本库）。拿一份空材料去重判，判分器会一律给出「材料里没有」——
+    **一个看起来判过、其实全错的结果**，比标着 UNRELIABLE 糟得多。
+    判分器欠费/断线时的正确做法是充值之后**把那一套重跑一遍**（私有库 19 题
+    约两分钟），让检索、答案、判分在同一份材料上重新对齐。
+    """
+    path = RESULTS_DIR / f"{tag}.json"
+    if not path.exists():
+        raise SystemExit(f"没有这轮结果：{path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    scope = payload.get("scope", "public")
+    _, cases = load_cases(scope=scope, space=payload.get("config", {}).get("space", DEFAULT_SPACE))
+    by_id = {c["id"]: c for c in cases}
+
+    fields = {f.name for f in dataclasses.fields(CaseResult)}
+    results, dropped = [], []
+    for row in payload["cases"]:
+        if row["id"] not in by_id:
+            dropped.append(row["id"])
+            continue
+        results.append(CaseResult(**{k: v for k, v in row.items() if k in fields}))
+    if dropped:
+        print(f"⚠️ 题集里已经没有这 {len(dropped)} 道题，丢掉不算：{dropped}")
+
+    metrics = score(results, [by_id[r.id] for r in results])
+    payload["metrics"] = metrics
+    payload["reliable"] = bool(metrics.get("可信", True))
+    # ⚠️ `context_chars` 只在第一次存档时算得出来（那时 `context` 还在）。
+    # 重算时 `_slim` 会把它抹成 0——一个"重算一下就少掉一列诊断信息"的静默损失，
+    # 正是这个项目最不想要的那类改动。按 id 原样搬回来
+    chars = {row["id"]: row.get("context_chars", 0) for row in payload["cases"]}
+    payload["cases"] = [
+        {**_slim(asdict(r)), "context_chars": chars.get(r.id, 0)} for r in results
+    ]
+    payload["rescored_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"{tag}：按现在的口径重算完毕（答案没动，只重算指标）→ {path}")
+    for k in ("准确率", "幻觉率", "假阴性率", "无效配图率", "配图串台率", "可判串台数"):
+        if (v := metrics.get(k)) is not None:
+            print(f"  {k:<12} {v}")
 
 
 def print_report(
@@ -1484,6 +1576,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="知识库 Agent 评测")
     ap.add_argument("--tag", default="", help="这轮的名字，结果存 results/<tag>.json")
     ap.add_argument("--check", action="store_true", help="只验检索，不调 LLM")
+    ap.add_argument(
+        "--rescore",
+        default="",
+        metavar="TAG",
+        help="用现在这版判分口径，把已存的那一轮重算一遍指标（不调模型、不花钱）",
+    )
     ap.add_argument("--compare", nargs="+", metavar="TAG", help="对比若干轮结果")
     ap.add_argument(
         "--allow-unreliable",
@@ -1537,6 +1635,10 @@ def main() -> None:
 
     if args.compare:
         compare(args.compare, allow_unreliable=args.allow_unreliable)
+        return
+
+    if args.rescore:
+        rescore(args.rescore)
         return
 
     # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——
