@@ -68,6 +68,12 @@ class RetrievedChunk:
     # 一模一样（见 `build_context`）。看不见的东西没法判断，
     # M9 那条「问题限定了主体时材料必须真的是讲这个主体的」铁律因此是**空的**。
     private: bool = False
+    # 这一块属于哪个知识版本（M19-A）。**它在这里是为了让下游能"核对"而不是"相信"。**
+    # 空间过滤发生在 SQL 里（`_space_filter`），过滤写错的表现是一个别的 ERP
+    # 版本的步骤出现在答案里——没有报错，也没有任何一层能事后看出来。
+    # 把 id 一路带出来，评测（`eval/cross_space.py`）就能对每一块独立断言
+    # 「它确实属于这一轮问的那个空间或 common」，而不是断言"过滤器应该是对的"。
+    space_id: uuid.UUID | None = None
 
 
 def source_label(rc: RetrievedChunk) -> str:
@@ -484,6 +490,7 @@ async def search(
                 content=chunk.content,
                 images=serving.get(chunk.id, []),
                 private=chunk.owner_id is not None,
+                space_id=chunk.knowledge_space_id,
                 citation=Citation(
                     n=i,
                     title=chunk.title,

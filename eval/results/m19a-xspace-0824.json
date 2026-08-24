@@ -1,0 +1,604 @@
+{
+  "tag": "m19a-xspace-0824",
+  "suite": "cross_space",
+  "ran_at": "2026-08-24T08:34:53+00:00",
+  "corpus": "语雀 wdterpqjb（旗舰版ERP）4568 块；企业版两个空间尚无语料（M18 才导入）",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "space": "flagship",
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "general": null,
+    "prompt_sha": "3f4cb2d1",
+    "corpus_sha": "14d26fc03599",
+    "spaces": {
+      "enterprise_desktop": {
+        "chunk_count": 0,
+        "corpus_sha": ""
+      },
+      "enterprise_web": {
+        "chunk_count": 0,
+        "corpus_sha": ""
+      },
+      "flagship": {
+        "chunk_count": 4568,
+        "corpus_sha": "14d26fc03599"
+      }
+    }
+  },
+  "reliable": true,
+  "judge_model": "",
+  "metrics": {
+    "题数": 8,
+    "探针题": 5,
+    "对照题": 3,
+    "cross_space_contamination_rate": 0.0,
+    "foreign_chunks": 0,
+    "banned_leak_rate": 0.0,
+    "refusal_failure_rate": 0.0,
+    "control_answer_rate": 100.0,
+    "probe_chunks": 0,
+    "probe_images": 0,
+    "control_images": 33
+  },
+  "cases": [
+    {
+      "id": "cs-probe-desktop-jtsd",
+      "kind": "no_answer",
+      "q": "微信视频号的发货设置里，极兔快递对应的平台物流编码是什么？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "enterprise_desktop",
+      "foreign_space_hits": 0,
+      "context_images": [],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "enterprise_desktop",
+      "expect": "no_answer",
+      "context_chars": 0
+    },
+    {
+      "id": "cs-probe-web-qimen",
+      "kind": "no_answer",
+      "q": "外部ERP分销商做奇门自助对接时，旺店通的 WMS AppKey 是多少？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "enterprise_web",
+      "foreign_space_hits": 0,
+      "context_images": [],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "enterprise_web",
+      "expect": "no_answer",
+      "context_chars": 0
+    },
+    {
+      "id": "cs-probe-desktop-stocktake",
+      "kind": "no_answer",
+      "q": "盘点的完整操作流程是怎样的？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "enterprise_desktop",
+      "foreign_space_hits": 0,
+      "context_images": [],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "enterprise_desktop",
+      "expect": "no_answer",
+      "context_chars": 0
+    },
+    {
+      "id": "cs-probe-web-print",
+      "kind": "no_answer",
+      "q": "发货单怎么打印？在哪个界面操作？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "enterprise_web",
+      "foreign_space_hits": 0,
+      "context_images": [],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "enterprise_web",
+      "expect": "no_answer",
+      "context_chars": 0
+    },
+    {
+      "id": "cs-probe-desktop-general-guard",
+      "kind": "no_answer",
+      "q": "自动审核失败之后系统会重试几次？",
+      "answer": "知识库暂无此内容。",
+      "citations": [],
+      "retrieved_titles": [],
+      "top_score": 0.0,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "enterprise_desktop",
+      "foreign_space_hits": 0,
+      "context_images": [],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "enterprise_desktop",
+      "expect": "no_answer",
+      "context_chars": 0
+    },
+    {
+      "id": "cs-control-flagship-jtsd",
+      "kind": "fact",
+      "q": "微信视频号的发货设置里，极兔快递对应的平台物流编码是什么？",
+      "answer": "微信视频号发货设置里，极兔快递对应的平台物流编码是 **JTSD**，系统物流类别为 **极兔速递**。[1]\n\n维护位置：【设置】【基本设置】【店铺】-物流公司。注意快运编码与物流映射一定不要维护错误，否则会导致发货后店铺后台信息没有物流流转信息。[1]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 微信视频号电子面单对接及模板设置",
+          "heading": "四、发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/fht5wwdbqd6u2abq",
+          "score": 0.8722
+        },
+        {
+          "n": 2,
+          "title": "设置 · 唯品会MP面单模板设置步骤",
+          "heading": "三.发货设置",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/som424",
+          "score": 0.3129
+        },
+        {
+          "n": 3,
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+          "heading": "一、设置 › 1.物流设置 › 1）第三方物流授权和模板设置的常见问题",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/ghydd246hc90gbse",
+          "score": 0.2407
+        },
+        {
+          "n": 4,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "75、Q：好食期平台订单使用菜鸟极兔物流，物流同步失败提示：物流推送失败",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.1464
+        },
+        {
+          "n": 5,
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案",
+          "heading": "92、Q： 微信视频号物流失败，平台msg: 订单状态错误，不允许执行此操作 rid: 63f1d908-6c785a3d-40d8bb73",
+          "url": "https://www.yuque.com/wdterpqjb/gea2c1/qwc4021scy8uoxft",
+          "score": 0.146
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 微信视频号电子面单对接及模板设置",
+        "设置 · 唯品会MP面单模板设置步骤",
+        "📒常见问题库 · 旗舰版功能常见问题及解决方案",
+        "📒常见问题库 · 物流同步常见报错及解决方案",
+        "📒常见问题库 · 物流同步常见报错及解决方案"
+      ],
+      "top_score": 0.8722438216209412,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/07/07c6578897598fe6.png",
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案"
+        },
+        {
+          "n": 2,
+          "url": "/images/a3/a301d59aae1408e9.png",
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案"
+        },
+        {
+          "n": 3,
+          "url": "/images/17/17fa4ac05b3f1ee9.png",
+          "title": "📒常见问题库 · 旗舰版功能常见问题及解决方案"
+        },
+        {
+          "n": 4,
+          "url": "/images/12/12ab957eb37ec479.png",
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案"
+        },
+        {
+          "n": 5,
+          "url": "/images/d5/d5483c323d994fc2.png",
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案"
+        },
+        {
+          "n": 6,
+          "url": "/images/1f/1f61d270ff4683df.png",
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案"
+        },
+        {
+          "n": 7,
+          "url": "/images/d9/d933f861b56a083a.png",
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案"
+        },
+        {
+          "n": 8,
+          "url": "/images/ab/ab39bd96a5ff41ea.png",
+          "title": "📒常见问题库 · 物流同步常见报错及解决方案"
+        }
+      ],
+      "source_hit": true,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "flagship",
+      "expect": "answer",
+      "context_chars": 1855
+    },
+    {
+      "id": "cs-control-flagship-qimen",
+      "kind": "fact",
+      "q": "外部ERP分销商做奇门自助对接时，旺店通的 WMS AppKey 是多少？",
+      "answer": "旺店通 WMS AppKey = **23381383** [2][3]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备 › 外部ERP分销商",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.9987
+        },
+        {
+          "n": 2,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "一、对接前准备",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.9986
+        },
+        {
+          "n": 3,
+          "title": "分销 · 旺店通奇门分销自助对接流程",
+          "heading": "四、对接前准备",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/nozx98ggn227fn50",
+          "score": 0.9986
+        },
+        {
+          "n": 4,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "二、对接流程以及注意事项 › 外部ERP分销商 › 1.登陆供销平台",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.8248
+        },
+        {
+          "n": 5,
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程",
+          "heading": "二、对接流程以及注意事项 › 四、更新优化 › 4.1外部ERP推送的分销订单支持多级推送（奇门分销支持多级分销）",
+          "url": "https://www.yuque.com/wdterpqjb/hneqls/tc290b",
+          "score": 0.659
+        }
+      ],
+      "retrieved_titles": [
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 旺店通奇门分销自助对接流程",
+        "分销 · 外部ERP分销商对接旺店通供销商流程",
+        "分销 · 外部ERP分销商对接旺店通供销商流程"
+      ],
+      "top_score": 0.998738706111908,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/7f/7f3bb941257a138b.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        },
+        {
+          "n": 2,
+          "url": "/images/5a/5acf8f99800d0feb.png",
+          "title": "分销 · 旺店通奇门分销自助对接流程"
+        },
+        {
+          "n": 3,
+          "url": "/images/7f/7f40f1b5a0baf0a0.png",
+          "title": "分销 · 旺店通奇门分销自助对接流程"
+        },
+        {
+          "n": 4,
+          "url": "/images/7d/7dd71402db267185.png",
+          "title": "分销 · 旺店通奇门分销自助对接流程"
+        },
+        {
+          "n": 5,
+          "url": "/images/14/149a956dfd4e9f25.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        },
+        {
+          "n": 6,
+          "url": "/images/a4/a44ce3c66c9689ad.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        },
+        {
+          "n": 7,
+          "url": "/images/8a/8a152c905a9dcece.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        },
+        {
+          "n": 8,
+          "url": "/images/89/8946fca060596a13.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        },
+        {
+          "n": 9,
+          "url": "/images/c1/c1382c1f8807f20a.png",
+          "title": "分销 · 外部ERP分销商对接旺店通供销商流程"
+        }
+      ],
+      "source_hit": true,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "flagship",
+      "expect": "answer",
+      "context_chars": 2477
+    },
+    {
+      "id": "cs-control-flagship-stocktake",
+      "kind": "fact",
+      "q": "盘点的完整操作流程是怎样的？",
+      "answer": "盘点的完整操作流程如下：\n\n1. **PC端创建盘点单**：进入【仓储-货品盘点-盘点开单】，选择货品后提交。支持领取货位盘点、明细盘点这两种类型的盘点单。[3]\n2. **PDA端领取盘点单**：在PDA端可以看到待盘点的单子，或输入扫描盘点单号进行领取。[3]\n3. **执行盘点**：\n   - **货位盘点**：扫提示货位→填写实际库存量→点下一货位。盘点单有其它货位的任务则进入下一个货位，没有则PDA端盘点完成。[3]\n   - **明细盘点**：显示目前系统内货位及库存信息→扫货位→扫货品或长按该货品→填写盘点数量→提交盘点。如仓库中出现系统提示中没有的货位，可添加新货位进行盘点。[3]\n4. **PC端完成盘点单**：提交盘点后，PC端盘点单变为盘点中状态，进行右键盘点单计算盈亏，完成盘点单。[3]\n\n**PDA单品（含强SN）盘点**（1.5.0.7版本新增，操作位置：PDA库存盘点）：\n- 进入盘点页面后扫描货品条码/SN码盘点（数量计算）。[3]\n- **非SN货品**：扫描条码后对应货品高亮蓝色且盘点数为1，继续扫描可累加盘点数，常摁可弹窗修改数量。当库存数=盘点数，货品高亮绿色；如果库存数>盘点数且中途退出再进入，对应货品高亮红色，表示未盘点完。[4]\n- **SN货品**：支持扫描序列号实现序列号盘点，支持状态为已入库、已出库的序列号进行盘点。盘点单生效后，盘点录入的序列号状态置为已入库，未录入的序列号状态置为已出库；**首次录入、二次录入、已占用的不参与盘点**，建议在盘点前把执行中单据审核完毕。第一次扫描货品条码，对应货品高亮蓝色提示且盘点数为0，点击【SN】弹窗扫描SN进行数量修改（增/删），扫描完后点击【确定】关闭弹窗；点击【提交盘点】根据已扫描的SN码修改货品的盘点数量；SN货品不可常摁修改数量。当库存数=盘点数，货品高亮绿色；如果库存数>盘点数且中途退出再进入，对应货品高亮红色，表示未盘点完。[4]\n- PDA只做货品录入，在PC端执行盘点单完成。[4]\n\n**盘点后的清点处理**（在“清点处理”界面）：\n- 进入清点处理页面展示需要进行清点处理的货品列表，批次、生产期不同则显示多条。盈亏状态后的（盈、亏）代表此货品盘盈、盘亏状态。清点类型分为盘亏暂存和待质检盘亏暂存、拣货缺货。[5]\n- 选中想要清点的货品，点击“清点处理”，“全选”按钮可一键选择全部需要清点“盘亏暂存”的货品进行处理。[5]\n- 扫描货位、货品，如果此货位的货品在列表中，弹出清点框对货位上货品库存进行清点；如果货位、货品不在列表中，但货品是选择需要清点处理的货品，会将货位、货品添加到列表中，并弹出清点框。长按某一行也可弹出清点框，清点后产生盈亏/盘盈，仍可再次清点。[5]\n- 校验库存结束后，点击右上角“提交”，选中货品进行清点处理。[5]\n- 若不选择货品，直接点击“确认清点”，提示“全部提交清零盘点”，点击“确认”可以把列表中所有货品的盘亏暂存进行清空。[5]\n\n**注意事项**：\n- 盘点流程分为两个页面：首先在“库存清点”界面将货位库存进行清点，会将清点前和清点后的差值移位至盘亏暂存；然后在“清点处理”界面对盘亏暂存进行清空并校验工作。[1]\n- 盘点的目的是调整实际库存和系统库存之间的差异，整理仓库内货品的库存，保证系统内库存与仓库内实际库存相等。[2]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "仓储 · 库存清点",
+          "heading": "一、操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/wfynya",
+          "score": 0.7869
+        },
+        {
+          "n": 2,
+          "title": "仓储 · 盘点流程",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/qpwntw",
+          "score": 0.723
+        },
+        {
+          "n": 3,
+          "title": "仓储 · 库存盘点",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/zyf2rt",
+          "score": 0.7017
+        },
+        {
+          "n": 4,
+          "title": "仓储 · 库存盘点",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/zyf2rt",
+          "score": 0.6984
+        },
+        {
+          "n": 5,
+          "title": "仓储 · 清点处理",
+          "heading": "二、操作步骤",
+          "url": "https://www.yuque.com/wdterpqjb/cangchu/wh1dp5",
+          "score": 0.6316
+        }
+      ],
+      "retrieved_titles": [
+        "仓储 · 库存清点",
+        "仓储 · 盘点流程",
+        "仓储 · 库存盘点",
+        "仓储 · 库存盘点",
+        "仓储 · 清点处理"
+      ],
+      "top_score": 0.7868688106536865,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/47/47e35a810b038f09.png",
+          "title": "仓储 · 库存清点"
+        },
+        {
+          "n": 2,
+          "url": "/images/ce/cef26a570a0ab674.png",
+          "title": "仓储 · 盘点流程"
+        },
+        {
+          "n": 3,
+          "url": "/images/f2/f2efb32067dda3ea.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 4,
+          "url": "/images/b4/b4480f6e02ccab8b.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 5,
+          "url": "/images/77/7714edca46f4c657.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 6,
+          "url": "/images/7a/7a1a38173cdbcefa.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 7,
+          "url": "/images/9a/9a2aace675c3a43e.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 8,
+          "url": "/images/0f/0f8b0aaf57cb0cf2.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 9,
+          "url": "/images/28/286de4333a28e90d.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 10,
+          "url": "/images/79/7969c60484d235ec.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 11,
+          "url": "/images/3d/3d7fca040fcafb91.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 12,
+          "url": "/images/7f/7f14f73561b93d81.png",
+          "title": "仓储 · 库存盘点"
+        },
+        {
+          "n": 13,
+          "url": "/images/1b/1bc99ab53a94130b.png",
+          "title": "仓储 · 清点处理"
+        },
+        {
+          "n": 14,
+          "url": "/images/40/4045f286837cdb02.png",
+          "title": "仓储 · 清点处理"
+        },
+        {
+          "n": 15,
+          "url": "/images/9f/9f2496a7f5e993d7.png",
+          "title": "仓储 · 清点处理"
+        },
+        {
+          "n": 16,
+          "url": "/images/62/62e3b73fd26d3899.png",
+          "title": "仓储 · 清点处理"
+        }
+      ],
+      "source_hit": true,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "",
+      "grounded": null,
+      "unsupported": "",
+      "reason": "",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "ask_in": "flagship",
+      "expect": "answer",
+      "context_chars": 1678
+    }
+  ]
+}

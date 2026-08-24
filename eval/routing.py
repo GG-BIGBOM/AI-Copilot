@@ -382,6 +382,7 @@ def save(results: list[CaseResult], m: Metrics, meta: dict, tag: str) -> Path:
         json.dumps(
             {
                 "tag": tag,
+                "suite": "routing",  # 门禁靠它认出这份证据，见 eval/gate.py
                 "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "dataset_meta": meta,
                 "metrics": asdict(m),

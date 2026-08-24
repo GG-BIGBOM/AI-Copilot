@@ -47,6 +47,12 @@ EVAL_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EVAL_DIR / "results"
 DATASET = EVAL_DIR / "dataset.yaml"
 
+# 评测默认量哪个知识版本（M19-A）。字面量而不是 `copilot.spaces.DEFAULT`，
+# 是为了让判分口径那一层的纯函数测试不必连库、不必装后端依赖；
+# 两者一致由 `tests/test_eval_spaces.py` 钉死——写死一个字符串而没人核对，
+# 正是 M14-A 那个 NOT NULL 洞的同一种形状。
+DEFAULT_SPACE = "flagship"
+
 sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
 
 # ⚠️ **Windows 控制台默认是 GBK，报告里的 ⚠️ / ⛔ / ✓ 一律编不出来。**
@@ -258,6 +264,12 @@ class Config:
     # 还调不调模型。只改 prompt 不改闸门的话，放开版会在所有 no_answer 题上
     # 拿到和严格版一模一样的兜底话术——A/B 会显示「毫无变化」，而那是假的
     general: bool | None = None
+    # ⭐ 这一轮在哪个知识版本里问（M19-A）。在它之前，检索那两支都写死
+    # `spaces.default_id()`——评测因此**只能**量旗舰版，而"企业版语料导进去
+    # 会不会污染旗舰版"这个问题，在导入之前一次都问不出来。
+    # 它同时是结果档案的一部分（见 `resolved()`）：两轮结果只有空间不同时，
+    # 存出来的 config 必须看得出来，否则 `--compare` 会拿两个题集比大小。
+    space: str = DEFAULT_SPACE
 
     def system_prompt(self) -> str | None:
         if self.prompt == "current":
@@ -286,6 +298,7 @@ class Config:
         return {
             "prompt": self.prompt,
             "path": "agent" if self.agent else "direct",
+            "space": self.space,
             "top_k": self.top_k or s.retrieve_top_k,
             "rerank_k": self.rerank_k or s.rerank_top_k,
             "threshold": s.rerank_score_threshold if self.threshold < 0 else self.threshold,
@@ -325,6 +338,17 @@ class CaseResult:
     # 而只看答案文本，它们长得一模一样
     private_hits: int = 0
     subject_guard: bool = False
+    # ⭐ 这一轮问的是哪个空间，以及召回里有几块**不属于**这个空间（也不属于
+    # `common`）。后者的正确值永远是 0——不是"通常是 0"，是**破了就不能上线**：
+    # 一块企业版的步骤混进旗舰版的答案里，用户照着点会把单据做错，
+    # 而答案长着有出处的样子，他分辨不出来。见 `eval/cross_space.py`
+    space: str = ""
+    foreign_space_hits: int = 0
+    # 这一轮上下文里真实存在的配图：[{"n": 1, "url": ..., "title": 出自哪篇}]。
+    # 有了它，「答案写的 [图3] 到底存不存在」才是**规则判定**——
+    # 在此之前只数得出答案里有几个 [图N]（`_count_pics`），
+    # 数得出用了几张，却看不出用的是不是真的那几张
+    context_images: list[dict] = field(default_factory=list)
 
     # 确定性判定
     source_hit: bool | None = None  # 期望源是否出现在引用里（无期望源时为 None）
@@ -336,6 +360,13 @@ class CaseResult:
     # M13 P0 一并补上：它现在是确定性失败的一种
     banned_hits: list[str] = field(default_factory=list)
     said_no_answer: bool = False
+    # 答案里写了、而上下文里根本没有的配图编号。**这是配图版的"假引用"**：
+    # 用户点开一张不存在的图，看到的是坏掉的图标；更糟的情形是编号存在
+    # 但指向另一篇文档的截图（下面那一列），那时他看到的是一张
+    # **看起来合理、其实是另一个平台**的界面
+    bad_image_refs: list[int] = field(default_factory=list)
+    # 编号存在，但那张图出自期望来源以外的文档（只在题目声明了 `source` 时判）
+    foreign_image_refs: list[int] = field(default_factory=list)
 
     # LLM 判定
     verdict: str = ""
@@ -365,7 +396,77 @@ def _count_pics(text: str) -> int:
     return len(_PIC_RE.findall(text or ""))
 
 
-def load_cases(only: str | None = None, scope: str = "public") -> tuple[dict, list[dict]]:
+# 带编号的版本：`[图3]` -> 3。`_PIC_RE` 只数个数，这里要的是编号本身
+_PIC_N_RE = re.compile(r"\[图\s*(\d{1,2})\]")
+
+
+def cited_pics(answer: str) -> list[int]:
+    """答案里引用到的配图编号，按出现顺序、去重。"""
+    seen: list[int] = []
+    for m in _PIC_N_RE.findall(answer or ""):
+        n = int(m)
+        if n not in seen:
+            seen.append(n)
+    return seen
+
+
+def _image_table(res, bundle) -> list[dict]:
+    """把 `bundle.images`（编号 + 地址）配上「这张图出自哪篇」。
+
+    编号是 `build_context()` 现编的（按在上下文里首次出现的顺序），
+    出处只有检索结果里才有——两边必须在同一处对上，否则
+    `foreign_image_refs` 判的就是一张对不上号的表。
+    """
+    titles = {
+        img["url"]: c.citation.title
+        for c in res.chunks
+        for img in c.images
+        if img.get("url")
+    }
+    return [{**img, "title": titles.get(img.get("url"), "")} for img in bundle.images]
+
+
+def bad_image_refs(answer: str, images: list[dict]) -> list[int]:
+    """答案里写了、上下文里却没有的配图编号（M19-A）。
+
+    ⚠️ **上下文一张图都没有时，任何 `[图N]` 都是编的。** 第一版把这种情形
+    直接返回空列表（"没有图就没什么可比的"），于是最该抓住的那类失败——
+    模型在完全没有配图的材料上凭空写出 `[图1]`——反而恒判为通过。
+    """
+    have = {img.get("n") for img in images or []}
+    return [n for n in cited_pics(answer) if n not in have]
+
+
+def foreign_image_refs(answer: str, images: list[dict], wants: list[str]) -> list[int]:
+    """引用到的配图里，出自期望来源以外那几张的编号（M19-A）。
+
+    量的是「配图串台」：编号真实存在、图也打得开，但它是另一篇文档的截图。
+    这类错误在现有指标上**全部隐形**——准确率、引用正确率、配图带出率
+    一个都不会动，而用户照着一张别的平台的界面去点。
+
+    只在题目声明了期望来源（`source`）时判；`title` 未知的图（私有图的地址
+    会被换成 `/api/images/{id}`，对不回文档）一律**不算串台**，
+    宁可漏判也不能凭"我不知道它是谁的"给系统记一笔错。
+    """
+    if not wants:
+        return []
+    by_n = {img.get("n"): img for img in images or []}
+    out: list[int] = []
+    for n in cited_pics(answer):
+        img = by_n.get(n)
+        if img is None:
+            continue  # 不存在的编号是 bad_image_refs 的事，不重复计一次
+        title = img.get("title")
+        if not title:
+            continue
+        if not any(w in title for w in wants):
+            out.append(n)
+    return out
+
+
+def load_cases(
+    only: str | None = None, scope: str = "public", space: str = DEFAULT_SPACE
+) -> tuple[dict, list[dict]]:
     import yaml
 
     data = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
@@ -373,6 +474,9 @@ def load_cases(only: str | None = None, scope: str = "public") -> tuple[dict, li
     # 文档集，混进来会让历史 tag 之间的 --compare 变成拿两个不同的题集比大小，
     # 而报告上完全看不出来
     cases = [c for c in data["cases"] if c.get("scope", "public") == scope]
+    # 同理，空间也是题集的一根轴（M19-A）。题目不写 `space` 就是旗舰版——
+    # 现有 89 道题一道都不用改，而 M18 之后新加的企业版题不会混进旗舰版的分母
+    cases = [c for c in cases if c.get("space", DEFAULT_SPACE) == space]
     if only:
         keys = {k.strip() for k in only.split(",") if k.strip()}
         cases = [c for c in cases if c["id"] in keys or c["kind"] in keys]
@@ -413,7 +517,78 @@ def resolve_user(email: str):
 # ---------- 阶段一：检索（串行） ----------
 
 
+async def _with_fresh_pool(coro):
+    """跑完一轮就把连接池丢掉。
+
+    ⚠️ **一个进程里第二次 `asyncio.run()` 会踩到上一轮留下的连接。**
+    连接池里那条 asyncpg 连接还绑在已经关掉的事件循环上，下一轮复用它时
+    报的是 `AttributeError: 'NoneType' object has no attribute 'send'`——
+    一个和数据库、和评测都八竿子打不着的错误，排查方向全歪。
+    `resolve_user` 早就为同样的理由 dispose 过一次；`retrieve_all` 一直漏着，
+    直到跨空间评测要按空间分组、连着跑好几轮才撞上来。
+    """
+    from copilot.db.session import engine
+
+    try:
+        return await coro
+    finally:
+        await engine.dispose()
+
+
 CORPUS_STATS: dict = {}  # 检索时顺手记下当时的块数，换 chunk 参数重灌后能看出规模变化
+
+
+async def resolve_space(session, code: str):
+    """把空间 code 换成行。找不到就退出，**不回落到默认空间**（M19-A）。
+
+    回落是这里最坏的选项：`--space enterprise_desktp` 拼错一个字母，
+    评测会安安静静地又量一遍旗舰版，而报告标题上写着企业版——
+    正是 `copilot.spaces.SpaceNotFound` 那段注释说的"没有任何症状的错误"。
+    """
+    from copilot import spaces
+
+    try:
+        return await spaces.by_code(session, code)
+    except spaces.SpaceNotFound as e:
+        raise SystemExit(f"{e}。可选：{'、'.join(c for c, *_ in spaces.SEED)}") from e
+
+
+async def corpus_fingerprint(session, space_id, common_id, user_id=None) -> dict:
+    """这一轮**实际能检索到**的那批块的指纹（M19-A）。
+
+    结果档案里原来只有一个 `chunk_count`，而它答不了两个问题：
+    「这两轮跑的是不是同一份语料」和「这份门禁证据是不是已经过期了」。
+    块数相同、内容变了（勘误改了一句话、重灌了一次）时它一动不动。
+
+    ⚠️ **过滤条件直接复用检索自己的 `_space_filter`**，不在这里抄一份。
+    指纹要覆盖的是"检索能看见的那批块"，抄一份的话，哪天空间过滤改了规则，
+    指纹会继续按老规则算——门禁于是拿着一份**它以为对应、其实不对应**的
+    语料快照放行，那比没有指纹更糟。
+    """
+    from copilot.db.models import Chunk
+    from copilot.retrieve import _space_filter
+    from sqlalchemy import String, func, literal, or_, select
+    from sqlalchemy.dialects.postgresql import aggregate_order_by
+
+    scope = (
+        Chunk.owner_id.is_(None)
+        if user_id is None
+        else or_(Chunk.owner_id.is_(None), Chunk.owner_id == user_id)
+    )
+    where = _space_filter(space_id, common_id) & scope
+    n = await session.scalar(select(func.count(Chunk.id)).where(where))
+    # 逐块的 (id, 正文 md5) 排序后再哈希：改一个字、少一块、多一块都会变。
+    # 在库里算，不是把 5000 块正文拉回本机——那是一次几十兆的传输
+    # ⚠️ **排序必须写在 `string_agg` 里**（`... ORDER BY id`）。
+    # 不排的话 Postgres 按它当时高兴的顺序拼，同一份语料能算出两个不同的
+    # 指纹——一个会随机报"语料变了"的指纹，比没有指纹更浪费人的时间
+    line = func.concat(func.cast(Chunk.id, String), ":", func.md5(Chunk.content))
+    digest = await session.scalar(
+        select(func.md5(func.string_agg(line, aggregate_order_by(literal(","), Chunk.id)))).where(
+            where
+        )
+    )
+    return {"chunk_count": n or 0, "corpus_sha": (digest or "")[:12]}
 
 
 def retrieve_all(
@@ -421,9 +596,6 @@ def retrieve_all(
 ) -> list[CaseResult]:
     import asyncio
 
-    from sqlalchemy import func, or_, select
-
-    from copilot.db.models import Chunk
     from copilot.db.session import SessionLocal
     from copilot.providers.siliconflow import (
         SiliconFlowClient,
@@ -440,22 +612,21 @@ def retrieve_all(
         emb, rr = SiliconFlowEmbedder(client=client), SiliconFlowReranker(client=client)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
-            # ⚠️ 知识版本。评测目前**只量旗舰版**——另外两个空间的语料要到 M18
-            # 才导入。不传的话检索是 fail closed 的（一条都不返回），
-            # 整份题集会全变成「知识库暂无此内容」，而那看起来像模型退化了。
-            # 跨空间的负例题集是 M19-A 的活，那时这里会变成一个参数。
+            # ⚠️ 知识版本（M19-A 起是参数，不再写死旗舰版）。不传的话检索是
+            # fail closed 的（一条都不返回），整份题集会全变成
+            # 「知识库暂无此内容」，而那看起来像模型退化了。
             from copilot import spaces
 
-            space_id = await spaces.default_id(session)
+            space_id = (await resolve_space(session, cfg.space)).id
+            common_id = await spaces.common_id(session)
+            # 「这一块算不算串了空间」的判据。**`common` 要算在里面**：
+            # 通用知识本来就该在任何版本里被召回（见 `copilot.spaces` 模块头），
+            # 漏掉它的话，跨空间污染率会把一批完全正确的召回记成污染
+            allowed = {x for x in (space_id, common_id) if x is not None}
 
             # 可见范围 = 公共库 +（指定用户时）他的私有库，和线上完全一致
-            scope_filter = (
-                Chunk.owner_id.is_(None)
-                if user_id is None
-                else or_(Chunk.owner_id.is_(None), Chunk.owner_id == user_id)
-            )
-            CORPUS_STATS["chunk_count"] = await session.scalar(
-                select(func.count(Chunk.id)).where(scope_filter)
+            CORPUS_STATS.update(
+                await corpus_fingerprint(session, space_id, common_id, user_id)
             )
             for i, case in enumerate(cases, 1):
                 res = await search(
@@ -488,6 +659,12 @@ def retrieve_all(
                     retrieved_titles=[c.title for c in res.citations],
                     top_score=res.citations[0].score if res.citations else 0.0,
                     private_hits=res.private_count,
+                    space=cfg.space,
+                    # ⭐ 逐块核对空间，而不是相信过滤器。见 `RetrievedChunk.space_id`
+                    foreign_space_hits=sum(
+                        1 for c in res.chunks if c.space_id not in allowed
+                    ),
+                    context_images=_image_table(res, bundle),
                 )
                 # M11 P3 第 3 步。**调的是线上那个函数**，不是抄一份判定逻辑——
                 # 抄一份的话，改了那边忘了改这边，评测会一直在报告一个
@@ -502,7 +679,7 @@ def retrieve_all(
         client.close()
         return out
 
-    return asyncio.run(main())
+    return asyncio.run(_with_fresh_pool(main()))
 
 
 # ---------- 阶段二：生成答案（并行） ----------
@@ -609,11 +786,8 @@ def run_agent_cases(
     """
     import asyncio
 
-    from sqlalchemy import func, select
-
     from copilot.agent.deps import AgentDeps
     from copilot.agent.runner import run_agent_stream
-    from copilot.db.models import Chunk
     from copilot.db.session import SessionLocal
     from copilot.providers.llm import ChatLLM
     from copilot.providers.siliconflow import (
@@ -632,13 +806,14 @@ def run_agent_cases(
         answer_llm = ChatLLM(forced_temperature=0.0)
         out: list[CaseResult] = []
         async with SessionLocal() as session:
-            # 同直路那一支：评测只量旗舰版，不传就是 fail closed
+            # 同直路那一支：空间是参数，不传就是 fail closed
             from copilot import spaces
 
-            space_id = await spaces.default_id(session)
+            space_id = (await resolve_space(session, cfg.space)).id
+            common_id = await spaces.common_id(session)
 
-            CORPUS_STATS["chunk_count"] = await session.scalar(
-                select(func.count(Chunk.id)).where(Chunk.owner_id.is_(None))
+            CORPUS_STATS.update(
+                await corpus_fingerprint(session, space_id, common_id, user_id)
             )
             for i, case in enumerate(cases, 1):
                 deps = AgentDeps(
@@ -670,6 +845,13 @@ def run_agent_cases(
                     retrieved_titles=[c.get("title", "") for c in deps.citations],
                     top_score=deps.citations[0].get("score", 0.0) if deps.citations else 0.0,
                     said_no_answer=is_no_answer(answer),
+                    space=cfg.space,
+                    # ⚠️ Agent 路上 `deps.images` 只有编号和地址，**没有出处**
+                    # （见 `agent/tools.py` 的 answer_kb）。所以这一路能判
+                    # 「编号存不存在」，判不了「串没串台」——`title` 留空，
+                    # `foreign_image_refs` 会因此跳过它，而不是猜。
+                    # 报告里那一行会连分母一起打出来，别把小分母看成干净
+                    context_images=[dict(img) for img in deps.images],
                 )
                 if wants := wanted_sources(case):
                     cr.source_hit = any(w in t for w in wants for t in cr.retrieved_titles)
@@ -680,7 +862,7 @@ def run_agent_cases(
         answer_llm.close()
         return out
 
-    return asyncio.run(main())
+    return asyncio.run(_with_fresh_pool(main()))
 
 
 # ---------- 阶段三：判分（并行） ----------
@@ -838,6 +1020,11 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
         case = by_id[cr.id]
         wants = wanted_sources(case)
 
+        # 配图的两条规则判定（M19-A）。放在三态之前算：下面「无效配图」
+        # 要和漏事实、禁止内容一样算**确定性失败**，判分器挂了也照样成立
+        cr.bad_image_refs = bad_image_refs(cr.answer, cr.context_images)
+        cr.foreign_image_refs = foreign_image_refs(cr.answer, cr.context_images, wants)
+
         # 答案里 [n] 标注的编号，是否有一个指向期望的那篇
         if wants and cr.citations:
             cited = {int(n) for n in _CITE_RE.findall(cr.answer)}
@@ -866,6 +1053,12 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
         elif cr.banned_hits:
             cr.status = "incorrect"
             cr.fail_why = f"出现了禁止内容：{cr.banned_hits}"
+        elif cr.bad_image_refs:
+            # ⭐ 编出一个不存在的配图编号 = 配图版的假引用，和「漏事实」同级。
+            # 不能只记进指标不判错：那样一道正文全对、配图指向空气的答案
+            # 会计进准确率，而用户点开看到的是一张打不开的图
+            cr.status = "incorrect"
+            cr.fail_why = f"引用了不存在的配图：{cr.bad_image_refs}"
         elif cr.judge_error:
             cr.status = "invalid"
             cr.fail_why = f"判分器没判成（不计入准确率）：{cr.reason[:70]}"
@@ -939,6 +1132,32 @@ def score(results: list[CaseResult], cases: list[dict]) -> dict:
     # 模型不写图是对的。拿它们当分母，这个数纯粹是噪声。
     # 分母必须由出题人显式标注，不能靠问题里的关键词去猜：猜出来的分母
     # 会随着有人换个问法而变，指标就没法跨轮比了。
+    # ⭐ 跨空间污染率（M19-A）。分母是全部题，不剔 invalid——它是逐块核对
+    # `knowledge_space_id` 得来的，和判分器一点关系都没有。
+    # **目标 0%，破了不能上线**：一块别的 ERP 版本的材料进了答案，
+    # 用户照着做会把单据做错，而答案看起来完全正常
+    m["跨空间污染率"] = pct(sum(r.foreign_space_hits > 0 for r in results), len(results))
+    m["跨空间污染块数"] = sum(r.foreign_space_hits for r in results)
+
+    # 配图的两条负例。分母是**真的写了 [图N] 的答案**——没配图的题
+    # 谈不上配错，混进分母只会把这两个数稀释成永远好看的小数
+    with_pics = [r for r in results if cited_pics(r.answer)]
+    if with_pics:
+        m["无效配图率"] = pct(sum(bool(r.bad_image_refs) for r in with_pics), len(with_pics))
+        m["带图答案数"] = len(with_pics)
+    # 串台只在「题目声明了期望来源」且「图对得回出处」时判得了。
+    # ⚠️ 分母单独打出来（`可判串台数`）：Agent 路上图片没有出处，
+    # 分母会缩到很小甚至 0——那时 0.0% 意味着"没量到"，不是"没串台"
+    judgeable = [
+        r
+        for r in with_pics
+        if wanted_sources(by_id[r.id])
+        and any(i.get("title") for i in r.context_images if i.get("n") in cited_pics(r.answer))
+    ]
+    m["可判串台数"] = len(judgeable)
+    if judgeable:
+        m["配图串台率"] = pct(sum(bool(r.foreign_image_refs) for r in judgeable), len(judgeable))
+
     procedural_ids = {c["id"] for c in cases if c.get("procedural")}
     procedural = [r for r in results if r.id in procedural_ids and not r.said_no_answer]
     if procedural:
@@ -984,6 +1203,16 @@ METRIC_HELP = {
     "判分失效率": "判分器**自己**没跑成（断线/限流/吐不出 JSON）的题占比。"
     "**这不是模型答错**——这些题不进准确率的分母。超过 5% 整轮标 UNRELIABLE",
     "有效题数": "真正评上了的题数 = 判对 + 判错。准确率的分母是它，不是题数",
+    "跨空间污染率": "召回里出现了**不属于本轮空间、也不属于 common** 的块的题占比。"
+    "逐块核对 `knowledge_space_id` 得来，与判分器无关。**目标 0%，是 M18 导入"
+    "企业版语料的门禁**：这个数不是 0，就说明空间过滤有洞，而洞的表现是"
+    "另一个 ERP 版本的步骤混进答案，没有任何报错",
+    "无效配图率": "写了 [图N] 的答案里，N 在上下文里根本不存在的比例。"
+    "**配图版的假引用**，目标 0%。规则判定，判分器挂了也算得出",
+    "配图串台率": "配图编号真实存在、但那张图出自期望来源以外的文档的比例。"
+    "这类错误在准确率/引用正确率/配图带出率上**全部隐形**，而用户照着"
+    "另一个平台的界面去点。⚠️ 看它必须连 `可判串台数` 一起看："
+    "Agent 路上图片没有出处，分母会是 0，那时 0.0% 是「没量到」不是「没串台」",
 }
 
 
@@ -1004,10 +1233,22 @@ def _slim(case: dict) -> dict:
     return out
 
 
-def save(tag: str, meta: dict, cfg: Config, metrics: dict, results: list[CaseResult], judge: str):
+def save(
+    tag: str,
+    meta: dict,
+    cfg: Config,
+    metrics: dict,
+    results: list[CaseResult],
+    judge: str,
+    scope: str = "public",
+):
     RESULTS_DIR.mkdir(exist_ok=True)
     payload = {
         "tag": tag,
+        # ⭐ 门禁（`eval/gate.py`）靠这两个字段认出「这份证据是哪一套题跑的」。
+        # 在它们之前，只能靠文件名猜——而文件名是人随手起的
+        "suite": "dataset",
+        "scope": scope,
         "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "corpus": meta.get("corpus", ""),
         "config": {**cfg.resolved(), **CORPUS_STATS},
@@ -1031,6 +1272,13 @@ def print_report(
     print()
     print("=" * 78)
     print(f"  {tag}    判分模型 {judge}    {cfg_line}")
+    # ⭐ 空间和语料指纹打在抬头。半年后回来看两份报告，「为什么这轮低了 3 个点」
+    # 第一个要排除的就是"跑的根本不是同一份语料"
+    corpus = CORPUS_STATS.get("corpus_sha", "")
+    print(
+        f"  知识版本 {r['space']}    语料 {CORPUS_STATS.get('chunk_count', '?')} 块"
+        + (f" · sha {corpus}" if corpus else "")
+    )
     print("=" * 78)
     # ⭐ 判分口径先打出来，再打指标。**顺序是刻意的**：先让人看见这一轮
     # 有几题根本没评上，再去看准确率——反过来的话，第一眼看到的是
@@ -1058,6 +1306,8 @@ def print_report(
         "假阴性率",
         "无据陈述率",
         "配图带出率",
+        "无效配图率",
+        "跨空间污染率",
     ):
         # ⚠️ 不是每一轮都有每一个指标。「配图带出率」的分母是标了 `procedural`
         # 的题，而**私有库那组一道都没有**——照着固定清单直接取值会 KeyError，
@@ -1071,6 +1321,12 @@ def print_report(
     # 总准确率会把 14 道难题的变化稀释成看不见的小数
     if "难题准确率" in metrics:
         print(f"  {'难题准确率':<11} {metrics['难题准确率']}%（{metrics['难题数']} 题）")
+    # ⚠️ 串台率必须**连分母一起打**。单独一行 0.0% 会被读成「配图没串台」，
+    # 而它同样可能是「这一轮一道题都没判得了」（Agent 路上图片没有出处）
+    if (rate := metrics.get("配图串台率")) is not None:
+        print(f"  {'配图串台率':<11} {rate}%（可判 {metrics['可判串台数']} 题）")
+    elif metrics.get("带图答案数"):
+        print(f"  {'配图串台率':<11} 未量到（{metrics['带图答案数']} 题带图，但都对不回出处）")
     print()
     print("  分类准确率：", "  ".join(f"{k} {v}%" for k, v in metrics["分类准确率"].items()))
 
@@ -1267,6 +1523,11 @@ def main() -> None:
     )
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument(
+        "--space",
+        default=DEFAULT_SPACE,
+        help=f"在哪个知识版本里跑（默认 {DEFAULT_SPACE}）。题集按题目的 space 字段过滤",
+    )
+    ap.add_argument(
         "--as-user",
         default="",
         metavar="EMAIL",
@@ -1281,9 +1542,11 @@ def main() -> None:
     # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——
     # 混跑等于把两个不同的题集算进同一个准确率
     user_id = resolve_user(args.as_user) if args.as_user else None
-    meta, cases = load_cases(args.only or None, scope="private" if user_id else "public")
+    meta, cases = load_cases(
+        args.only or None, scope="private" if user_id else "public", space=args.space
+    )
     if not cases:
-        raise SystemExit("这个范围里一道题都没有，检查 --only / --as-user")
+        raise SystemExit("这个范围里一道题都没有，检查 --only / --as-user / --space")
     cfg = Config(
         top_k=args.top_k,
         rerank_k=args.rerank_k,
@@ -1292,6 +1555,7 @@ def main() -> None:
         agent=args.agent,
         mode=args.mode,
         general={"on": True, "off": False}.get(args.general),
+        space=args.space,
     )
 
     if args.check:
@@ -1322,7 +1586,9 @@ def main() -> None:
     judge = judge_all(results, cases, workers=args.workers, skip=args.no_judge)
 
     metrics = score(results, cases)
-    path = save(tag, meta, cfg, metrics, results, judge)
+    path = save(
+        tag, meta, cfg, metrics, results, judge, scope="private" if user_id else "public"
+    )
     print_report(tag, metrics, results, judge, cfg)
     print()
     print(f"耗时 {time.monotonic() - t0:.0f}s　结果存在 {path}")

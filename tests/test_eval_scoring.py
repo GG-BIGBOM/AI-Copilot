@@ -318,3 +318,164 @@ def test_compare_refuses_unreliable_runs(capsys):
     ok, rate, stuck = run._reliability(stale)
     assert (ok, stuck) == (False, 5)
     assert rate == 8.2
+
+
+# ─────────────────────────────────────────────────────────
+# M19-A：空间与配图的负例
+#
+# 路线图 49「Evaluation 自身也要有测试」的四个 case。四条全是**规则判定**，
+# 手工造结果就能钉死口径——评测这台仪器自己有没有刻度，不该等到跑真题时才知道
+# ─────────────────────────────────────────────────────────
+
+
+def test_case_b_cross_space_contamination_is_counted():
+    """Case B：本轮问的是这个空间，召回里却混进了别的空间的块。
+
+    ⭐ 它**不看判分器**：`foreign_space_hits` 是逐块核对 `knowledge_space_id`
+    得来的，判分器挂着也算得出来。这正是它能当 M18 门禁的原因。
+    """
+    cases = [case("x"), case("y")]
+    results = [
+        result("x", answer="答案[1]", verdict="correct", grounded=True, foreign_space_hits=2),
+        result("y", answer="答案[1]", verdict="correct", grounded=True),
+    ]
+    m = run.score(results, cases)
+    assert m["跨空间污染率"] == 50.0
+    assert m["跨空间污染块数"] == 2
+
+
+def test_clean_run_has_zero_contamination():
+    """全部块都在本空间（或 common）里时，这个数必须是 0.0 而不是缺项。
+
+    缺项和 0 在报告上长得不一样，但在「门禁通过了吗」这个问题上会被同样地
+    读成"没问题"——所以它得永远在。
+    """
+    cases = [case("x")]
+    m = run.score([result("x", answer="答案[1]", verdict="correct", grounded=True)], cases)
+    assert m["跨空间污染率"] == 0.0
+
+
+def test_case_d_wrong_image_context_is_counted():
+    """Case D：配图编号真实存在，但那张图出自另一篇文档。
+
+    正文可以完全正确，引用也可以完全正确——用户看到的却是另一个平台的界面。
+    这类失败在准确率、引用正确率、配图带出率上一个数都不会动。
+    """
+    cases = [case("pic", source="微信视频号电子面单")]
+    results = [
+        result(
+            "pic",
+            answer="按 [图1] 里的位置点开。[1]",
+            verdict="correct",
+            grounded=True,
+            context_images=[{"n": 1, "url": "/images/ab/1.png", "title": "抖音电子面单"}],
+        )
+    ]
+    m = run.score(results, cases)
+    assert results[0].foreign_image_refs == [1]
+    assert m["配图串台率"] == 100.0
+    assert m["可判串台数"] == 1
+    # ⚠️ 串台**不算答错**：正文可能确实是对的。它是单独一条要压到 0 的指标，
+    # 混进准确率会让"配错图"和"答错事"变成同一个数
+    assert results[0].status == "correct"
+
+
+def test_image_from_expected_source_is_not_contamination():
+    """出自期望来源的配图不算串台——否则这个指标会永远是 100%。"""
+    cases = [case("pic", source="微信视频号")]
+    results = [
+        result(
+            "pic",
+            answer="见 [图1]。[1]",
+            verdict="correct",
+            grounded=True,
+            context_images=[{"n": 1, "url": "/i/1.png", "title": "微信视频号电子面单"}],
+        )
+    ]
+    m = run.score(results, cases)
+    assert results[0].foreign_image_refs == []
+    assert m["配图串台率"] == 0.0
+
+
+def test_invalid_image_reference_is_a_deterministic_failure():
+    """写了上下文里没有的 [图N] = 配图版的假引用，判错，且不靠判分器。"""
+    cases = [case("pic")]
+    results = [
+        result(
+            "pic",
+            answer="见 [图3]。[1]",
+            verdict="correct",
+            grounded=True,
+            judge_error=True,
+            context_images=[{"n": 1, "url": "/i/1.png", "title": "某篇"}],
+        )
+    ]
+    m = run.score(results, cases)
+    assert results[0].bad_image_refs == [3]
+    assert results[0].status == "incorrect"  # 不是 invalid
+    assert "不存在的配图" in results[0].fail_why
+    assert m["无效配图率"] == 100.0
+
+
+def test_image_reference_with_empty_context_is_still_invalid():
+    """⚠️ 上下文一张图都没有时的 [图1] 是**最该抓住**的那一类，不能豁免。
+
+    第一版写成「没有图就没什么可比的」直接返回空——于是凭空编图恒判通过。
+    """
+    assert run.bad_image_refs("见 [图1]", []) == [1]
+
+
+def test_wrong_image_context_needs_titles_to_be_judgeable():
+    """Agent 路上图片没有出处（title 为空）：不判串台，也不假装判过。
+
+    ⭐ 这条守的是**分母**。`配图串台率` 缺项时报告会打「未量到」，
+    而不是打一个 0.0%——后者会被读成「配图很干净」。
+    """
+    cases = [case("pic", source="微信视频号")]
+    results = [
+        result(
+            "pic",
+            answer="见 [图1]。[1]",
+            verdict="correct",
+            grounded=True,
+            context_images=[{"n": 1, "url": "/i/1.png"}],  # 没有 title
+        )
+    ]
+    m = run.score(results, cases)
+    assert results[0].foreign_image_refs == []
+    assert m["可判串台数"] == 0
+    assert "配图串台率" not in m
+    assert m["带图答案数"] == 1
+
+
+def test_answers_without_pictures_are_out_of_the_image_denominators():
+    """没写 [图N] 的答案不进配图两条指标的分母。"""
+    cases = [case("a")]
+    m = run.score([result("a", answer="纯文字答案[1]", verdict="correct", grounded=True)], cases)
+    assert "无效配图率" not in m
+    assert m.get("带图答案数") is None
+
+
+def test_case_c_unsupported_claim_is_flagged():
+    """Case C：引用编号存在，但材料不支持那句话。
+
+    这一条**必须**靠判分器（"材料支不支持这句话"没有规则判法），
+    所以它的分母要剔掉 invalid——见 `score()` 里 `无据陈述率` 那一段。
+    """
+    cases = [case("a"), case("b")]
+    results = [
+        result("a", answer="材料里没有的说法[1]", verdict="correct", grounded=False),
+        result("b", answer="老实的答案[1]", verdict="correct", grounded=True),
+    ]
+    m = run.score(results, cases)
+    assert m["无据陈述率"] == 50.0
+
+
+def test_space_and_corpus_are_part_of_the_archived_config():
+    """结果档案里必须看得出这一轮跑的是哪个空间。
+
+    没有它，两轮只差空间的结果存出来一模一样，而 `--compare` 会把
+    两个不同的题集当成同一个题集比大小。
+    """
+    assert run.Config().resolved()["space"] == run.DEFAULT_SPACE
+    assert run.Config(space="enterprise_web").resolved()["space"] == "enterprise_web"
