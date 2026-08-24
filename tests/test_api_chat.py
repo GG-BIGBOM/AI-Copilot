@@ -116,6 +116,56 @@ async def test_no_answer_is_not_stored_with_citations(
     assert rows and all(c is None for c in rows), f"落库的引用没清干净：{rows}"
 
 
+async def test_only_the_sources_the_answer_cites_are_shown(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch, maker
+):
+    """来源清单只列**正文引用过**的那几条。
+
+    ⭐ 线上台账里的样子：一条走方案流程的会话，连「你好」「好的谢谢」都挂着
+    **21 条来源**——出方案那条路大范围检索，而方案正文一个 `[n]` 都不写。
+    用户看到「来源 · 21」，点开全是和这句话无关的文档。
+    来源清单是给人溯源用的，不是"这一轮检索到了什么"的日志。
+    """
+    from copilot.api import providers
+
+    # 一段没有任何 [n] 的答案（方案 / 常识 / 寒暄都是这个形状）
+    monkeypatch.setattr(providers, "get_llm", lambda: FakeLLM("按你的情况，建议这样配置：先接入店铺。"))
+
+    _, body = public_chunk
+    r = await ask(api_client, body)
+
+    assert not [p for p in parts(r.text) if p["type"] == "data-citations"], (
+        "正文一个 [n] 都没写，却挂了来源"
+    )
+    async with maker() as s:
+        rows = list(
+            (
+                await s.execute(
+                    select(Message.citations)
+                    .join(Conversation, Message.conversation_id == Conversation.id)
+                    .where(Conversation.user_id == logged_in, Message.role == "assistant")
+                )
+            ).scalars()
+        )
+    assert rows and all(c is None for c in rows), f"落库的来源没清干净：{rows}"
+
+
+def test_cited_only_keeps_the_original_numbers():
+    """只留引用过的，**但不重新编号**。
+
+    重编就得连正文一起改，而正文已经流给用户了——两边对不上的表现是
+    用户点 `[3]` 跳到另一篇，比编号不连续糟得多。
+    """
+    from copilot.qa import cited_only
+
+    cites = [{"n": 1, "title": "甲"}, {"n": 2, "title": "乙"}, {"n": 3, "title": "丙"}]
+    assert [c["n"] for c in cited_only("只引了第三条 [3]。", cites)] == [3]
+    assert [c["n"] for c in cited_only("引了 [1] 和 [3]。", cites)] == [1, 3]
+    assert cited_only("一个引用都没有的方案正文。", cites) == []
+    # 编号超出清单时不该炸，也不该凭空造一条
+    assert cited_only("引了 [9]。", cites) == []
+
+
 # ---------- 会话历史 ----------
 
 

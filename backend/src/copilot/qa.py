@@ -55,6 +55,8 @@ NO_ANSWER = "知识库暂无此内容。"
 
 # 答案里的引用标记 `[1]`、`[2]`。用来区分「拒答」和「答了一部分、并说明另一部分没有」
 _CITE_MARK_RE = re.compile(r"\[\d{1,2}\]")
+# 同一个标记，但要取出编号本身（`cited_only` 用）
+_CITE_NUM_RE = re.compile(r"\[(\d{1,2})\]")
 
 # ─────────────────────────────────────────────────────────
 # 招呼语 / 寒暄
@@ -668,6 +670,27 @@ def is_no_answer(text: str) -> bool:
         return False
     at = body.find(needle)
     return 0 <= at <= _NO_ANSWER_PREFACE_MAX
+
+
+def cited_only(answer: str, citations: list[dict]) -> list[dict]:
+    """只留正文里 `[n]` 真的引用过的那几条来源。
+
+    ⭐ **来源清单是给人溯源用的，不是"这一轮检索到了什么"的日志。**
+    在此之前，挂出去的是这一轮召回/累积的全部材料。生产台账上的样子：
+    一条走方案流程的会话里，**连「你好」「好的谢谢」都挂着 21 条来源**
+    （`chunk_count=21`，`answer_source=tool`）——因为出方案那条路会大范围
+    检索，而方案正文一个 `[n]` 都不写。用户看到的是「来源 · 21」，
+    点开全是和这句话毫无关系的文档。
+
+    正文一个 `[n]` 都没有时返回空：方案、常识回答（M12 规定不标来源编号）、
+    寒暄本来就没有可溯源的东西可挂。
+
+    ⚠️ **不重新编号。** `[3]` 留着叫 3，哪怕清单里只剩它一条。
+    重编就得同时改正文，而正文已经流给用户了——两边对不上的表现是
+    用户点 `[3]` 跳到另一篇，比编号不连续糟得多。
+    """
+    used = {int(n) for n in _CITE_NUM_RE.findall(answer or "")}
+    return [c for c in citations or [] if c.get("n") in used]
 
 
 @dataclass(slots=True)

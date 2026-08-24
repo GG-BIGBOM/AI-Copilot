@@ -51,7 +51,14 @@ from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
 from copilot.db.models import Conversation, Message, RequestTrace
 from copilot.db.session import SessionLocal
-from copilot.qa import DEFAULT_MODE, HISTORY_TURNS, ask_stream, is_no_answer, small_talk_reply
+from copilot.qa import (
+    DEFAULT_MODE,
+    HISTORY_TURNS,
+    ask_stream,
+    cited_only,
+    is_no_answer,
+    small_talk_reply,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -190,8 +197,10 @@ class _AnswerWriter:
         if final:
             self.row.citations = citations or None
             # 图片跟着答案一起存，否则重新载入历史时 [图1] 会变成裸标记。
-            # 没有引用就没有图——那种情况下正文里根本不会出现 [图N]
-            self.row.images = (images or None) if citations else None
+            # ⚠️ **图片不再挂在 `citations` 上**（2026-08-24）：来源清单现在只列
+            # 正文引用过的那几条，可能是空的，而"来源为空"和"这一轮没有图"
+            # 是两件事。该不该有图由调用方判（拒答就没有），这里只管存
+            self.row.images = images or None
         await self.session.commit()
         self._last = time.monotonic()
 
@@ -318,13 +327,22 @@ async def _chat_stream(
                 text_open = False
 
             answer = "".join(buf)
-            # ⚠️ 见文件头第 1 条：说了"不知道"就不能挂来源
-            shown = [] if is_no_answer(answer) else [c.to_dict() for c in citations]
+            # ⚠️ 见文件头第 1 条：说了"不知道"就不能挂来源。
+            # 第二道：**只挂正文真的引用过的那几条**（见 `qa.cited_only`）——
+            # 来源清单是给人溯源用的，不是"这一轮检索到了什么"的日志
+            refused = is_no_answer(answer)
+            shown = [] if refused else cited_only(answer, [c.to_dict() for c in citations])
             if shown:
                 yield stream.data_part("citations", {"citations": shown})
 
             await writer.write(
-                answer, final=True, citations=shown, images=streamed.images
+                answer,
+                final=True,
+                citations=shown,
+                # ⚠️ 配图跟的是**拒没拒答**，不是"来源清单剩几条"。
+                # 挂在 `shown` 上的话，一段引用了材料却忘了写 `[n]` 的答案
+                # 会连图一起丢掉——而它的 [图1] 已经流给用户了
+                images=[] if refused else streamed.images,
             )
 
             # 记账。算的是「送进去的 + 吐出来的」——**上下文才是大头**
@@ -456,8 +474,12 @@ async def _agent_stream(
             if deps.images and not deps.images_sent:
                 yield stream.data_part("images", {"images": deps.images})
 
-            # ⚠️ 同直路：说了"不知道"就不能挂来源
-            shown = [] if is_no_answer(answer) else deps.citations
+            # ⚠️ 同直路：说了"不知道"就不能挂来源，且只挂正文引用过的那几条。
+            # ⭐ 这条路上第二道尤其要紧：出方案会大范围检索（线上量到 21 块），
+            # 而方案正文一个 `[n]` 都不写——在此之前，同一条会话里连「你好」
+            # 都挂着 21 条来源
+            refused = is_no_answer(answer)
+            shown = [] if refused else cited_only(answer, deps.citations)
             if shown:
                 yield stream.data_part("citations", {"citations": shown})
             if deps.download_url:
@@ -474,7 +496,12 @@ async def _agent_stream(
                 conv.checklist = deps.checklist.model_dump()
             if deps.download_url:
                 conv.export_path = f"{user_id}/{conv.id}.xlsx"
-            await writer.write(answer, final=True, citations=shown, images=deps.images)
+            await writer.write(
+                answer,
+                final=True,
+                citations=shown,
+                images=[] if refused else deps.images,
+            )
             # ⚠️ 再提交一次。`writer.write` 在正文为空时会直接返回**不提交**，
             # 而上面那几行对 `conv` 的改动一个都不能丢——尤其是 `profile`：
             # 它是「这条会话在走 Agent」的标记，丢了下一轮就掉回直路，对话散掉。
