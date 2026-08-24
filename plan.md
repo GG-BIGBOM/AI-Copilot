@@ -683,6 +683,23 @@ DOCX/PPTX 里解出嵌图，同一条链路会把别人的私有截图挂在一�
 生产影响：期间没有任何上传成功过，库里也没留下半截数据
 （`documents.knowledge_space_id IS NULL` 为 0 行，事务整个回滚了）。
 
+**上线后在生产上真的走了一遍**（造一份带两张图的 docx，走真实 HTTP 接口，
+用完连文档一起删掉）：
+
+| 步骤 | 结果 |
+|---|---|
+| `POST /api/documents` | **201**（不再 500） |
+| worker 解析 | `done`，1 块，知识版本非空 |
+| 嵌图 → `image_assets` | 2 行，`owner_id` 非空 |
+| 图片文件落在哪 | `data/private-images/…`（**不是** nginx 直发的 `data/images/`） |
+| 块里的图片地址 | `asset://b6/…png`（不是可直发的路径） |
+| `GET /api/images/{id}` | 本人 **200 image/png**，匿名 **404** |
+| `DELETE /api/documents/{id}` | 行、块、资产、**磁盘上的私有图文件**一起没了 |
+
+那两个孤儿文件也清掉了（`data/uploads` 与 `data/private-images` 现在都是 0 个
+文件，`documents` 里 upload 类型 0 行）。⚠️ **用户那两份文档要自己重新传一次**
+——孤儿文件在库里没有任何一行指向它们，不是能"恢复"的东西。
+
 ### 部署记录 — M14-B / M15-A / M16 / M17 上线（2026-08-23）
 
 `deploy/deploy.sh` 一次走完，公网验收 4 条全 200，备份体检通过。
