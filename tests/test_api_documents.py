@@ -21,7 +21,7 @@ from sqlalchemy import delete, select
 
 from copilot.auth.invites import create_invite_codes
 from copilot.config import get_settings
-from copilot.db.models import Chunk, Document, InviteCode, Job, User
+from copilot.db.models import Chunk, Document, InviteCode, Job, KnowledgeSpace, User
 
 PASSWORD = "test-password-2026"
 MD = ("面单手册.md", "# 面单设置\n\n先绑定物流账号，再选择模板打印。".encode(), "text/markdown")
@@ -341,3 +341,53 @@ async def test_cannot_delete_public_document(api_client, alice, public_doc, make
 
 async def test_delete_unknown_id_is_404(api_client, alice):
     assert (await api_client.delete(f"/api/documents/{uuid.uuid4()}")).status_code == 404
+
+
+async def test_an_upload_lands_in_a_space(api_client, alice, maker, no_space_filler):
+    """⭐⭐ 上传路径**自己**要写 `knowledge_space_id`，不许靠别人补。
+
+    2026-08-24 线上事故：M14-A 把这一列加成 NOT NULL，而这条路径一直没写它
+    ——上传接口从那天起每一次都 500，用户看到「服务端出错了，请稍后重试」。
+    全套测试当时是绿的，因为 conftest 那个填充器替生产代码补上了值。
+
+    所以这条测试**摘掉填充器**（`no_space_filler`）：它验的是真代码写进去的
+    那个值，不是夹具补出来的。
+    """
+    body = "# 面单\n\n先绑定物流账号再打印。".encode()
+    doc_id = (
+        await _upload(api_client, name="带空间的手册.md", content=body)
+    ).json()["document"]["id"]
+
+    async with maker() as s:
+        doc = await s.get(Document, uuid.UUID(doc_id))
+        assert doc.knowledge_space_id is not None, "上传的文档没有知识版本——检索里它是搜不到的"
+        space = await s.get(KnowledgeSpace, doc.knowledge_space_id)
+        assert space.code == "flagship", f"落在了 {space.code}，而上传页今天只有旗舰版"
+
+
+async def test_a_failed_upload_does_not_leave_the_file_behind(
+    api_client, alice, maker, monkeypatch
+):
+    """⭐ 写库失败时，刚落盘的那份文件要跟着走。
+
+    文件在建行**之前**就写下去了（边读边写，不占内存），所以事务回滚只回滚
+    数据库。2026-08-24 上传 500 那次就留下了两个孤儿文件：库里没有任何一行
+    指向它们，40G 的磁盘上慢慢积，而没有任何地方看得出来。
+    """
+    from copilot.api.routes import docs as docs_module
+
+    async def boom(*a, **kw):
+        raise RuntimeError("写库炸了")
+
+    before = {p for p in (get_settings().upload_dir / str(alice)).glob("*")} if (
+        get_settings().upload_dir / str(alice)
+    ).exists() else set()
+
+    monkeypatch.setattr(docs_module.queue, "enqueue", boom)
+    r = await _upload(api_client, name="会失败的文档.md", content=b"# boom\n\nthis will fail")
+    assert r.status_code == 500
+
+    after = {p for p in (get_settings().upload_dir / str(alice)).glob("*")} if (
+        get_settings().upload_dir / str(alice)
+    ).exists() else set()
+    assert after == before, f"失败的上传留下了孤儿文件：{after - before}"

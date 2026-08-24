@@ -257,3 +257,30 @@ async def logged_in(api_client, maker):
         await s.execute(delete(InviteCode).where(InviteCode.code == code))
         await s.execute(delete(User).where(User.id == user_id))
         await s.commit()
+
+
+@pytest.fixture
+def no_space_filler():
+    """临时摘掉上面那个自动补 flagship 的填充器。
+
+    ⭐⭐ **给「验证生产代码自己写了知识版本」的测试用。**
+
+    填充器省掉了二十几处夹具的手写空间，代价写在它自己的注释里：
+    **生产代码忘了传空间，测试也不会红**。2026-08-24 这个代价真的兑现了——
+    上传接口从 M14-A 上线起每一次都 500（`documents.knowledge_space_id`
+    是 NOT NULL，而那条路径从来没写过它），而全套测试一直是绿的，
+    因为填充器替它补上了。
+
+    所以凡是「这条写入路径自己必须写空间」的断言，都要挂上这个夹具。
+    """
+    from sqlalchemy import event as _event
+
+    _event.remove(Document, "before_insert", _fill_space)
+    _event.remove(Chunk, "before_insert", _fill_space)
+    _event.remove(Conversation, "before_insert", _fill_space)
+    try:
+        yield
+    finally:
+        _event.listen(Document, "before_insert", _fill_space, propagate=True)
+        _event.listen(Chunk, "before_insert", _fill_space, propagate=True)
+        _event.listen(Conversation, "before_insert", _fill_space, propagate=True)

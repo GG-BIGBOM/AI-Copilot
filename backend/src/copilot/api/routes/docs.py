@@ -33,7 +33,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import delete, desc, func, select
 
-from copilot import assets
+from copilot import assets, spaces
 from copilot.api.schemas import DocumentOut, UploadResult
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
@@ -139,6 +139,22 @@ async def upload_document(
             f"文档数已达上限（{s.upload_max_docs_per_user} 份），请先删掉一些",
         )
 
+    # ⭐⭐ **知识版本要在建行之前先取好。**
+    #
+    # 2026-08-24 线上事故：M14-A 把 `documents.knowledge_space_id` 加成了
+    # NOT NULL，而这条上传路径一直没写它——上传接口从那天起**每一次都 500**
+    # （NotNullViolation），用户看到的是「服务端出错了，请稍后重试」。
+    #
+    # ⚠️ 修的时候差点踩第二个坑：把 `await spaces.default_id(session)` 放在
+    # `session.add(doc)` 之后、字段赋值之前，那句 await 会触发 **autoflush**，
+    # 把一个 title 还没填的半截 Document 刷进库，报错变成
+    # 「null value in column "title"」——看起来像另一个 bug。
+    # **在 ORM 里，一次 await 不是无害的。** 先查完再建行。
+    #
+    # 用默认空间（旗舰版）：上传页今天没有版本选择器，M18 导入企业版语料时
+    # 才会有。到那时这里改成「跟着用户当前选的版本走」。
+    space_id = await spaces.default_id(session)
+
     # 相对 upload_dir 的路径，库里存的就是这个（见 Settings.upload_path）
     rel = f"{user.id}/{uuid.uuid4().hex}{suffix}"
     size, digest = await _spool_to_disk(file, s.upload_path(rel))
@@ -163,7 +179,16 @@ async def upload_document(
         _remove_file(existing.stored_path)
         doc = existing
     else:
-        doc = Document(owner_id=user.id, source_type="upload")
+        doc = Document(
+            owner_id=user.id,
+            source_type="upload",
+            # ⚠️ 见上面那段：这一列是 NOT NULL，漏写就是每次上传都 500。
+            # **测试没抓到**是因为 conftest 那个自动补 flagship 的填充器
+            # （`_fill_space`）替生产代码补上了值——它自己的注释里早写着这个
+            # 风险。现在有一条摘掉填充器的断言守着：
+            # `test_api_documents.py::test_an_upload_lands_in_a_space`
+            knowledge_space_id=space_id,
+        )
         session.add(doc)
 
     doc.title = _clean_title(file.filename, fallback=f"上传文档 {digest[:8]}")
@@ -176,12 +201,22 @@ async def upload_document(
     doc.status = "pending"
     doc.error = None
     doc.chunk_count = 0
-    await session.flush()
 
-    # ⭐ 文档行和任务行必须一起提交。分开的话，「文档建好了、任务没入队」
-    # 就是一篇永远停在「排队中」、永远没人来解析的文档
-    await queue.enqueue(session, queue.PARSE_UPLOAD, queue.document_payload(doc.id))
-    await session.commit()
+    # ⭐ **写库失败要把刚落盘的文件带走。**
+    # 文件是在建行之前就写下去的（边读边写，不占内存），所以一旦这里失败，
+    # 事务回滚只回滚数据库——那个文件会永远躺在 data/uploads 下面，
+    # 库里没有任何一行指向它。2026-08-24 那次上传 500 就留下了两个这样的
+    # 孤儿：40G 的磁盘上慢慢积，而没有任何地方看得出来。
+    try:
+        await session.flush()
+        # ⭐ 文档行和任务行必须一起提交。分开的话，「文档建好了、任务没入队」
+        # 就是一篇永远停在「排队中」、永远没人来解析的文档
+        await queue.enqueue(session, queue.PARSE_UPLOAD, queue.document_payload(doc.id))
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        _remove_file(rel)
+        raise
 
     # ⚠️ 必须 refresh。`updated_at` 是 `onupdate=func.now()`——值由数据库算，
     # 提交后这个属性处于过期状态，序列化时一读就触发一次隐式 IO，

@@ -27,7 +27,7 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from copilot import assets
+from copilot import assets, spaces
 from copilot.config import get_settings
 from copilot.db.models import Chunk as ChunkRow
 from copilot.db.models import Document
@@ -100,6 +100,7 @@ async def ingest_documents(
     owner_id: uuid.UUID | None = None,
     force: bool = False,
     report: Reporter | None = None,
+    space_id: uuid.UUID | None = None,
 ) -> IngestStats:
     """把一批文档切分、向量化、写库。
 
@@ -115,7 +116,7 @@ async def ingest_documents(
 
     for i, src in enumerate(docs, 1):
         try:
-            n = await _ingest_one(session, src, embedder, owner_id, force, settings)
+            n = await _ingest_one(session, src, embedder, owner_id, force, settings, space_id)
         except Exception as e:  # noqa: BLE001 - 单篇失败不能中断整批
             await session.rollback()
             stats.failed += 1
@@ -208,6 +209,7 @@ async def _ingest_one(
     owner_id: uuid.UUID | None,
     force: bool,
     settings,
+    space_id: uuid.UUID | None = None,
 ) -> int | None:
     """入库一篇。返回块数；返回 None 表示内容没变、已跳过。"""
     digest = src.content_hash
@@ -226,10 +228,23 @@ async def _ingest_one(
     if existing and existing.content_hash == digest and not force and existing.status == "done":
         return None
 
+    # ⚠️ 同上传那条路（`routes/docs.py`）：`knowledge_space_id` 是 NOT NULL，
+    # 不写就是每一次入库都 NotNullViolation。**在建行之前就取好**——
+    # 放到 `session.add()` 之后再 await，会触发 autoflush 把一个字段还没填全的
+    # Document 刷进库，报出来的是「title 不能为空」，指不到真正的原因。
+    # 默认给旗舰版：`copilot ingest` 灌的就是语雀那套旗舰版语料，
+    # 和 M14-A 的回填规则一致
+    if existing is None or existing.knowledge_space_id is None:
+        space_id = space_id or await spaces.default_id(session)
+
     if existing:
         doc = existing
+        if doc.knowledge_space_id is None:
+            doc.knowledge_space_id = space_id
     else:
-        doc = Document(owner_id=owner_id, source_type=src.source_type)
+        doc = Document(
+            owner_id=owner_id, source_type=src.source_type, knowledge_space_id=space_id
+        )
         session.add(doc)
 
     doc.title = src.title
