@@ -1,0 +1,114 @@
+# 和 deploy.sh 第 1 步（本机自检）跑的是同一批命令。
+# 两边任何一处改了检查项，另一处也要改——否则会出现「CI 绿、部署红」。
+#
+# ⚠️ 这里**不跑评测**。`eval/run.py --check` 要打 SiliconFlow 的 embedding
+# 接口、还要库里有语料，两样 CI 都没有。评测始终在本机跑，见 EVALUATION.md。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支上后推的 commit 顶掉前一次还没跑完的
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # ⭐ 必须是 pgvector 的镜像，不能用官方 postgres:16。
+        # 初始迁移里有 `CREATE EXTENSION IF NOT EXISTS vector`，
+        # 镜像里没装扩展的话这一句直接失败，而报错长得像迁移写错了
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: kb
+          POSTGRES_PASSWORD: kb
+          POSTGRES_DB: kb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://kb:kb@localhost:5432/kb
+      # 测试要能签发登录态。这是 CI 里的一次性值，和线上无关
+      JWT_SECRET: ci-only-not-a-real-secret
+      # 三方密钥一个都不给：测试全程用 chat_helpers.py 里的假 provider。
+      # 哪天有用例真去连网络，它会在这里当场变红——这正是要的
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # ⚠️ **别用 `uv sync --all-extras`**：它会连 parse-full 一起装，
+      # 那个 extra 带的是 docling → torch，几个 G，CI 上纯粹是浪费。
+      # 这三个 extra 才是测试真正 import 的：
+      #   parse  → docx / pptx / pypdf     agent → pydantic_ai     eval → yaml
+      - name: 装依赖
+        working-directory: backend
+        run: uv sync --extra parse --extra agent --extra eval
+
+      # ⚠️ **下面一律直接调 `.venv/bin/...`，不用 `uv run`**（deploy.sh 里
+      # 同样的坑，2026-08-23 踩过）。`uv run` 会先把环境同步回 pyproject 的
+      # 默认样子——带 dev 组、**不带 extra**——上一步装的三个 extra 当场被卸掉，
+      # 然后报 ModuleNotFoundError: docx / pydantic_ai，看起来像代码坏了
+      - name: 建表
+        working-directory: backend
+        run: .venv/bin/alembic upgrade head
+
+      - name: ruff
+        working-directory: backend
+        run: .venv/bin/ruff check .
+
+      - name: pytest
+        working-directory: backend
+        run: .venv/bin/pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # ⭐ 必须 24。`npm test` 是 `node --test lib/*.test.ts`，
+          # 直接喂 TypeScript 给 node 跑，靠的是内置的类型擦除。
+          # 22 以下不认 .ts，报的是一句看不懂的语法错误
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 装依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 单测
+        working-directory: frontend
+        run: npm test
+
+      - name: lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: 类型检查
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      # 构建也在 CI 里跑一次。线上产物是本机构建后传上去的（服务器 1.6G
+      # 内存跑 next build 必 OOM，见 OPERATIONS.md），所以「构建能不能过」
+      # 在真正部署之前没有任何地方验过——这里是唯一的一道
+      - name: 构建
+        working-directory: frontend
+        run: npm run build

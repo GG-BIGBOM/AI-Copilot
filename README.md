@@ -1,6 +1,8 @@
-# 旺店通旗舰版 ERP 知识库 Agent
+# AI Copilot
 
-公网上线中：<https://liushun666.cn/>
+[![CI](https://github.com/GG-BIGBOM/AI-Copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/GG-BIGBOM/AI-Copilot/actions/workflows/ci.yml)
+
+**旺店通旗舰版 ERP 的知识库 Agent。** 公网上线中：<https://liushun666.cn/>
 
 一个带引用的 ERP 知识库问答助手。用户注册登录后提问，答案逐句标注来源、
 带上原文档的操作截图，来源可点击跳回语雀原文；也可以上传自己的文档，
