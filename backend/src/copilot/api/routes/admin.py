@@ -61,6 +61,7 @@ from copilot.db.models import (
     AnswerCorrection,
     Conversation,
     Document,
+    ImageAsset,
     Job,
     KnowledgeSpace,
     Message,
@@ -698,6 +699,11 @@ class CorrectionDetail(CorrectionRow):
     trace_id: uuid.UUID | None
     message_id: uuid.UUID | None
     markdown: str
+    # 提交人贴在修正稿里的截图（M17.1）。
+    # ⚠️ **`public` 这一列不是装饰**：发布会把这些私有截图变成**全站可见**，
+    # 而审核界面必须在按下发布之前就说清楚这件事——一个人截图里可能有
+    # 客户名、订单号、他自己的后台账号
+    images: list[dict]
 
 
 class CorrectionPage(BaseModel):
@@ -840,6 +846,15 @@ async def _detail(session, c: AnswerCorrection) -> CorrectionDetail:
     )
     spaces = await _space_codes(session, {c.knowledge_space_id} if c.knowledge_space_id else set())
     base = _row(c, email, spaces.get(c.knowledge_space_id))
+    shots = list(
+        (
+            await session.execute(
+                select(ImageAsset)
+                .where(ImageAsset.correction_id == c.id)
+                .order_by(ImageAsset.created_at)
+            )
+        ).scalars()
+    )
     return CorrectionDetail(
         **base.model_dump(),
         original_answer=c.original_answer,
@@ -850,6 +865,16 @@ async def _detail(session, c: AnswerCorrection) -> CorrectionDetail:
         trace_id=c.trace_id,
         message_id=c.message_id,
         markdown=flow.snapshot_markdown(c, submitted_by=email),
+        images=[
+            {
+                "id": str(a.id),
+                "url": f"/api/images/{a.id}",
+                # 已经是公共图 = 这条纠错发布过了。审核界面据此把
+                # 「发布后所有人可见」那句提示收起来——已经发生的事不用再警告
+                "public": a.owner_id is None,
+            }
+            for a in shots
+        ],
     )
 
 

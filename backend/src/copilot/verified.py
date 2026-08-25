@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from copilot import assets
 from copilot import corrections_flow as flow
 from copilot.db.models import (
     AnswerCorrection,
@@ -156,6 +157,18 @@ async def publish_correction(
     """
     flow.check_transition(correction.status, flow.PUBLISHED)
 
+    # ⭐ 纠错里贴的截图在这里从私有变成公共（M17.1 P1），正文里的地址跟着换。
+    # **不换的后果是无声的**：`/api/images/{id}` 不是 `assets.storage_path_of()`
+    # 认识的形状，切块时那张图配不出资产行，检索层"换不成就丢掉"的规则会把它
+    # 直接丢掉——发布说成功了，答案里却没有图，而没有任何一处报错。
+    #
+    # ⚠️⚠️ **必须在 `session.add(row)` 之前做完。** 它里面有 await，而在 ORM 里
+    # **一次 await 不是无害的**：autoflush 会把一个 `answer` 还没填的半截
+    # VerifiedAnswer 刷进库，报出来的是「answer 不能为空」——一个指不到真正
+    # 原因的错误。2026-08-24 上传那条路刚踩过同一个坑（见「线上事故」那节），
+    # 这里第一版又踩了一次。**先查完，再建行。**
+    public_urls = await assets.publish_correction_images(session, correction.id)
+
     question = " ".join(correction.original_question.split())[:1024]
     row = (
         await session.execute(
@@ -174,7 +187,10 @@ async def publish_correction(
         )
         session.add(row)
 
-    row.answer = correction.corrected_answer_markdown.strip()
+    answer = correction.corrected_answer_markdown.strip()
+    for private_url, public_url in public_urls.items():
+        answer = answer.replace(private_url, public_url)
+    row.answer = answer
     row.author_id = correction.submitted_by  # 内容是提交人写的，署他的名
     row.status = ACTIVE
     row.source_correction_id = correction.id

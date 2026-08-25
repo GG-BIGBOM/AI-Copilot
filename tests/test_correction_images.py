@@ -19,8 +19,19 @@ import pytest
 from sqlalchemy import delete, select
 
 from copilot import assets
+from copilot.auth.security import create_access_token
 from copilot.config import get_settings
-from copilot.db.models import AnswerCorrection, Conversation, ImageAsset, Message, User
+from copilot.db.models import (
+    AnswerCorrection,
+    Chunk,
+    Conversation,
+    Document,
+    ImageAsset,
+    Message,
+    User,
+    VerifiedAnswer,
+    VerifiedAnswerRevision,
+)
 
 # 一张真的 1x1 PNG（不是"看起来像"的字节串——魔数校验认的就是这几个字节）
 PNG = bytes.fromhex(
@@ -315,3 +326,236 @@ async def test_uploading_the_same_screenshot_twice_reuses_the_row(
     first = (await upload(api_client)).json()
     again = (await upload(api_client)).json()
     assert first["id"] == again["id"]
+
+
+# ─────────── 5. 发布：私有截图在这一刻变成公共图 ───────────
+
+
+@pytest.fixture
+async def admin_headers(maker):
+    email = f"root-{uuid.uuid4().hex[:8]}@test.local"
+    async with maker() as s:
+        u = User(email=email, password_hash="x", is_active=True, is_admin=True)
+        s.add(u)
+        await s.commit()
+        token, admin_id = create_access_token(u.id), u.id
+
+    yield {"Authorization": f"Bearer {token}"}
+
+    async with maker() as s:
+        await s.execute(delete(User).where(User.id == admin_id))
+        await s.commit()
+
+
+@pytest.fixture
+async def scrub_verified(maker):
+    """把发布出来的标准答案连同它的索引文档一起删掉。"""
+    yield
+    async with maker() as s:
+        for d in list(
+            (
+                await s.execute(select(Document).where(Document.source_type == "verified"))
+            ).scalars()
+        ):
+            await s.execute(delete(ImageAsset).where(ImageAsset.document_id == d.id))
+            await s.execute(delete(Chunk).where(Chunk.document_id == d.id))
+            await s.delete(d)
+        await s.execute(delete(VerifiedAnswerRevision))
+        await s.execute(delete(VerifiedAnswer))
+        await s.commit()
+
+
+async def publish(api_client, headers, correction_id) -> dict:
+    # ⚠️ **cookie 优先于 Authorization 头**（`auth/deps.extract_token`）。
+    # 不清掉 cookie 的话，带着管理员 token 的请求仍然会被认成刚才那个
+    # 普通用户，403——而报错看起来像"管理员守卫写错了"
+    api_client.cookies.clear()
+    r = await api_client.post(
+        f"/api/admin/corrections/{correction_id}/review",
+        json={"decision": "approve"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    r = await api_client.post(
+        f"/api/admin/corrections/{correction_id}/publish", json={}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_publishing_makes_the_screenshot_public(
+    api_client, logged_in, answered, admin_headers, scrub_images, scrub_verified,
+    fake_providers, maker,
+):
+    """⚠️⚠️ **发布 = 把一个人的私有截图变成全站可见。**
+
+    标准答案是公共的（它要盖住所有人的错误答案），那么它的配图也必须是——
+    一张只有本人能取的图挂在一条人人都会读到的答案里，
+    表现是**所有其他人看到一个裂图**。
+
+    两件事缺一不可：文件搬到公共目录、`owner_id` 改成 None。
+    只做一件的表现都是"图裂了"，而且都不报错。
+    """
+    shot = (await upload(api_client)).json()
+    r = await submit(api_client, answered, f"正确的做法：\n\n{shot['markdown']}")
+    correction_id = r.json()["id"]
+
+    out = await publish(api_client, admin_headers, correction_id)
+    assert out["applied"] is True
+
+    async with maker() as s:
+        row = await s.get(ImageAsset, uuid.UUID(shot["id"]))
+        answer = (await s.execute(select(VerifiedAnswer.answer))).scalars().first()
+
+    assert row.owner_id is None, "还是私有图——别人读这条标准答案时会看到裂图"
+    assert assets.absolute_path(row.storage_path, private=False).is_file(), "文件没搬到公共目录"
+    assert not assets.absolute_path(row.storage_path, private=True).exists(), "私有目录里还留着一份"
+
+    # ⭐ 正文里的地址也要跟着换。`/api/images/{id}` 不是 `storage_path_of()`
+    # 认识的形状，留着它的话切块时配不出资产行，检索层会把这张图直接丢掉
+    assert f"/api/images/{shot['id']}" not in answer
+    assert f"/images/{row.storage_path}" in answer
+
+
+async def test_the_published_image_is_readable_by_anyone(
+    api_client, logged_in, answered, admin_headers, scrub_images, scrub_verified,
+    fake_providers, maker,
+):
+    """发布之后，没登录的人也该取得到这张图——那正是"公共"的意思。"""
+    shot = (await upload(api_client)).json()
+    r = await submit(api_client, answered, f"看这里：\n\n{shot['markdown']}")
+    await publish(api_client, admin_headers, r.json()["id"])
+
+    api_client.cookies.clear()
+    got = await api_client.get(f"/api/images/{shot['id']}")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/png"
+
+
+async def test_the_verified_chunk_carries_the_image(
+    api_client, logged_in, answered, admin_headers, scrub_images, scrub_verified,
+    fake_providers, maker,
+):
+    """图要真的进到索引块里，否则答案发出去是没有配图的。"""
+    shot = (await upload(api_client)).json()
+    r = await submit(api_client, answered, f"看这里：\n\n{shot['markdown']}")
+    await publish(api_client, admin_headers, r.json()["id"])
+
+    async with maker() as s:
+        doc = (
+            await s.execute(select(Document).where(Document.source_type == "verified"))
+        ).scalars().first()
+        chunks = list(
+            (await s.execute(select(Chunk).where(Chunk.document_id == doc.id))).scalars()
+        )
+    urls = [img["url"] for c in chunks for img in (c.images or [])]
+    assert urls, "块上一张图都没有——发布出去的答案不会有配图"
+    assert all(u.startswith("/images/") for u in urls), urls
+
+
+async def test_a_rejected_correction_keeps_its_screenshot_private(
+    api_client, logged_in, answered, admin_headers, scrub_images, maker
+):
+    """没发布就不该动它的归属。审核不通过的稿子里那张图仍然只有本人能看。"""
+    shot = (await upload(api_client)).json()
+    r = await submit(api_client, answered, f"看这里：\n\n{shot['markdown']}")
+    cid = r.json()["id"]
+
+    api_client.cookies.clear()  # 同 `publish()`：cookie 优先于 Bearer
+    rejected = await api_client.post(
+        f"/api/admin/corrections/{cid}/review",
+        json={"decision": "reject", "note": "不对"},
+        headers=admin_headers,
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    async with maker() as s:
+        row = await s.get(ImageAsset, uuid.UUID(shot["id"]))
+    assert row.owner_id == logged_in
+    assert assets.absolute_path(row.storage_path, private=True).is_file()
+
+
+async def test_a_second_correction_on_the_same_question_publishes_its_own_image(
+    api_client, logged_in, answered, admin_headers, scrub_images, scrub_verified,
+    fake_providers, maker,
+):
+    """同一个问题发第二版：新的截图也要变成公共图，标准答案是改它 + 加一版。
+
+    ⚠️ 同一张图**不能**跨纠错复用（绑定那一层会 400），所以第二版换一张图——
+    这也正是真实用法：改稿时截了一张新图。
+    """
+    from copilot.config import get_settings as _settings
+
+    cookie_name = _settings().cookie_name
+    user_cookie = api_client.cookies.get(cookie_name)
+
+    first_shot = (await upload(api_client)).json()
+    first = await submit(api_client, answered, f"第一版：\n\n{first_shot['markdown']}")
+    await publish(api_client, admin_headers, first.json()["id"])
+
+    api_client.cookies.set(cookie_name, user_cookie)  # 换回本人再提交第二版
+    second_shot = (await upload(api_client, data=PNG + b"\x01")).json()
+    second = await submit(api_client, answered, f"第二版：\n\n{second_shot['markdown']}")
+    assert second.status_code == 201, second.text
+    out = await publish(api_client, admin_headers, second.json()["id"])
+    assert out["applied"] is True
+
+    async with maker() as s:
+        rows = list(
+            (
+                await s.execute(select(VerifiedAnswer).order_by(VerifiedAnswer.version.desc()))
+            ).scalars()
+        )
+        newest = await s.get(ImageAsset, uuid.UUID(second_shot["id"]))
+    assert len(rows) == 1 and rows[0].version == 2, "同一个问题该是改它 + 加一版，不是再插一条"
+    assert newest.owner_id is None
+    assert assets.absolute_path(newest.storage_path, private=False).is_file()
+
+
+async def test_reusing_an_image_across_corrections_is_refused(
+    api_client, logged_in, answered, scrub_images
+):
+    """一张图只能挂在一条纠错上。
+
+    允许复用的话，删掉其中一条纠错会把另一条的图一起带走（外键级联），
+    而那条纠错的审核界面上会突然少一张图。
+    """
+    shot = (await upload(api_client)).json()
+    first = await submit(api_client, answered, f"第一版：\n\n{shot['markdown']}")
+    assert first.status_code == 201, first.text
+
+    again = await submit(api_client, answered, f"另一条：\n\n{shot['markdown']}")
+    assert again.status_code == 400
+    assert "另一条纠错" in again.json()["detail"]
+
+
+async def test_the_review_screen_can_see_the_screenshots_and_whether_they_are_public(
+    api_client, logged_in, answered, admin_headers, scrub_images, scrub_verified,
+    fake_providers, maker,
+):
+    """审核界面要拿得到这些截图，并且看得出「发布之后会不会变成公开」。
+
+    ⚠️ **这不是装饰**：一个人截图里可能有客户名、订单号、他自己的后台账号。
+    发布会把它变成全站可见——审核的人必须在按下那个按钮**之前**知道这件事。
+    """
+    from copilot.config import get_settings as _settings
+
+    cookie_name = _settings().cookie_name
+    user_cookie = api_client.cookies.get(cookie_name)
+
+    shot = (await upload(api_client)).json()
+    r = await submit(api_client, answered, f"看这里：\n\n{shot['markdown']}")
+    cid = r.json()["id"]
+
+    api_client.cookies.clear()
+    detail = await api_client.get(f"/api/admin/corrections/{cid}", headers=admin_headers)
+    assert detail.status_code == 200, detail.text
+    images = detail.json()["images"]
+    assert [i["id"] for i in images] == [shot["id"]]
+    assert images[0]["public"] is False, "还没发布就说成公开的，审核的人会以为已经泄漏了"
+
+    api_client.cookies.set(cookie_name, user_cookie)
+    await publish(api_client, admin_headers, cid)
+
+    after = await api_client.get(f"/api/admin/corrections/{cid}", headers=admin_headers)
+    assert after.json()["images"][0]["public"] is True, "发布之后仍然显示私有，提示会一直挂着"

@@ -355,6 +355,13 @@ export type AdminCorrectionDetail = AdminCorrectionRow & {
   message_id: string | null;
   /** 审核快照。可以整段粘走、进 Git、拿两版做 diff */
   markdown: string;
+  /**
+   * 提交人贴在修正稿里的截图。
+   *
+   * ⚠️ `public=false` 时它还是**只有提交人自己能看的私有图**，发布会把它
+   * 变成全站可见——审核界面必须在按下发布之前说清楚这件事。
+   */
+  images: { id: string; url: string; public: boolean }[];
 };
 
 export type AdminCorrectionPage = {
@@ -362,6 +369,13 @@ export type AdminCorrectionPage = {
   limit: number;
   offset: number;
   items: AdminCorrectionRow[];
+};
+
+/** 纠错里贴的一张截图。`markdown` 直接插进光标处即可 */
+export type CorrectionImage = {
+  id: string;
+  url: string;
+  markdown: string;
 };
 
 export type PublishResult = {
@@ -442,7 +456,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * boundary，必须让浏览器自己生成。手写这个头的话，后端会因为找不到 boundary
  * 直接 422，而错误信息完全指不到这里。
  */
-async function upload(path: string, file: File): Promise<UploadResult> {
+async function upload<T = UploadResult>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file);
 
@@ -472,7 +486,7 @@ async function upload(path: string, file: File): Promise<UploadResult> {
       res.status,
     );
   }
-  return (await res.json()) as UploadResult;
+  return (await res.json()) as T;
 }
 
 export const api = {
@@ -617,6 +631,16 @@ export const api = {
     }),
 
   myCorrections: () => request<AnswerCorrection[]>("/api/answer-corrections/mine"),
+
+  /**
+   * 往纠错稿里贴一张截图。**先传、后绑**：提交那一刻服务端才把正文里
+   * 引用到的图挂到这条纠错上，没提交的那些由 `prune-images` 按时清掉。
+   *
+   * 返回的 `markdown` 直接插进光标处——格式不该由前端自己拼，
+   * 拼错一个感叹号，正文里出现的就是一段裸链接而不是一张图。
+   */
+  uploadCorrectionImage: (file: File) =>
+    upload<CorrectionImage>("/api/answer-corrections/images", file),
 
   withdrawCorrection: (id: string) =>
     request<AnswerCorrection>(`/api/answer-corrections/${id}`, {

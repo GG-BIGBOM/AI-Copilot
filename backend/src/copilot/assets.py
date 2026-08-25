@@ -228,6 +228,59 @@ class UploadImageSink:
 POSITION_FIELDS = ("page_number", "slide_number", "sheet_name", "anchor")
 
 
+async def publish_correction_images(session: AsyncSession, correction_id) -> dict[str, str]:
+    """把一条纠错里的私有截图**变成公共图**，返回 `/api/images/{id}` → 公共地址 的对照表。
+
+    ⚠️⚠️ **这一步是把一个人的私有截图变成全站可见的。** 它没有第二种可能：
+    标准答案是公共的（`owner_id=None`，它要盖住所有人的错误答案），
+    那么它的配图也必须是——一张只有本人能取的图挂在一条人人都会读到的
+    答案里，表现是**所有其他人看到一个裂图**。
+
+    所以这件事必须发生在**管理员按下"发布"的那一刻**，而且管理台上要明写
+    这句话（P2）。发布之前（pending / approved）截图一直是私有的。
+
+    做两件事，缺一不可：
+
+        搬文件   data/private-images/ab/x.png → data/images/ab/x.png
+        改归属   owner_id = None
+
+    ⚠️ **两件事的顺序不能反，也不能只做一件。** 只改 owner 不搬文件，
+    `/api/images/{id}` 会去公共目录找一个不存在的文件（图裂）；只搬文件不改
+    owner，鉴权那一句仍然只放行本人（还是裂）。而 `assets.root_for()` 的规则是
+    "路径由 owner 决定"——两者不一致本身就是个说不通的状态。
+
+    幂等：第二次发布（改了再发一版）时文件已经在公共目录、owner 已经是 None，
+    这里什么都不做。
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(ImageAsset).where(ImageAsset.correction_id == correction_id)
+            )
+        ).scalars()
+    )
+    mapping: dict[str, str] = {}
+    for row in rows:
+        mapping[f"{API_PREFIX}/{row.id}"] = f"{PUBLIC_PREFIX}/{row.storage_path}"
+        if row.owner_id is None:
+            continue  # 已经是公共图了（重复发布）
+        src = absolute_path(row.storage_path, private=True)
+        dest = absolute_path(row.storage_path, private=False)
+        if src.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            # 同 `store_bytes`：先写临时文件再改名，中途挂掉不会留下半张图
+            tmp = dest.with_suffix(dest.suffix + ".part")
+            tmp.write_bytes(src.read_bytes())
+            tmp.replace(dest)
+            src.unlink(missing_ok=True)
+        elif not dest.is_file():
+            # 两边都没有文件。不抛：发布不该因为一张丢失的截图整个失败，
+            # 但要留下痕迹——正文里那个引用会渲染成一个裂图，而不是无声无息
+            logger.warning("发布纠错 %s 时找不到截图文件：%s", correction_id, row.storage_path)
+        row.owner_id = None
+    return mapping
+
+
 async def sync_document_assets(
     session: AsyncSession,
     doc: Document,

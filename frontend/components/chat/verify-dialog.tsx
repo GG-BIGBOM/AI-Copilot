@@ -16,16 +16,34 @@
  *
  *   1. 把**现在这条回答**原样放进一个可编辑的框
  *   2. 收一句「哪里不对」——审核的人需要它，否则只能把两段文字读一遍自己猜
- *   3. 提交（带 traceId，原问答快照由服务端自己取）
- *   4. 回执里说清楚**这只是提交**
+ *   3. 让人贴截图（ERP 的操作步骤里，图往往就是那一步本身）
+ *   4. 提交（带 traceId，原问答快照由服务端自己取）
+ *   5. 回执里说清楚**这只是提交**
+ *
+ * ⚠️ **截图区的唯一事实来源是正文本身。** 缩略图是从草稿里的
+ * `/api/images/{id}` 现解出来的，删除就是把那段 Markdown 从正文里删掉——
+ * 单独存一份"我传过哪些图"的状态，迟早会和正文对不上：用户手动删掉一行
+ * 图片语法之后，缩略图还在，他以为图还会跟着提交。
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, Loader2 } from "lucide-react";
+import { Check, ImagePlus, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, API_BASE, ApiError } from "@/lib/api";
+
+/** 正文里一段图片语法：`![截图](/api/images/{uuid})` */
+const SHOT_RE = /!\[[^\]]*\]\((\/api\/images\/[0-9a-fA-F-]{36})\)/g;
+
+/** 草稿里现在引用着哪几张截图。**从正文解，不另存一份状态**（见文件头） */
+function shotsIn(draft: string): string[] {
+  const out: string[] = [];
+  for (const m of draft.matchAll(SHOT_RE)) {
+    if (!out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
 
 const POPUP =
   "fixed left-1/2 top-[8vh] z-[60] flex max-h-[84vh] w-[min(680px,calc(100vw-2rem))] " +
@@ -55,6 +73,46 @@ export function VerifyDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const shots = shotsIn(draft);
+
+  /** 把一段 Markdown 插到光标处（没有光标就接在末尾）。 */
+  function insertAtCursor(snippet: string) {
+    const el = textareaRef.current;
+    setDraft((current) => {
+      const at = el ? el.selectionStart : current.length;
+      const before = current.slice(0, at);
+      const after = current.slice(at);
+      // 前面补一个空行：图片语法贴在一段文字中间时不会单独成行，
+      // 渲染出来是一张挤在句子里的小图
+      const gap = before && !before.endsWith("\n\n") ? "\n\n" : "";
+      return `${before}${gap}${snippet}\n\n${after}`;
+    });
+  }
+
+  async function attach(file: File | null | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const shot = await api.uploadCorrectionImage(file);
+      insertAtCursor(shot.markdown);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "图片上传失败");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = ""; // 同一张图能再选一次
+    }
+  }
+
+  /** 从正文里删掉这张图。**删的是文字，不是某个列表里的一项** */
+  function removeShot(url: string) {
+    setDraft((current) =>
+      current.replace(new RegExp(`!\\[[^\\]]*\\]\\(${url}\\)\\n*`, "g"), ""),
+    );
+  }
 
   // 每次打开都用**这次**的答案重置草稿。在渲染期比对 open 而不是写 effect：
   // effect 里同步 setState 会触发级联渲染，React 19 的规则直接判错
@@ -119,12 +177,73 @@ export function VerifyDialog({
           {!cannot && (
             <>
               <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                  // 截图基本都是粘贴进来的（QQ / 微信 / Win+Shift+S），
+                  // 让人先存成文件再"选择文件"是多余的两步
+                  const item = Array.from(e.clipboardData.items).find((i) =>
+                    i.type.startsWith("image/"),
+                  );
+                  if (!item) return;
+                  e.preventDefault();
+                  void attach(item.getAsFile());
+                }}
                 spellCheck={false}
                 className="mt-4 min-h-[14rem] resize-none rounded-lg border border-border bg-surface-subtle px-3 py-2.5 font-mono text-[13px] leading-relaxed text-foreground outline-hidden transition-colors focus:border-ring focus:bg-background"
                 aria-label="正确的答案"
               />
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+                  className="hidden"
+                  onChange={(e) => void attach(e.target.files?.[0])}
+                />
+                <Button
+                  variant="ghost"
+                  className="h-8 px-2 text-[13px]"
+                  disabled={uploading}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ImagePlus className="size-3.5" />
+                  )}
+                  贴张截图
+                </Button>
+                <span className="text-[12px] text-muted-foreground">
+                  也可以直接 Ctrl+V 粘贴。截图只有你和管理员看得到，
+                  <span className="font-medium text-foreground">发布之后所有人可见</span>。
+                </span>
+              </div>
+
+              {shots.length > 0 && (
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {shots.map((url) => (
+                    <li key={url} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- 用户刚传上来的图，没有尺寸信息 */}
+                      <img
+                        src={`${API_BASE}${url}`}
+                        alt="已贴的截图"
+                        className="size-16 rounded-md border border-border object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeShot(url)}
+                        aria-label="从正文里删掉这张截图"
+                        className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-border bg-surface text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               <label
                 className="mt-3 text-[13px] font-medium text-foreground"

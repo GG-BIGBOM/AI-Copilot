@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   api,
+  API_BASE,
   ApiError,
   CORRECTION_STATUS_LABEL,
   type AdminCorrectionDetail,
@@ -261,6 +262,36 @@ export default function AdminCorrectionsPage() {
                             <p className="mt-1 text-[12px] text-muted-foreground">
                               已经审过的纠错不能再改内容——管理员看过的和最终发布的必须是同一段文字。
                             </p>
+                          )}
+
+                          {detail.images.length > 0 && (
+                            <div className="mt-2">
+                              <ul className="flex flex-wrap gap-2">
+                                {detail.images.map((shot) => (
+                                  <li key={shot.id}>
+                                    <a
+                                      href={`${API_BASE}${shot.url}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element -- 用户传的截图，没有尺寸信息 */}
+                                      <img
+                                        src={`${API_BASE}${shot.url}`}
+                                        alt="提交人贴的截图"
+                                        className="size-20 rounded-md border border-border object-cover"
+                                      />
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                              {/* ⚠️⚠️ 这句话必须出现在**按下发布之前**：截图里可能有客户名、
+                                  订单号、他自己的后台账号，而发布会把它变成全站可见 */}
+                              <p className="mt-1.5 text-[12px] text-warning">
+                                {detail.images.some((shot) => !shot.public)
+                                  ? `这 ${detail.images.filter((shot) => !shot.public).length} 张截图现在只有提交人和管理员看得到。发布之后所有人都能看到——发布前确认里面没有客户名、订单号之类的信息。`
+                                  : "这些截图已经随发布变成公开的了。"}
+                              </p>
+                            </div>
                           )}
                         </section>
                       </div>
