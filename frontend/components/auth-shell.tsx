@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { BrandMark } from "@/components/brand-mark";
+import { BrandLogo } from "@/components/brand-mark";
 
 /**
  * 登录页和注册页共用的外框（UI_OPTIMIZATION_SPEC §20）。
@@ -23,7 +23,7 @@ export function AuthShell({
     <main className="flex min-h-full items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-[22rem]">
         <div className="flex flex-col items-center gap-2.5 text-center">
-          <BrandMark className="size-6 text-foreground/75" />
+          <BrandLogo className="h-7" />
           <div>
             <h1 className="text-base font-semibold tracking-tight text-foreground">{title}</h1>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
