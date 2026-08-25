@@ -71,9 +71,11 @@ jobs:
         working-directory: backend
         run: .venv/bin/ruff check .
 
+      # `-rs` = 把跳过的用例连原因一起列出来。`-q` 只报一句「1 skipped」，
+      # 而 CI 上一条**没人知道被跳过**的用例，和没有这条用例是一回事
       - name: pytest
         working-directory: backend
-        run: .venv/bin/pytest -q
+        run: .venv/bin/pytest -q -rs
 
   frontend:
     runs-on: ubuntu-latest

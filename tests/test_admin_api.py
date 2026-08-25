@@ -202,7 +202,14 @@ async def test_an_unknown_range_is_refused(api_client, admin_headers):
 # ---------- 3. 用户列表 ----------
 
 
-async def test_users_page_is_capped_and_paginated(api_client, admin_headers):
+async def test_users_page_is_capped_and_paginated(api_client, admin_headers, logged_in):
+    """⚠️ `logged_in` 是**必需的**，不是顺手加的。
+
+    这条要验的是「第二页和第一页不是同一行」，前提是库里至少有两个用户，
+    而 `admin_headers` 只造了一个。本机开发库里躺着历史用户，这条一直是绿的；
+    2026-08-25 搬上 CI，第一次在**空库**上跑就红了（`assert 1 >= 2`）。
+    靠环境里恰好有别人留下的数据的断言，等于没有断言。
+    """
     headers, _ = admin_headers
     api_client.cookies.clear()
 
