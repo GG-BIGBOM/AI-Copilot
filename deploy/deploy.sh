@@ -7,7 +7,14 @@
 #    在上面 build 必被 OOM killer 干掉——这是这套部署方案的第一条生死线。
 set -euo pipefail
 
-HOST=${COPILOT_HOST:-root@8.136.116.9}
+# ⚠️ **服务器地址不写在仓库里**（这个仓库是公开的）。两种给法，环境变量优先：
+#     export COPILOT_HOST=root@1.2.3.4
+#     cp deploy/.env.example deploy/.env && 填进去      ← deploy/.env 已在 .gitignore
+# 只有 HOST 是必填。密钥文件名不是秘密，保留默认值，换机器时再覆盖。
+if [ -z "${COPILOT_HOST:-}" ] && [ -f "$(dirname "$0")/.env" ]; then
+    . "$(dirname "$0")/.env"
+fi
+HOST=${COPILOT_HOST:?没有服务器地址。cp deploy/.env.example deploy/.env 后填 COPILOT_HOST}
 KEY=${COPILOT_SSH_KEY:-$HOME/.ssh/erp_vps}
 APP_DIR=/opt/copilot
 WEB_DIR=/var/www/copilot
@@ -16,6 +23,42 @@ SSH="ssh -i $KEY -o BatchMode=yes $HOST"
 cd "$(dirname "$0")/.."
 
 echo "==> [1/7] 本机自检（不过就别推上去）"
+
+# ⚠️⚠️ **CRLF 闸门。这条不是洁癖，是一次真实事故的补丁。**
+#
+# 2026-08-24：生产的每日备份连续两天失败，journal 里只有一行
+# `set: pipefail: invalid option name` + 「[75B blob data]」。
+# 真因是 `deploy/backup.sh` 在**本机工作区**里变成了 CRLF——Windows 上
+# 一个 Python 补丁脚本用 `write_text` 顺手改了一行，它默认把 `\n` 写成
+# `\r\n`。而这个脚本推的是**工作区**（tar over ssh），不是 git 里那份
+# （git 的 eol=lf 只规范索引，不管工作区）。于是 Linux 上 bash 读到的是
+# `pipefail\r`，整个脚本从第一行就废了。
+#
+# **备份坏掉是所有失败模式里最坏的一种**：它每天照常被触发、照常"跑完"，
+# 而你以为有备份。发现它的那一刻，往往正是你需要它的那一刻。
+#
+# systemd 单元同理：`ExecStart=... --apply\r` 会把 `\r` 当成参数的一部分。
+#
+# ⚠️ **这一段用 Python 读字节，不是 grep。** Git Bash 上的 grep / awk 都会
+# 在读文件时把 CR 吃掉（MSYS 的文本模式），`grep -U $'\r'` 在命令替换里
+# 还会把参数里那个裸 CR 弄丢、退化成空模式——**空模式匹配每一行**，
+# 于是闸门要么全放行、要么全拦下。写这条检查的时候实测到了这两种表现。
+CRLF_CHECK=$(cat <<'PYEOF'
+import pathlib, sys
+bad = sorted(
+    str(f)
+    for pattern in ("*.sh", "*.service", "*.timer", "*.conf")
+    for f in pathlib.Path("deploy").glob(pattern)
+    if b"\r\n" in f.read_bytes()
+)
+if bad:
+    print("!! 这些要推到服务器上的文件是 CRLF，Linux 上跑不起来：")
+    for f in bad:
+        print(f"     {f}")
+    print("   修：把它们改回 LF（写文件的脚本要用二进制写，别用 write_text）")
+    sys.exit(1)
+PYEOF
+)
 # ⚠️ **这三条不能写成 `uv run`**（2026-08-23 踩到）。`uv run` 会先把环境同步成
 # pyproject 的默认样子——带 dev 组、**不带 extra**——于是本机 venv 里的
 # parse / agent / eval 当场被卸掉，自检自己把自己跑红：
@@ -27,6 +70,7 @@ echo "==> [1/7] 本机自检（不过就别推上去）"
 PY=backend/.venv/bin/python
 [ -x "$PY" ] || PY=backend/.venv/Scripts/python.exe   # Git Bash on Windows
 [ -x "$PY" ] || { echo "找不到 backend/.venv，先 uv sync 一次"; exit 1; }
+echo "$CRLF_CHECK" | "$PY" - || exit 1
 ( cd backend && "../$PY" -m ruff check . && "../$PY" -m pytest -q )
 ( cd frontend && npm test && npm run lint && npx tsc --noEmit )
 

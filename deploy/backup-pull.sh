@@ -12,7 +12,14 @@
 # 目标目录默认 D 盘（见 plan.md 一·五：所有软件和数据装 D）。
 set -euo pipefail
 
-HOST=${COPILOT_HOST:-root@8.136.116.9}
+# ⚠️ **服务器地址不写在仓库里**（这个仓库是公开的）。两种给法，环境变量优先：
+#     export COPILOT_HOST=root@1.2.3.4
+#     cp deploy/.env.example deploy/.env && 填进去      ← deploy/.env 已在 .gitignore
+# 只有 HOST 是必填。密钥文件名不是秘密，保留默认值，换机器时再覆盖。
+if [ -z "${COPILOT_HOST:-}" ] && [ -f "$(dirname "$0")/.env" ]; then
+    . "$(dirname "$0")/.env"
+fi
+HOST=${COPILOT_HOST:?没有服务器地址。cp deploy/.env.example deploy/.env 后填 COPILOT_HOST}
 KEY=${COPILOT_SSH_KEY:-$HOME/.ssh/erp_vps}
 REMOTE_DIR=${COPILOT_BACKUP_DIR:-/var/backups/copilot}
 LOCAL_DIR=${COPILOT_BACKUP_LOCAL:-/d/backups/copilot}

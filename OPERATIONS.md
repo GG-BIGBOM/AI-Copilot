@@ -1,6 +1,7 @@
 # 运维
 
-服务器：阿里云 ECS `8.136.116.9`，Ubuntu，**2 核 / 1.6GB / 40G**。
+服务器：阿里云 ECS，Ubuntu，**2 核 / 1.6GB / 40G**。
+地址不写在仓库里（公开库），放在 `deploy/.env`，见 `deploy/.env.example`。
 站点：<https://liushun666.cn/>
 
 两条红线，破了会直接把站弄挂：

@@ -4,7 +4,7 @@
 # 这份脚本是 2026-08-17 首次上线时**实际跑通的步骤**，不是照着想象写的。
 # 幂等：重复执行不会破坏已有状态。
 #
-#   scp deploy/setup-server.sh root@8.136.116.9:/tmp/ && ssh root@8.136.116.9 bash /tmp/setup-server.sh
+#   scp deploy/setup-server.sh root@<服务器>:/tmp/ && ssh root@<服务器> bash /tmp/setup-server.sh
 set -euo pipefail
 
 APP_DIR=/opt/copilot

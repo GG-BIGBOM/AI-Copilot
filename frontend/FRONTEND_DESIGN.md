@@ -41,7 +41,7 @@ flowchart TB
         Store[useSyncExternalStore 状态池]
     end
 
-    subgraph CDN_Nginx [接入层 (阿里云 ECS 8.136.116.9)]
+    subgraph CDN_Nginx [接入层 (阿里云 ECS)]
         Nginx[Nginx 静态服务器]
     end
 
