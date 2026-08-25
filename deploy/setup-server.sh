@@ -90,8 +90,13 @@ free -h | head -2
 
 cat <<'NEXT'
 
-初始化完成。接下来（在本机执行）：
-  1. ./deploy/deploy.sh              # 传代码 + 构建前端 + 起服务
+初始化完成。接下来：
+  0. ⭐ 先加固，再放数据（在服务器上）：
+     bash /tmp/harden.sh             # 见 deploy/harden.sh
+     ⚠️ 它会关掉 SSH 密码登录。跑之前确认 authorized_keys 里有你的公钥，
+        脚本自己也会检查，一把都没有就拒绝执行。
+
+  1. ./deploy/deploy.sh              # 传代码 + 构建前端 + 起服务（本机执行）
   2. 服务器上灌数据：
      sudo -u copilot env COPILOT_ROOT=/opt/copilot HOME=/tmp \
        /opt/copilot/.venv/bin/copilot sync-yuque https://www.yuque.com/wdterpqjb

@@ -247,7 +247,106 @@ Agent 轮次与 tools 为空 / 越过工具直答 / 出错 / TTFB p50·p95 /
 
 ---
 
-## 八、事故检查表
+## 八、安全基线
+
+2026-08-25 开源前审了一次。**结论是好坏参半，而坏的那一半坏得很典型**：
+边界（防火墙）做得挺好，入口（SSH 认证）一直敞着。
+
+### 审出来的实际状态
+
+```
+✅ ufw active，默认 deny incoming，只开 22 / 80 / 443
+✅ Postgres 5432 和 FastAPI 8000 都不对外监听（只走 nginx）
+✅ unattended-upgrades 已启用
+✅ copilot 是 nologin 的服务账号
+
+❌ PasswordAuthentication yes      ← 公网 22 + root + 有密码
+❌ PermitRootLogin yes             ← root 可以用密码直接登
+❌ fail2ban 没装                   ← 爆破不限次数
+```
+
+**那三条加起来只剩「密码够不够长」一道防线。** 而 journal 里
+（2026-05-08 起）`fail2ban-regex` 从历史日志中匹配出 **283611 条**
+失败认证记录 —— 日均约 2700 次。不是"会不会被扫"的问题，是一直在被扫。
+
+⚠️ **摘掉仓库里的 IP 不算防线。** `liushun666.cn` 的 DNS 一查就是那个地址。
+脱敏挡的是代码搜索和爬存档，真正拦住人的是下面这些。
+
+### 现在强制的
+
+`deploy/harden.sh`（幂等，服务器上以 root 跑）：
+
+```
+PasswordAuthentication no          密码登录整个关掉
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password  root 只认公钥。**不是 no** —— 部署走的就是 root@
+MaxAuthTries 3
+X11Forwarding no
+fail2ban                           10 分钟错 5 次封 1 小时，backend = systemd
+```
+
+三条刻意的选择：
+
+- **改 drop-in，不改 `sshd_config` 本体**（`/etc/ssh/sshd_config.d/99-hardening.conf`）。
+  回滚 = 删一个文件，不用去原文件里认哪几行是自己加的。
+- **`sshd -t` 不过就地删掉 drop-in 再退出。** 让一个语法错的 drop-in 留在盘上，
+  下一次任何人 restart ssh 都会起不来，而那时候没人记得它是谁放的。
+- **不锁 root 密码。** 密码登录关掉后它对公网已经没用，但它是阿里云控制台
+  VNC 唯一的登录方式 —— 万一 SSH 被自己关死，那是唯一一条回得去的路。
+
+### fail2ban 的 backend 必须写死 systemd
+
+```
+backend = systemd     # 不要用 auto
+```
+
+`auto` 的含义是「有 `/var/log/auth.log` 就读文件」，而那个文件在 Ubuntu 24.04
+上取决于 rsyslog 装没装。哪天它不在了，`auto` 会**安静地退化**：fail2ban 照常
+`active`、`systemctl status` 完全正常、一个 IP 都不封。
+
+⚠️ 装完必须验**两半**，只看 `is-active` 等于什么都没验：
+
+```bash
+# 半一：过滤器真能从 journal 里捞到失败记录（看 matched 不为 0）
+fail2ban-regex systemd-journal /etc/fail2ban/filter.d/sshd.conf
+
+# 半二：封禁动作真的落到内核（拿 TEST-NET 地址试，再解封）
+fail2ban-client set sshd banip 203.0.113.42
+nft list set inet f2b-table addr-set-sshd | grep elements
+fail2ban-client set sshd unbanip 203.0.113.42
+```
+
+### 改 SSH 配置时的自保动作
+
+改之前先武装一个**自动回滚**，确认新连接进得来之后再撤销：
+
+```bash
+# 服务器上：10 分钟后自动删掉加固配置并重载
+systemd-run --on-active=600 --unit=ssh-rollback /bin/bash -c \
+  'rm -f /etc/ssh/sshd_config.d/99-hardening.conf; systemctl reload ssh || systemctl restart ssh.socket'
+
+# 本机：另开一条**新**连接验证（当前这条不算数，它是老进程）
+ssh -i ~/.ssh/erp_vps root@<服务器> true && echo ok
+
+# 验过了再撤销
+ssh ... 'systemctl stop ssh-rollback.timer'
+```
+
+⭐ Ubuntu 24.04 默认是 socket 激活，每条连接现起一个 `sshd@`，所以
+**改配置不会踢掉当前连接**，`reload` 也未必存在 —— 但正因为如此，
+「当前连接还活着」完全不能证明新配置是对的。**必须开新连接验。**
+
+### 还没做 / 需要你在控制台确认的
+
+- ⚠️ **阿里云安全组是独立于 ufw 的另一层。** ufw 是主机内的，安全组在网络边界。
+  控制台里如果放开了 0.0.0.0/0 的全端口，主机上任何一个新起的监听都会直接
+  暴露出去。去 ECS 控制台核一遍，只留 22 / 80 / 443。
+- SSH 端口没有改（还是 22）。改端口只是降噪，不是防护，而它会让
+  `deploy/*.sh` 和所有文档多一个变量。fail2ban 上了之后收益更小。
+
+---
+
+## 九、事故检查表
 
 ### 站打不开
 
@@ -304,7 +403,7 @@ cd backend && uv run python ../eval/risk_boundary.py --tag incident
 
 ---
 
-## 九、端到端验收（上线后手工过一遍）
+## 十、端到端验收（上线后手工过一遍）
 
 ```
 1. 邀请码注册 → 登录
