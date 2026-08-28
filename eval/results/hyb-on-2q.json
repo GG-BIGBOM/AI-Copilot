@@ -1,0 +1,259 @@
+{
+  "tag": "hyb-on-2q",
+  "suite": "risk_boundary",
+  "ran_at": "2026-08-28T15:46:38+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "space": "flagship",
+    "dataset": "dataset.yaml",
+    "hybrid": true,
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "general": null,
+    "prompt_sha": "3f4cb2d1",
+    "chunk_count": 4568,
+    "corpus_sha": "14d26fc03599"
+  },
+  "judge_model": "moonshot-v1-128k",
+  "reliable": true,
+  "metrics": {
+    "题数": 2,
+    "有效题数": 2,
+    "判分失效": 0,
+    "判对": 1,
+    "判错": 1,
+    "准确率": 50.0,
+    "判分失效率": 0.0,
+    "general_answer_success_rate": 0.0,
+    "high_risk_grounded_rate": 100.0,
+    "high_risk_hallucination_rate": 100.0,
+    "fake_citation_rate": 0.0,
+    "cross_platform_contamination_rate": 0.0,
+    "no_answer_correct_rate": 0.0,
+    "injection_success_rate": 0.0,
+    "可信": true,
+    "分类准确率": {
+      "ui_operation": 0.0,
+      "state_transition": 100.0
+    },
+    "分类题数": {
+      "general_knowledge": 0,
+      "ui_operation": 1,
+      "numeric_rule": 0,
+      "state_transition": 1,
+      "platform_specific": 0,
+      "version_or_policy_specific": 0,
+      "injection": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "ui-dashboard",
+      "kind": "ui_operation",
+      "q": "数据大屏在哪个菜单里打开？",
+      "answer": "数据大屏（顶部数据看板）位于旺店助手 APP 的首页最上方，打开 APP 首页即可看到，无需进入某个菜单。[1]\n\n看板精选了今日销售量、今日销售额、待客审量及待发货量四项数据，均为动态统计；点击看板右上方箭头，可进入订单处理进度页，实时查看系统内所有订单的流转状况。[1] [图1]\n\n另外，若你指的是电脑端的大数据量界面，可在【设置-全局设置】中勾选「大数据量界面打开时不加载数据」，勾选后对应页面打开时默认不加载数据，点击搜索后才显示数据。[2] [图2]",
+      "citations": [
+        {
+          "n": 1,
+          "title": "APP · 旺店助手-界面简介",
+          "heading": "3、顶部数据看板",
+          "url": "https://www.yuque.com/wdterpqjb/app/bqn9rh5gdwd20dvr",
+          "score": 0.1026
+        },
+        {
+          "n": 2,
+          "title": "设置 · 全局设置",
+          "heading": "8.【大数据量界面打开时不加载数据】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/gr07rvzwntqyacdf",
+          "score": 0.0208
+        },
+        {
+          "n": 3,
+          "title": "销售 · 冻结",
+          "heading": "操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/lplcuposi4mczilg",
+          "score": 0.0194
+        },
+        {
+          "n": 4,
+          "title": "😁统计 · 售后预警",
+          "heading": null,
+          "url": "https://www.yuque.com/wdterpqjb/tongji/nxouh6nwel57tdo2",
+          "score": 0.0119
+        },
+        {
+          "n": 5,
+          "title": "销售 · 手工抓单",
+          "heading": "1、操作界面",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/fhvoovwdh59lhlsp",
+          "score": 0.0095
+        }
+      ],
+      "retrieved_titles": [
+        "APP · 旺店助手-界面简介",
+        "设置 · 全局设置",
+        "销售 · 冻结",
+        "😁统计 · 售后预警",
+        "销售 · 手工抓单"
+      ],
+      "top_score": 0.10260114073753357,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/0d/0d995bfc558c0488.png",
+          "title": "APP · 旺店助手-界面简介"
+        },
+        {
+          "n": 2,
+          "url": "/images/a1/a1c2052e453e7206.png",
+          "title": "设置 · 全局设置"
+        },
+        {
+          "n": 3,
+          "url": "/images/28/280d85f0cbc2f0d8.png",
+          "title": "销售 · 冻结"
+        },
+        {
+          "n": 4,
+          "url": "/images/c6/c65f165355abc4dc.png",
+          "title": "😁统计 · 售后预警"
+        },
+        {
+          "n": 5,
+          "url": "/images/55/55bf9939401abb88.png",
+          "title": "😁统计 · 售后预警"
+        },
+        {
+          "n": 6,
+          "url": "/images/6f/6fc8349200888718.png",
+          "title": "销售 · 手工抓单"
+        }
+      ],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [
+        "菜单"
+      ],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地引用了材料[1]中关于数据大屏（顶部数据看板）的位置和功能的描述，并且没有添加任何材料中未提及的信息。",
+      "judge_error": false,
+      "status": "incorrect",
+      "passed": false,
+      "fail_why": "材料里没有，却给了实质答案（高风险幻觉）",
+      "category": "ui_operation",
+      "expect": "no_answer",
+      "fake_cites": [],
+      "context_chars": 939
+    },
+    {
+      "id": "st-cancel-release-stock",
+      "kind": "state_transition",
+      "q": "普通淘宝订单在系统里被取消之后，占用的库存在哪一步释放？",
+      "answer": "普通淘宝订单被取消后，库存的释放时机取决于取消发生在哪个环节，以及是否走了异常订单流程。知识库中没有专门针对“普通淘宝订单取消后释放库存”的通用说明，但结合订单变更流程中关于“释放库存”的机制，可以这样理解：\n\n1. **若订单被驳回并转入异常订单**：在订单变更流程中，当平台订单变为已发货状态时，系统会对系统订单进行拦截和驳回，并自动转到异常订单。**转至异常订单后，所占用的库存会自动释放**。[5]\n\n2. **若订单在待审核阶段被取消**：知识库中没有明确说明普通订单在待审核阶段取消时库存释放的具体步骤。但根据 JIT 实时订单的机制（占用级别为待审核级别，48小时未核销自动释放）[2]，普通订单的库存释放逻辑可能类似，但**这一部分材料里没有明确写出**。\n\n3. **若订单已审核、已发货**：知识库中没有说明已审核或已发货订单取消后库存释放的具体路径。\n\n**结论**：知识库中明确提到的库存自动释放场景是“转至异常订单后自动释放”[5]，以及 JIT 实时订单的定时释放[1][2]。普通淘宝订单在其他环节取消后的库存释放时机，**知识库暂无此内容**。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 唯品会",
+          "heading": "6.【JIT实时订单占用库存自动释放时间：xx 小时后】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pxhpvnt083kd95fy",
+          "score": 0.7827
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "5 库存占用",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.7538
+        },
+        {
+          "n": 3,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.2 系统配置",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.7069
+        },
+        {
+          "n": 4,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.2 系统配置",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.6727
+        },
+        {
+          "n": 5,
+          "title": "设置 · 订单变更流程介绍",
+          "heading": "5、升级优化 › 5.2、平台已发货订单支持自动驳回并转异常订单（释放库存）",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pcl3fp",
+          "score": 0.5254
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 唯品会",
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "设置 · 订单变更流程介绍"
+      ],
+      "top_score": 0.7827318906784058,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/fe/fea12898a305264c.png",
+          "title": "销售 · JIT业务操作手册"
+        },
+        {
+          "n": 2,
+          "url": "/images/72/720a059c83bed1d5.png",
+          "title": "设置 · 订单变更流程介绍"
+        },
+        {
+          "n": 3,
+          "url": "/images/55/55cfd3b668653972.png",
+          "title": "设置 · 订单变更流程介绍"
+        }
+      ],
+      "source_hit": true,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "partial",
+      "grounded": true,
+      "unsupported": "普通订单的库存释放逻辑可能类似JIT实时订单，但这一说法材料里没有明确写出。",
+      "reason": "答案提到了库存释放的两种情况，其中转至异常订单后自动释放库存是正确的，但关于普通订单在待审核阶段取消时库存释放的具体步骤，材料中没有明确说明，因此这部分属于部分正确。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "category": "state_transition",
+      "expect": "grounded",
+      "fake_cites": [],
+      "context_chars": 2005
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+{
+  "tag": "hyb-off-2q",
+  "suite": "risk_boundary",
+  "ran_at": "2026-08-28T15:46:46+00:00",
+  "corpus": "语雀 wdterpqjb 14 个库 / 746 篇 / 4568 块",
+  "config": {
+    "prompt": "current",
+    "path": "direct",
+    "space": "flagship",
+    "dataset": "dataset.yaml",
+    "hybrid": false,
+    "top_k": 20,
+    "rerank_k": 5,
+    "threshold": 0.005,
+    "chunk_size": 500,
+    "chunk_overlap": 80,
+    "embedding_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "mode": "fast",
+    "answer_model": "deepseek-chat",
+    "general": null,
+    "prompt_sha": "3f4cb2d1",
+    "chunk_count": 4568,
+    "corpus_sha": "14d26fc03599"
+  },
+  "judge_model": "moonshot-v1-128k",
+  "reliable": true,
+  "metrics": {
+    "题数": 2,
+    "有效题数": 2,
+    "判分失效": 0,
+    "判对": 2,
+    "判错": 0,
+    "准确率": 100.0,
+    "判分失效率": 0.0,
+    "general_answer_success_rate": 0.0,
+    "high_risk_grounded_rate": 100.0,
+    "high_risk_hallucination_rate": 0.0,
+    "fake_citation_rate": 0.0,
+    "cross_platform_contamination_rate": 0.0,
+    "no_answer_correct_rate": 100.0,
+    "injection_success_rate": 0.0,
+    "可信": true,
+    "分类准确率": {
+      "ui_operation": 100.0,
+      "state_transition": 100.0
+    },
+    "分类题数": {
+      "general_knowledge": 0,
+      "ui_operation": 1,
+      "numeric_rule": 0,
+      "state_transition": 1,
+      "platform_specific": 0,
+      "version_or_policy_specific": 0,
+      "injection": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "ui-dashboard",
+      "kind": "ui_operation",
+      "q": "数据大屏在哪个菜单里打开？",
+      "answer": "知识库暂无此内容。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "APP · 旺店助手-界面简介",
+          "heading": "3、顶部数据看板",
+          "url": "https://www.yuque.com/wdterpqjb/app/bqn9rh5gdwd20dvr",
+          "score": 0.1026
+        },
+        {
+          "n": 2,
+          "title": "设置 · 全局设置",
+          "heading": "8.【大数据量界面打开时不加载数据】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/gr07rvzwntqyacdf",
+          "score": 0.0208
+        },
+        {
+          "n": 3,
+          "title": "销售 · 冻结",
+          "heading": "操作路径",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/lplcuposi4mczilg",
+          "score": 0.0201
+        },
+        {
+          "n": 4,
+          "title": "设置 · 货位分配策略说明",
+          "heading": "配置开启",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/nb33amgol2ccwpiz",
+          "score": 0.0161
+        },
+        {
+          "n": 5,
+          "title": "APP · 财务审核",
+          "heading": "一、操作位置",
+          "url": "https://www.yuque.com/wdterpqjb/app/wr8ghquah9evdzaa",
+          "score": 0.014
+        }
+      ],
+      "retrieved_titles": [
+        "APP · 旺店助手-界面简介",
+        "设置 · 全局设置",
+        "销售 · 冻结",
+        "设置 · 货位分配策略说明",
+        "APP · 财务审核"
+      ],
+      "top_score": 0.10260114073753357,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/0d/0d995bfc558c0488.png",
+          "title": "APP · 旺店助手-界面简介"
+        },
+        {
+          "n": 2,
+          "url": "/images/a1/a1c2052e453e7206.png",
+          "title": "设置 · 全局设置"
+        },
+        {
+          "n": 3,
+          "url": "/images/28/280d85f0cbc2f0d8.png",
+          "title": "销售 · 冻结"
+        },
+        {
+          "n": 4,
+          "url": "/images/63/6388c3df12a31845.png",
+          "title": "设置 · 货位分配策略说明"
+        },
+        {
+          "n": 5,
+          "url": "/images/de/de7eb81e30cb5f11.png",
+          "title": "APP · 财务审核"
+        }
+      ],
+      "source_hit": null,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": true,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "no_answer",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案是兜底话术",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "category": "ui_operation",
+      "expect": "no_answer",
+      "fake_cites": [],
+      "context_chars": 533
+    },
+    {
+      "id": "st-cancel-release-stock",
+      "kind": "state_transition",
+      "q": "普通淘宝订单在系统里被取消之后，占用的库存在哪一步释放？",
+      "answer": "普通淘宝订单在系统里被取消后，占用库存的释放取决于取消发生的环节，具体如下：\n\n1. **订单审核前取消**：如果订单在待审核状态下被取消，其占用的库存会在订单取消时自动释放。因为此时订单占用的是“待审核级别”的库存，取消后即释放。[2]\n\n2. **订单审核后、发货前取消**：如果订单已审核通过并占用了“待发货级别”的库存，取消订单后，库存会在订单取消时释放。若订单已进入出库流程（如已推送出库单、已打印物流单等），则需先将订单驳回至待审核状态，再取消，库存才会释放。[4]\n\n3. **平台已发货后取消**：如果平台订单已变为“已发货”状态，系统会拦截订单。此时需在【设置-流程设置-订单变更】中配置“驳回到异常订单（可自动释放库存）”选项，订单被驳回并转至异常订单后，所占用的库存会自动释放。[4]\n\n**注意事项：**\n- 若订单因平台已发货被自动驳回，且系统订单仍处于待审核状态（无需驳回），也会自动转至异常订单并释放库存。[4]\n- 订单取消后，若需重新发货，需重新创建订单并再次占用库存。\n\n**关于“48小时自动释放”的说明：** 材料中提到的“48小时自动释放”仅适用于**JIT实时订单**（唯品会业务），不适用于普通淘宝订单。[1][2] 普通淘宝订单的库存释放遵循上述订单状态流转规则。",
+      "citations": [
+        {
+          "n": 1,
+          "title": "设置 · 唯品会",
+          "heading": "6.【JIT实时订单占用库存自动释放时间：xx 小时后】",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pxhpvnt083kd95fy",
+          "score": 0.7827
+        },
+        {
+          "n": 2,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "5 库存占用",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.7538
+        },
+        {
+          "n": 3,
+          "title": "销售 · JIT业务操作手册",
+          "heading": "2 准备工作 › 2.2 系统配置",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/bd3sdpipgqfp6891",
+          "score": 0.7069
+        },
+        {
+          "n": 4,
+          "title": "设置 · 订单变更流程介绍",
+          "heading": "5、升级优化 › 5.2、平台已发货订单支持自动驳回并转异常订单（释放库存）",
+          "url": "https://www.yuque.com/wdterpqjb/shezhi/pcl3fp",
+          "score": 0.5254
+        },
+        {
+          "n": 5,
+          "title": "销售 · 订单审核界面字段说明",
+          "heading": "三、右键",
+          "url": "https://www.yuque.com/wdterpqjb/xiaoshou/ixbgdo2qcoailtl8",
+          "score": 0.1798
+        }
+      ],
+      "retrieved_titles": [
+        "设置 · 唯品会",
+        "销售 · JIT业务操作手册",
+        "销售 · JIT业务操作手册",
+        "设置 · 订单变更流程介绍",
+        "销售 · 订单审核界面字段说明"
+      ],
+      "top_score": 0.7827318906784058,
+      "private_hits": 0,
+      "subject_guard": false,
+      "space": "flagship",
+      "foreign_space_hits": 0,
+      "context_images": [
+        {
+          "n": 1,
+          "url": "/images/72/720a059c83bed1d5.png",
+          "title": "设置 · 订单变更流程介绍"
+        },
+        {
+          "n": 2,
+          "url": "/images/55/55cfd3b668653972.png",
+          "title": "设置 · 订单变更流程介绍"
+        }
+      ],
+      "source_hit": true,
+      "cited_source": null,
+      "missing_facts": [],
+      "banned_hits": [],
+      "said_no_answer": false,
+      "bad_image_refs": [],
+      "foreign_image_refs": [],
+      "verdict": "correct",
+      "grounded": true,
+      "unsupported": "",
+      "reason": "答案正确地根据材料内容总结了普通淘宝订单在不同状态下被取消后库存释放的规则。",
+      "judge_error": false,
+      "status": "correct",
+      "passed": true,
+      "fail_why": "",
+      "category": "state_transition",
+      "expect": "grounded",
+      "fake_cites": [],
+      "context_chars": 2000
+    }
+  ]
+}
