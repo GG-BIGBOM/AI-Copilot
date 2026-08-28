@@ -48,7 +48,8 @@ import pathlib, sys
 bad = sorted(
     str(f)
     # ⚠️ **rglob 不是 glob。** `deploy/docker/init.sh` 跑在容器里的 Linux
-    # shell 下，一个  就是 `bad interpreter`；而它在 deploy/ 的子目录里，
+    # shell 下，一个 
+ 就是 `bad interpreter`；而它在 deploy/ 的子目录里，
     # 非递归的 glob 根本看不见它（W1.3 加进来的时候差点漏掉）
     for pattern in ("*.sh", "*.service", "*.timer", "*.conf")
     for f in pathlib.Path("deploy").rglob(pattern)
@@ -85,11 +86,19 @@ echo "$CRLF_CHECK" | "$PY" - || exit 1
 # `pyproject.toml`，tests/ 会改用那一份；漏配 select 的话行长会从 100 掉到 88，
 # 表现是**当场变红**而不是悄悄放行，这个方向是安全的。
 ( cd backend && "../$PY" -m ruff check . ../tests ../eval && "../$PY" -m pytest -q )
-# ⚠️ `next typegen` 排在 tsc 前面，和 CI 那一步同一个理由：
-# `LayoutProps<"/">` 是 Next 16 生成的全局类型，住在 gitignore 掉的 `.next/types/`。
-# 本机通常有上次构建的残留所以看不出来，干净检出上会报
-# `TS2304: Cannot find name 'LayoutProps'`——两边任何一处改了另一处也要改。
-( cd frontend && npm test && npm run lint && npx next typegen && npx tsc --noEmit )
+# ⭐⭐ **前端自检只有一条命令，清单在 `frontend/package.json` 的 `verify` 里。**
+#
+# 这里原来手写着 `npm test && npm run lint && npx next typegen && npx tsc --noEmit`，
+# CI 里抄着一份，plan.md 里还抄着一份。2026-08-25 就是这么破的：
+# CI 补了 `next typegen`，这里没补，于是本机自检永远绿、CI 红了三天。
+# `LayoutProps<"/">` 是 Next 16 **生成**的全局类型，住在 gitignore 掉的
+# `.next/types/`——本机有上次构建的残留所以看不出来，干净检出上报
+# `TS2304: Cannot find name 'LayoutProps'`。
+#
+# ⚠️ `verify` 里的 `typecheck` **先删 `.next/types` 再 typegen**：
+# 那个残留正是「本机绿」的隐藏前置条件，不删掉的话本机永远比 CI 宽松一档。
+# `tests/test_ci_contract.py` 盯着这一行和 CI 那一行都还在调 `verify`。
+( cd frontend && npm run verify )
 
 # 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
 # 拦下来只会逼人加 --skip 绕过去，那这条检查就永远没人看了。
@@ -97,6 +106,9 @@ echo "$CRLF_CHECK" | "$PY" - || exit 1
     echo "  ⚠️ 上面有过期的勘误，语雀原文已经变了，抽空核对一下"
 
 echo "==> [2/7] 构建前端"
+# ⚠️ 上一步的 `verify` 已经构建过一次（CI 也要求构建能过）。这里仍然重来一次，
+# 因为要的是**干净的 `out/`**：上一次部署留下的旧页面不清掉，会跟着 rsync 传上去，
+# 表现是线上多出几个谁都不记得的路由——而那种残留没有任何报错
 ( cd frontend && rm -rf out && npm run build )
 [ -f frontend/out/index.html ] || { echo "构建没产出 out/，中止"; exit 1; }
 

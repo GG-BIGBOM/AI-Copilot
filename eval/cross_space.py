@@ -243,7 +243,7 @@ def save(tag: str, meta: dict, cfg: base.Config, metrics: dict, results: list[Sp
         "cases": [base._slim(asdict(r)) for r in results],
     }
     path = RESULTS_DIR / f"{tag}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    base.save_json(path, payload)
     return path
 
 

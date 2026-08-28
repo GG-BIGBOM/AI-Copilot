@@ -111,37 +111,22 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: 单测
-        working-directory: frontend
-        run: npm test
-
-      - name: lint
-        working-directory: frontend
-        run: npm run lint
-
-      # ⚠️ **`next typegen` 不能省，而且必须排在 tsc 前面。**
-      # `app/layout.tsx` 用的 `LayoutProps<"/">` 是 Next 16 **生成**的全局类型，
-      # 住在 `.next/types/` 里，而那个目录是 gitignore 的。
-      # 干净检出上直接跑 tsc，报的是一句看不懂的
-      #   `error TS2304: Cannot find name 'LayoutProps'`
+      # ⭐⭐ **一步，而且是 `package.json` 里那一个 `verify`。**
       #
-      # ⭐ 本机一直是绿的，因为 `.next/` 还留着上一次 `npm run build` 的产物——
-      # **这正是「本机绿、CI 红」的教科书形态**：本机多了一个谁都没意识到的前置条件。
-      # 这一步从 2026-08-25 起就红着，只是那时 backend 也红，没人往下看第二条。
+      # 这里原来是四步：单测 / lint / 生成路由类型 / 类型检查 / 构建。
+      # 四步本身没错，错的是**同一份清单同时抄在三个地方**：这个文件、
+      # `deploy/deploy.sh` 第 1 步、`plan.md` 的「本机自检」。
+      # 三份抄件靠一句注释「改一处要改另一处」维持一致——而 2026-08-25
+      # 那次正是这么破的：CI 补了 `next typegen`，本机自检没补，
+      # 于是本机永远绿、CI 从那天起红了三天。
       #
-      # 用 `typegen` 不用 `build`：它只生成类型、不打包，几秒钟的事，
-      # 而把整个 `next build` 挪到类型检查前面会让一次类型错误要等两分钟才报出来。
-      - name: 生成路由类型
+      # 现在清单只有一份（`frontend/package.json` 的 `verify`），
+      # 三个入口都调它。`tests/test_ci_contract.py` 盯着这件事，
+      # 谁把某一处改回手写清单，后端测试当场红。
+      #
+      # ⚠️ 代价说清楚：CI 日志里五项检查合成了一步，看不出是哪一项挂的。
+      # 换来的是**不可能再出现"某个入口少跑一项"**——那种失败没有症状，
+      # 而这个代价只是多滚两行日志。
+      - name: 前端自检（单测 / lint / 类型 / 构建）
         working-directory: frontend
-        run: npx next typegen
-
-      - name: 类型检查
-        working-directory: frontend
-        run: npx tsc --noEmit
-
-      # 构建也在 CI 里跑一次。线上产物是本机构建后传上去的（服务器 1.6G
-      # 内存跑 next build 必 OOM，见 OPERATIONS.md），所以「构建能不能过」
-      # 在真正部署之前没有任何地方验过——这里是唯一的一道
-      - name: 构建
-        working-directory: frontend
-        run: npm run build
+        run: npm run verify

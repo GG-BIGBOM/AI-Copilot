@@ -48,6 +48,30 @@ EVAL_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EVAL_DIR / "results"
 DATASET = EVAL_DIR / "dataset.yaml"
 
+
+def save_json(path: Path, payload: object) -> Path:
+    """把一轮结果写成 JSON。**换行一律 LF，不管跑在哪个操作系统上。**
+
+    ⚠️⚠️ **这不是洁癖，是 `deploy/backup.sh` 那次故障的同一个根因。**
+    `Path.write_text(..., encoding="utf-8")` 的 `newline` 默认是 `None`，
+    在 Windows 上它把每一个 `\\n` 翻成 `\\r\\n`。那次是一个补丁脚本顺手
+    改了一行 shell，结果 Linux 上 bash 读到 `pipefail\\r`，
+    **备份从此每天照常"跑完"、每天什么都没备份**。
+
+    ⭐ 这里的表现温和得多，但机理一模一样：`.gitattributes` 的
+    `* text=auto eol=lf` 只规范**索引**，工作区那份原样留着 CRLF。
+    于是 `eval/results/` 里 106 个文件在磁盘上全是 CRLF、在 git 里全是 LF，
+    `git status` 干干净净——**看不出来，也就没人会发现写文件那一层有问题**。
+    哪天有人关掉那条 attribute，或者把结果喂给一个按字节比对的工具，
+    差异会一次性冒出来 106 个。
+
+    修在**写的那一层**，不是靠 git 兜着：git 的规范化是安全网，
+    不该拿它当唯一的正确性来源。
+    """
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
 # 评测默认量哪个知识版本（M19-A）。字面量而不是 `copilot.spaces.DEFAULT`，
 # 是为了让判分口径那一层的纯函数测试不必连库、不必装后端依赖；
 # 两者一致由 `tests/test_eval_spaces.py` 钉死——写死一个字符串而没人核对，
@@ -1324,7 +1348,7 @@ def save(
         "cases": [_slim(asdict(r)) for r in results],
     }
     path = RESULTS_DIR / f"{tag}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_json(path, payload)
     return path
 
 
@@ -1388,7 +1412,7 @@ def rescore(tag: str) -> None:
         {**_slim(asdict(r)), "context_chars": chars.get(r.id, 0)} for r in results
     ]
     payload["rescored_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_json(path, payload)
     print(f"{tag}：按现在的口径重算完毕（答案没动，只重算指标）→ {path}")
     for k in ("准确率", "幻觉率", "假阴性率", "无效配图率", "配图串台率", "可判串台数"):
         if (v := metrics.get(k)) is not None:

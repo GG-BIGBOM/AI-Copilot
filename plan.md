@@ -665,8 +665,10 @@ Judge 网络错误被算模型答错              ← UNRELIABLE 三态已实现
 
 ```bash
 # ── 本机自检（和 CI、deploy.sh 第 1 步同一批命令）──
-cd backend && uv run ruff check . && uv run pytest
-cd ../frontend && npm test && npm run lint && npx tsc --noEmit && npm run build
+# ⚠️ `../tests ../eval` 不能省（ADR-18）：这两个目录在仓库根，
+#    `ruff check .` 一行扫不到，而漏掉它们的表现是**这一步照样绿**
+cd backend && .venv/Scripts/python.exe -m ruff check . ../tests ../eval            && .venv/Scripts/python.exe -m pytest -q      # Linux 换 .venv/bin/python
+cd ../frontend && npm run verify   # = 单测 + lint + 类型 + 构建，和 CI / deploy.sh 同一条
 
 # ── 评测（只在本机跑）──
 cd backend

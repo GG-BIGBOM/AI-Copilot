@@ -97,8 +97,12 @@ def load_manifest(root: Path) -> dict[str, dict]:
 
 def save_manifest(root: Path, manifest: dict[str, dict]) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    # ⚠️ `newline` 不能留默认值。`write_text` 默认 `newline=None`，在 Windows 上
+    # 把每个换行写成 CRLF——而 manifest 是抓取的增量判据，两台机器上抓同一份
+    # 语料会得到逐字节不同的文件。同一个默认值曾经把 `deploy/backup.sh` 写成
+    # CRLF，结果备份每天照常"跑完"、每天什么都没备份（见 deploy.sh 文件头）
     (root / MANIFEST_NAME).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
     )
 
 
@@ -213,7 +217,11 @@ def _sync_book(
         doc.markdown = rewrite_markdown(doc.markdown, mirror, stats.images)
 
         path = book_dir / f"{_safe_name(node.slug)}.md"
-        path.write_text(_doc_to_markdown(doc, crumbs.get(node.uuid, [])), encoding="utf-8")
+        # `newline` 见 `save_manifest`：抓下来的正文两台机器上要逐字节一致，
+        # 否则 `content_hash` 判重会把同一篇文档看成两篇
+        path.write_text(
+            _doc_to_markdown(doc, crumbs.get(node.uuid, [])), encoding="utf-8", newline="\n"
+        )
 
         manifest[key] = {
             "title": doc.title,

@@ -411,6 +411,11 @@ def correct(
             retired=retire,
         ),
         encoding="utf-8",
+        # ⚠️ 换行自己定死。`write_text` 默认 `newline=None`，Windows 上写出 CRLF——
+        # 而这个文件下一步就要 `git add` 进版本库、再 rsync 到 Linux 服务器。
+        # 同一个默认值曾经把 `deploy/backup.sh` 写成 CRLF，结果备份每天照常
+        # "跑完"、每天什么都没备份（见 deploy.sh 文件头）
+        newline="\n",
     )
     typer.secho(f"已写入 {out_path}", fg=typer.colors.GREEN)
     typer.echo("接下来：")
@@ -823,7 +828,8 @@ async def _corrections_export(dry_run: bool) -> None:
         typer.echo(f"  {verb} {out_path.name}　← {row.title or row.target_url}")
         if not dry_run:
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(text, encoding="utf-8")
+            # `newline` 见上面 `correct` 那一处：勘误文件进版本库，也上服务器
+            out_path.write_text(text, encoding="utf-8", newline="\n")
 
     if dry_run:
         typer.secho(f"\n（--dry-run，没有真写）共 {len(rows)} 条", fg=typer.colors.YELLOW)

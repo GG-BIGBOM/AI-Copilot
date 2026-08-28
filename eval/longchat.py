@@ -342,23 +342,19 @@ def print_report(meta: dict, metrics: dict, results: list[ChatResult], facts_on:
 def save(tag: str, meta: dict, metrics: dict, results: list[ChatResult], facts_on: bool) -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     path = RESULTS_DIR / f"{tag}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "suite": "longchat",
-                "tag": tag,
-                # ⚠️ 时间戳要留：这份题集的分数只在同一个 HISTORY_TURNS 下可比，
-                # 而那个常量改过之后，旧 tag 就只是历史了
-                "at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "dataset_meta": meta,
-                "session_facts_enabled": facts_on,
-                "metrics": metrics,
-                "cases": [asdict(r) for r in results],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    base.save_json(
+        path,
+        {
+            "suite": "longchat",
+            "tag": tag,
+            # ⚠️ 时间戳要留：这份题集的分数只在同一个 HISTORY_TURNS 下可比，
+            # 而那个常量改过之后，旧 tag 就只是历史了
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "dataset_meta": meta,
+            "session_facts_enabled": facts_on,
+            "metrics": metrics,
+            "cases": [asdict(r) for r in results],
+        },
     )
     return path
 

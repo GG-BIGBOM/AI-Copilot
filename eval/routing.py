@@ -37,6 +37,9 @@ DATASET = EVAL_DIR / "routing.yaml"
 RESULTS_DIR = EVAL_DIR / "results"
 
 sys.path.insert(0, str(EVAL_DIR.parent / "backend" / "src"))
+sys.path.insert(0, str(EVAL_DIR))
+
+import run as base  # noqa: E402  —— 只用它的 save_json：换行一律 LF，见那个函数
 
 # 期望路由的合法取值。写错一个字（比如 smalltalks）应该当场报错，
 # 而不是安静地算成一道永远不过的题
@@ -378,20 +381,16 @@ def report(results: list[CaseResult], m: Metrics, tag: str) -> None:
 def save(results: list[CaseResult], m: Metrics, meta: dict, tag: str) -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     path = RESULTS_DIR / f"routing-{tag}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "tag": tag,
-                "suite": "routing",  # 门禁靠它认出这份证据，见 eval/gate.py
-                "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "dataset_meta": meta,
-                "metrics": asdict(m),
-                "cases": [asdict(r) for r in results],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    base.save_json(
+        path,
+        {
+            "tag": tag,
+            "suite": "routing",  # 门禁靠它认出这份证据，见 eval/gate.py
+            "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "dataset_meta": meta,
+            "metrics": asdict(m),
+            "cases": [asdict(r) for r in results],
+        },
     )
     return path
 
