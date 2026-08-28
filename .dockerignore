@@ -1,0 +1,34 @@
+# 构建上下文里不该出现的东西（W1.3）。
+#
+# ⚠️ 少了这个文件，`docker compose build` 会把 frontend/node_modules
+# （几百兆、几万个文件）和 data/（语料、图片、上传件）一起打包送进 daemon。
+# 表现是"build 卡在 sending build context 好几分钟"，而且**没有任何报错**。
+
+# 依赖与构建产物
+**/node_modules
+**/.next
+**/out
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/*.tsbuildinfo
+
+# ⚠️⚠️ 数据和密钥。`data/` 里有真实语料、用户上传件和私有截图，
+# `.env` 里有 API key——**一个都不能进镜像**
+data/
+.env
+.env.*
+!.env.example
+backend/.env
+
+# 版本库与本地垃圾
+.git
+.github
+.playwright-cli
+output/
+*.log
+
+# 评测结果（几十兆 JSON，镜像里用不到）
+eval/results

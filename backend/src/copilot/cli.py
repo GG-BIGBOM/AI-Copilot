@@ -499,6 +499,145 @@ async def _invite(count: int, show: bool) -> None:
     typer.secho(f"\n当前未使用共 {remaining} 个。每个码只能用一次。", fg=typer.colors.BRIGHT_BLACK)
 
 
+@app.command(name="seed-user")
+def seed_user(
+    email: str = typer.Option(..., "--email", help="账号邮箱"),
+    password: str = typer.Option(..., "--password", help="明文口令"),
+    admin: bool = typer.Option(False, "--admin", help="顺便给管理员"),
+) -> None:
+    """建一个演示账号，**绕过邀请码**。只给 docker-compose 那套本地环境用（W1.3）。
+
+    ⚠️⚠️ **必须显式设 `COPILOT_ALLOW_SEED_USER=1` 才肯跑。**
+
+    邀请码是这个站唯一的准入闸门（见 `db/models.InviteCode`）。
+    留一个能凭命令行凭空造账号的口子，等于在那道闸门旁边开了一扇小门——
+    而小门的危险不在于它存在，在于**有一天没人记得它存在**。
+    多一个环境变量挡着，是让"在生产上手滑跑一次"这件事不可能悄悄发生：
+    compose 里那一行写得明明白白，服务器上那一行根本不存在。
+
+    已经有同名账号时**只改口令、不重建**——重建会把他的会话和文档一起带走。
+    """
+    import os
+
+    if os.getenv("COPILOT_ALLOW_SEED_USER") != "1":
+        typer.secho(
+            "拒绝：seed-user 只在本地演示环境可用。\n"
+            "要用的话显式设 COPILOT_ALLOW_SEED_USER=1（docker-compose 里已经设了）。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    import asyncio
+
+    asyncio.run(_seed_user(email.strip().lower(), password, admin))
+
+
+async def _seed_user(email: str, password: str, admin: bool) -> None:
+    from sqlalchemy import select
+
+    from copilot.auth.security import hash_password
+    from copilot.config import get_settings
+    from copilot.db.models import User
+    from copilot.db.session import SessionLocal, engine
+
+    s = get_settings()
+    if len(password) < s.password_min_length:
+        typer.secho(f"口令至少 {s.password_min_length} 位", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    try:
+        async with SessionLocal() as session:
+            user = (
+                await session.execute(select(User).where(User.email == email))
+            ).scalar_one_or_none()
+            if user is None:
+                user = User(email=email, password_hash=hash_password(password), is_admin=admin)
+                session.add(user)
+                verb = "建好了"
+            else:
+                # 只改口令。删了重建会连着把他的会话、文档、私有块一起带走，
+                # 而这个命令的用途只是"让我能登进去看看"
+                user.password_hash = hash_password(password)
+                if admin:
+                    user.is_admin = True
+                verb = "已存在，改了口令"
+            await session.commit()
+        typer.secho(f"演示账号 {email} {verb}。", fg=typer.colors.GREEN)
+    finally:
+        await engine.dispose()
+
+
+@app.command(name="backfill-tsv")
+def backfill_tsv(
+    batch: int = typer.Option(500, "--batch", help="一批多少块。内存和事务大小的闸门"),
+    force: bool = typer.Option(False, "--force", help="连已经有分词的块也重算"),
+) -> None:
+    """给存量块补上词法索引 `content_tsv`（W1.2）。
+
+    ⭐ **上线顺序是：迁移 → 这个命令 → 才谈开不开 `HYBRID_ENABLED`。**
+    列刚加出来时旧块的它全是 NULL，也就是词法那一路一条都召不回——
+    在那个状态下打开开关，量到的是"hybrid 没用"，而真相是它压根没数据。
+
+    改了切词方式（换 jieba 模式、加自定义词典）之后要 `--force` 重跑一遍：
+    索引侧和查询侧用不同切法的表现是「库里明明有这个词却搜不到」，
+    而且没有任何报错（见 `copilot.lexical.cut`）。
+    """
+    import asyncio
+
+    asyncio.run(_backfill_tsv(batch=batch, force=force))
+
+
+async def _backfill_tsv(*, batch: int, force: bool) -> None:
+    from sqlalchemy import bindparam, func, select, update
+
+    from copilot import lexical
+    from copilot.db.models import Chunk
+    from copilot.db.session import SessionLocal, engine
+
+    if not lexical.available():
+        typer.secho(
+            "没装 jieba，没法分词。装法：cd backend && uv sync --extra hybrid",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    done = 0
+    try:
+        while True:
+            async with SessionLocal() as session:
+                stmt = select(Chunk.id, Chunk.content).limit(batch)
+                # ⭐ 默认只挑还没算过的，所以这个命令**可以断了再跑**。
+                # 5000 块要打几十秒，中途 Ctrl+C 之后从头再来是很蠢的。
+                # `--force` 时全部重算，靠 offset 翻页
+                stmt = (
+                    stmt.offset(done) if force else stmt.where(Chunk.content_tsv.is_(None))
+                )
+                rows = (await session.execute(stmt)).all()
+                if not rows:
+                    break
+                await session.execute(
+                    # ⚠️ **打在 `__table__` 上，不是打在 ORM 实体上。**
+                    # `update(Chunk)` + 一串参数字典会走 SQLAlchemy 的
+                    # "ORM bulk update by primary key" 那条路，它要求每个字典里
+                    # 有一个叫 `id` 的键，报出来的是 "No primary key value supplied"——
+                    # 一个和"我明明写了 WHERE"完全对不上的错误。走 Core 就没有这层猜测。
+                    update(Chunk.__table__)
+                    .where(Chunk.__table__.c.id == bindparam("cid"))
+                    .values(content_tsv=func.to_tsvector("simple", bindparam("tok"))),
+                    [{"cid": cid, "tok": lexical.tokenize(content)} for cid, content in rows],
+                )
+                await session.commit()
+                done += len(rows)
+                typer.echo(f"  已回填 {done} 块")
+        async with SessionLocal() as session:
+            left = await session.scalar(
+                select(func.count(Chunk.id)).where(Chunk.content_tsv.is_(None))
+            )
+        typer.secho(f"完成：本次 {done} 块，仍为空的 {left} 块", fg=typer.colors.GREEN)
+    finally:
+        await engine.dispose()
+
+
 @app.command(name="prune-junk")
 def prune_junk(
     apply: bool = typer.Option(False, "--apply", help="真的删。默认只看不动"),

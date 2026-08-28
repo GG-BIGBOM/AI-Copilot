@@ -42,10 +42,32 @@ class FakeEmbedder:
 
 
 class TopOneReranker:
-    """只保留向量召回的第一名。测试里就是那条精确命中的 chunk。"""
+    """只保留**和问题最像**的那一条。测试里就是夹具造的那条精确命中的 chunk。
+
+    ⚠️ **它原来返回的是 `index=0`，也就是盲信召回顺序——W1.2 之后那个假设不成立了。**
+
+    在混合检索之前，候选池只有向量召回一条路，而假 embedder 让"拿原文去搜"
+    的余弦距离是 0，夹具那条必然排第一，`index=0` 于是恰好总是对的。
+    加上词法召回之后，候选池是 RRF 融合出来的：**两条路都找到的块会压过
+    只有一条路找到的块**——那正是 RRF 的本意，但它让"第一名"不再等于
+    "夹具那条"。表现是 `test_agent_images` 里冒出几张真实语料的截图，
+    看起来像配图串台，其实是这个假 reranker 在说谎。
+
+    真的 reranker 是按**内容和问题的相关性**打分的，跟召回顺序无关。
+    这里用最笨的字符重合度模拟它——够用，而且不会再随召回策略改变而失真。
+    """
 
     def rerank(self, query: str, documents: list[str], top_k: int) -> list[RerankResult]:
-        return [RerankResult(index=0, score=0.9)] if documents else []
+        if not documents:
+            return []
+        q = set(query)
+
+        def overlap(doc: str) -> float:
+            return len(q & set(doc)) / (len(q) or 1)
+
+        # 平手时取靠前的那条（`max` 的语义），结果因此是确定的
+        best = max(range(len(documents)), key=lambda i: (overlap(documents[i]), -i))
+        return [RerankResult(index=best, score=0.9)]
 
 
 class PartsFromStream:

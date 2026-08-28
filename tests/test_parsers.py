@@ -215,8 +215,9 @@ def test_scanned_pdf_page_limit_is_disclosed(tmp_path, monkeypatch):
     不说的话，用户搜不到第 21 页的内容时只会以为知识库不好用——
     而真正的原因是我们为了省钱主动没读。
     """
-    from copilot.config import get_settings
     from pypdf import PdfWriter
+
+    from copilot.config import get_settings
 
     writer = PdfWriter()
     for _ in range(4):

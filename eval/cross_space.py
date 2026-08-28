@@ -88,7 +88,9 @@ def load_cases(only: str | None = None) -> tuple[dict, list[dict]]:
     return data.get("meta", {}), cases
 
 
-def retrieve_by_space(cases: list[dict], cfg: base.Config, quiet: bool = False) -> list[SpaceResult]:
+def retrieve_by_space(
+    cases: list[dict], cfg: base.Config, quiet: bool = False
+) -> list[SpaceResult]:
     """按 `ask_in` 分组检索。**分组是这套评测的全部机制所在**。
 
     `base.retrieve_all` 一次只认一个空间（一个 `space_id` 贯穿整轮），
@@ -187,9 +189,11 @@ def print_report(tag: str, metrics: dict, results: list[SpaceResult]) -> None:
     print("=" * 78)
     for space, stats in sorted(CORPUS_BY_SPACE.items()):
         sha = stats.get("corpus_sha", "")
-        print(f"  {space:<20} {stats.get('chunk_count', '?')} 块" + (f" · sha {sha}" if sha else ""))
+        tail = f" · sha {sha}" if sha else ""
+        print(f"  {space:<20} {stats.get('chunk_count', '?')} 块" + tail)
     print()
-    print(f"  {'题数':<28} {metrics['题数']}（探针 {metrics['探针题']} / 对照 {metrics['对照题']}）")
+    probes = f"（探针 {metrics['探针题']} / 对照 {metrics['对照题']}）"
+    print(f"  {'题数':<28} {metrics['题数']}" + probes)
     for k in ZERO_METRICS:
         flag = "" if metrics[k] == 0.0 else "   ⛔ 破线"
         print(f"  {k:<28} {metrics[k]}%{flag}")

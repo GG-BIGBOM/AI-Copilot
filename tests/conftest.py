@@ -5,9 +5,7 @@
 所以测试一律用 NullPool 的独立引擎，用完即弃。
 """
 
-import json
 import uuid
-from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import delete, event, select
@@ -25,7 +23,6 @@ from copilot.db.models import (
     Message,
     User,
 )
-from copilot.providers.base import RerankResult
 
 # ─────────────────────────────────────────────────────────
 # 知识版本（M14-A）

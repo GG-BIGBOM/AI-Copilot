@@ -41,3 +41,13 @@ logs/
 # 不是项目文件，也不该进版本库——每跑一次就多几十个 M。
 .playwright-cli/
 output/
+
+# ===== 个人材料：不进公开仓库 =====
+# 这是个公开仓库（github.com/GG-BIGBOM/AI-Copilot）。下面这些是本地用的
+# 个人材料，不是项目文件：
+#   简历带着联系方式；慧策的 logo 是第三方商标，不该由这个仓库分发。
+# ⚠️ 文件留在本地（还要用），只是不入库——所以是 ignore 不是删。
+resume_*.html
+刘顺-*.html
+刘顺-*.pdf
+慧策logo*.png

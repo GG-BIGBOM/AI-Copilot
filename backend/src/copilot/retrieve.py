@@ -14,20 +14,25 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
 from functools import partial
 
 import anyio.to_thread
-from sqlalchemy import false, select
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from copilot import assets
+from copilot import assets, obs
+from copilot import lexical as lexical_mod
 from copilot.config import get_settings
 from copilot.db.models import Chunk, KnowledgeSpace
+from copilot.injection import sanitize
 from copilot.providers.base import Embedder, Reranker
+
+logger = logging.getLogger(__name__)
 
 # 与 ingest/chunker.py 的标记格式一致：正文里存 `[图:a3f9]`
 _IMG_MARK_RE = re.compile(r"\[图:([0-9a-f]{4})\]")
@@ -179,7 +184,10 @@ class RetrievalResult:
                 return f"[图{numbering[ident]}]"
 
             body = _IMG_MARK_RE.sub(renumber, rc.content)
-            parts.append(f"[{rc.citation.n}] 来源：{source_label(rc)}\n{body}")
+            # ⭐ W2.3：把伪造的区段标记剥掉。**永远做，不看开关**——
+            # 真实语料里不含那串标记，所以这一步对正常内容是恒等的
+            # （理由见 injection.py 文件头）
+            parts.append(f"[{rc.citation.n}] 来源：{source_label(rc)}\n{sanitize(body)}")
 
         return ContextBundle(text="\n\n".join(parts), images=images)
 
@@ -353,6 +361,128 @@ async def has_private_chunks(session: AsyncSession, user_id: uuid.UUID | None) -
     return (await session.execute(stmt)).first() is not None
 
 
+async def _rare_terms(
+    session: AsyncSession,
+    terms: list[str],
+    space_id: uuid.UUID | None,
+    common_id: uuid.UUID | None,
+    user_id: uuid.UUID | None,
+) -> list[str]:
+    """只留**稀有**的那几个词。W1.2 里最要紧的一步。
+
+    ⭐⭐ **不做这一步，词法这一路是纯噪声——这是量出来的。**
+    「物流同步报错 CD01#未在状态机中找到规则」切出来是
+    `物流 同步 报错 未 找到 规则 状态机 CD01`。前六个词在这个语料里
+    到处都是（"报错"命中上千块），`ts_rank_cd` 又**不含 IDF**——
+    它只看词频和挨得近不近。于是排在最前面的是"讲物流同步讲得最密集"的那几块，
+    而不是含着 `CD01` 的那一块。2026-08-28 实测：关掉这一步，30 道关键词题
+    的候选池里词法带进来 229 块新内容，最终 top-5 **一块都没进**——
+    重排把它们全滤掉了，等于白跑一次 SQL。
+
+    判据是**语料自己的文档频率**，不是一张手写停用词表：
+    出现在超过 `hybrid_df_max_ratio` 的块里，就认为它不具区分度。
+    这样"哪些词是废话"由语料回答，而不是由我猜——换一批语料它自己会变。
+
+    ⚠️ **全砍光时保底留最稀有的几个**（`hybrid_min_terms`）。
+    「怎么设置物流」这种整句都是常用词的提问，砍完是空查询，
+    那一路就直接消失了；留几个至少还是一次正常的词法召回。
+
+    ⚠️⚠️ **DF 也在可见范围内算。** 用整张 `chunks` 表算会更简单，
+    但那样统计里就含了别人的私有文档——本项目对隔离的标准是
+    「让写错的那种代码写不出来」，统计量也不该是例外。
+    代价是零：过滤条件一样，走的是同一个 GIN 索引。
+    """
+    s = get_settings()
+    total = await session.scalar(
+        select(func.count(Chunk.id))
+        .where(_space_filter(space_id, common_id))
+        .where(_visibility_filter(user_id))
+    )
+    if not total:
+        return terms
+    cutoff = max(1, int(total * s.hybrid_df_max_ratio))
+
+    # 一次往返算完全部词的 DF：每个词一个 FILTER 聚合，走的是同一遍索引扫描。
+    # 逐词发一条 SQL 的话，一次提问要打十几个来回——而这一路本该是"顺手多问一句"
+    lexs = lexical_mod.lexemes(terms)
+    cols = [
+        func.count(Chunk.id)
+        .filter(Chunk.content_tsv.op("@@")(func.to_tsquery("simple", lex)))
+        .label(f"df{i}")
+        for i, lex in enumerate(lexs)
+    ]
+    row = (
+        await session.execute(
+            select(*cols)
+            .where(_space_filter(space_id, common_id))
+            .where(_visibility_filter(user_id))
+        )
+    ).one()
+
+    scored = sorted(zip(terms, row, strict=True), key=lambda p: p[1])
+    rare = [t for t, df in scored if 0 < df <= cutoff]
+    if not rare:
+        # 一个都不稀有：留最稀有的几个，顺带把 df=0 的（库里压根没有的词）丢掉
+        rare = [t for t, df in scored if df > 0][: s.hybrid_min_terms]
+    logger.debug("词法留词 %s（总块 %s，阈值 %s）", rare, total, cutoff)
+    return rare
+
+
+async def _lexical_recall(
+    session: AsyncSession,
+    query: str,
+    space_id: uuid.UUID | None,
+    common_id: uuid.UUID | None,
+    user_id: uuid.UUID | None,
+    *,
+    limit: int,
+) -> list[Chunk]:
+    """词法召回（W1.2）。按 `ts_rank_cd` 取前 `limit` 块。
+
+    ⚠️⚠️ **两道过滤一个都不能少，而且必须是那两个函数。**
+    这是第三条召回路径（前两条：向量主查询、私有库补捞），
+    而旁路正是隔离最容易漏的地方——M11 P3 那条补捞旁路当初就漏了空间过滤，
+    表现是"用户传在旗舰版下的文档出现在他的企业版会话里"。
+
+    `ts_rank_cd` 而不是 `ts_rank`：cover density 会考虑查询词在文档里
+    **挨得有多近**。「京东 电子面单 模板」三个词凑在一句里的块，
+    应该排在三个词散落在全文各处的那块前面。
+
+    ⚠️ 一条都切不出词时返回空（比如问题全是标点），**不是返回全表**。
+    """
+    # ⚠️ **try 要包住整个函数体，不能只包最后那条 SQL。**
+    # 词法这一路**坏了也不许把整轮问答带崩**——它是"多一次机会"，不是必需品。
+    # 2026-08-28 写 `test_词法那一路挂了也只是退回纯向量` 时当场撞到：
+    # 原来只包了最后一条 `session.execute`，而 `_rare_terms` 自己也发 SQL，
+    # 它抛出来的异常一路穿到 `ask_stream`，整轮提问变成 500。
+    # 一个检索增强不该有能力把整个站点弄挂。
+    try:
+        terms = lexical_mod.query_terms(query)
+        if not terms:
+            return []
+        terms = await _rare_terms(session, terms, space_id, common_id, user_id)
+        tsq = lexical_mod.or_query(terms)
+        if not tsq:
+            return []
+        vec = func.to_tsquery("simple", tsq)
+        stmt = (
+            select(Chunk)
+            .where(_space_filter(space_id, common_id))
+            .where(_visibility_filter(user_id))
+            .where(Chunk.content_tsv.op("@@")(vec))
+            .order_by(func.ts_rank_cd(Chunk.content_tsv, vec).desc())
+            .limit(limit)
+        )
+        return list((await session.execute(stmt)).scalars())
+    except Exception:  # noqa: BLE001 —— 见上
+        # 最可能的三种坏法：列还没回填（这条不报错，只是空结果）、
+        # tsquery 语法错（`lexical._escape_lexeme` 挡的就是它）、
+        # 以及 DF 那条统计查询本身出问题。
+        # 三种都退回纯向量检索，用户拿到的仍然是一个能用的答案
+        logger.warning("词法召回失败，本轮退回纯向量检索 q=%r", query[:60], exc_info=True)
+        return []
+
+
 async def search(
     session: AsyncSession,
     query: str,
@@ -375,7 +505,44 @@ async def search(
         rerank_k: 重排后保留数量
         score_threshold: 低于此分丢弃。**只是滤掉明显垃圾的下限**，
             真正的防幻觉闸门在 prompt 里
+
+    ⭐ 这一层只负责开 `retrieve` 这个 span，实现在 `_search` 里（W1.1）。
+    拆成两个函数是因为 `_search` 有五处提前 return——把整个函数体缩进到
+    一个 `with` 里，diff 会淹掉真正的改动，而这个文件是隔离的收敛点，
+    它的 diff 必须一眼能读完。
     """
+    with obs.span("retrieve", query_chars=len(query or "")) as sp:
+        result = await _search(
+            session,
+            query,
+            embedder,
+            reranker,
+            user_id=user_id,
+            space_id=space_id,
+            top_k=top_k,
+            rerank_k=rerank_k,
+            score_threshold=score_threshold,
+        )
+        sp.set(
+            chunk_count=len(result.chunks),
+            private_hits=result.private_count,
+            top_score=result.chunks[0].citation.score if result.chunks else None,
+        )
+        return result
+
+
+async def _search(
+    session: AsyncSession,
+    query: str,
+    embedder: Embedder,
+    reranker: Reranker | None = None,
+    *,
+    user_id: uuid.UUID | None = None,
+    space_id: uuid.UUID | None = None,
+    top_k: int | None = None,
+    rerank_k: int | None = None,
+    score_threshold: float | None = None,
+) -> RetrievalResult:
     s = get_settings()
     top_k = top_k or s.retrieve_top_k
     rerank_k = rerank_k or s.rerank_top_k
@@ -388,7 +555,11 @@ async def search(
     # Embedder / Reranker 是同步的（httpx.Client + time.sleep 限速），一次调用
     # 几百毫秒到数秒。直接在协程里调会**卡住整个事件循环**——单 worker 的
     # uvicorn 下，别人正在进行的 SSE 流会一起停住。丢线程池里跑。
-    query_vec = await anyio.to_thread.run_sync(embedder.embed_query, query)
+    #
+    # ⚠️ span 包在**调用方这一侧**，不进线程里开（见 obs.py 文件头最后一段）：
+    # 线程里拿不到当前 context，那里开的 span 会变成一棵孤儿树
+    with obs.span("retrieve.embed", model=s.embedding_model):
+        query_vec = await anyio.to_thread.run_sync(embedder.embed_query, query)
 
     # ⭐ 空间过滤和可见性过滤**在同一个 where 里**，缺一不可：
     # 前者管「哪一版 ERP」，后者管「谁的文档」。两根轴互不替代——
@@ -403,14 +574,41 @@ async def search(
     ).scalar_one_or_none()
 
     # 向量召回。cosine_distance 越小越近
-    stmt = (
-        select(Chunk)
-        .where(_space_filter(space_id, common))
-        .where(_visibility_filter(user_id))
-        .order_by(Chunk.embedding.cosine_distance(query_vec))
-        .limit(top_k)
-    )
-    candidates = list((await session.execute(stmt)).scalars())
+    with obs.span("retrieve.dense", top_k=top_k) as sp_dense:
+        stmt = (
+            select(Chunk)
+            .where(_space_filter(space_id, common))
+            .where(_visibility_filter(user_id))
+            .order_by(Chunk.embedding.cosine_distance(query_vec))
+            .limit(top_k)
+        )
+        candidates = list((await session.execute(stmt)).scalars())
+        sp_dense.set(hits=len(candidates))
+
+    # ⭐ 词法召回 + RRF 融合（W1.2）。**默认关**，见 `Settings.hybrid_enabled`。
+    #
+    # 它只改**候选池里有谁**，不改任何一条留下来的规则：融合后的池子照样
+    # 整个进重排、照样过阈值。所以最坏的情况是"多塞了几块无关内容进重排"，
+    # 不可能是"一块低于阈值的东西混进了答案"。
+    #
+    # ⚠️ 池子大小仍然是 `top_k`。融合会挤掉向量那一路排在最后的几块——
+    # 那是 hybrid 的**本意**（让词法命中的块有机会顶掉语义上似是而非的块），
+    # 也让重排的开销和改动前一模一样（同样 20 条进去）。
+    if s.hybrid_enabled:
+        with obs.span("retrieve.lexical", top_k=s.hybrid_lexical_k) as sp_lex:
+            lexical = await _lexical_recall(
+                session, query, space_id, common, user_id, limit=s.hybrid_lexical_k
+            )
+            sp_lex.set(hits=len(lexical))
+        if lexical:
+            by_id = {c.id: c for c in candidates}
+            by_id.update({c.id: c for c in lexical})
+            fused = lexical_mod.rrf_fuse(
+                [[c.id for c in candidates], [c.id for c in lexical]],
+                k=s.hybrid_rrf_k,
+                limit=top_k,
+            )
+            candidates = [by_id[cid] for cid in fused]
 
     # ⭐⭐ **私有库的召回名额（M11 P3）。这是量出来的，不是设计出来的。**
     #
@@ -455,11 +653,19 @@ async def search(
         # 代价近乎零，换来的是 `_private_floor` 能看见「第 6 名是个私有块、
         # 分数其实过了阈值」。只拿前 5 名的话，被挤出去的那块连同它的分数
         # 一起消失了，保底名额根本无从判断该捞谁。
-        ranked = await anyio.to_thread.run_sync(
-            partial(
-                reranker.rerank, query, [c.content for c in candidates], top_k=len(candidates)
+        with obs.span(
+            "retrieve.rerank", model=s.rerank_model, candidates=len(candidates)
+        ) as sp_rr:
+            ranked = await anyio.to_thread.run_sync(
+                partial(
+                    reranker.rerank, query, [c.content for c in candidates], top_k=len(candidates)
+                )
             )
-        )
+            sp_rr.set(
+                top_score=max((r.score for r in ranked), default=None),
+                threshold=threshold,
+                passed=sum(1 for r in ranked if r.score >= threshold),
+            )
         scored = [(candidates[r.index], r.score) for r in ranked if r.score >= threshold]
         # 按分降序排一次，别依赖服务端的返回顺序。
         # ⚠️ 这一句同时保证了**行为和改动前完全一致**：分数降序时

@@ -55,6 +55,19 @@ agent = [
 eval = [
     "pyyaml>=6.0",
 ]
+# 可观测性（W1.1）。**默认不装**：服务器只有 1.6GB 内存，
+# 而 `TRACING_ENABLED` 默认是 false——为一个关着的功能常驻几十兆不值当。
+# 没装它时 `copilot.obs` 照样 import 得进来，只是所有 span 都是空实现。
+obs = [
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-exporter-otlp-proto-http>=1.29",
+]
+# 中文混合检索（W1.2）。jieba 是纯 Python、约 20MB、不碰 torch，
+# 所以它**可以**上服务器——但仍然做成 extra：`HYBRID_ENABLED` 关着的时候
+# 一行都不会执行到，装了只是白占内存。开之前先看 EVALUATION.md 那组 A/B
+hybrid = [
+    "jieba>=0.42",
+]
 
 [project.scripts]
 copilot = "copilot.cli:app"

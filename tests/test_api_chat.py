@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from chat_helpers import DIM, PASSWORD, FakeEmbedder, FakeLLM, TopOneReranker, ask, parts
+from chat_helpers import PASSWORD, FakeLLM, ask, parts
 from sqlalchemy import delete, select
 
 from copilot.auth.invites import create_invite_codes
@@ -129,7 +129,8 @@ async def test_only_the_sources_the_answer_cites_are_shown(
     from copilot.api import providers
 
     # 一段没有任何 [n] 的答案（方案 / 常识 / 寒暄都是这个形状）
-    monkeypatch.setattr(providers, "get_llm", lambda: FakeLLM("按你的情况，建议这样配置：先接入店铺。"))
+    no_cites = FakeLLM("按你的情况，建议这样配置：先接入店铺。")
+    monkeypatch.setattr(providers, "get_llm", lambda: no_cites)
 
     _, body = public_chunk
     r = await ask(api_client, body)

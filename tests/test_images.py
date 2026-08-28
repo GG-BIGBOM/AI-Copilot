@@ -290,5 +290,7 @@ def test_context_without_images_is_unchanged():
 
 def test_to_context_still_returns_text():
     """旧入口保持可用。"""
-    result = RetrievalResult(chunks=[_chunk(1, "内容 [图:aaaa]", [{"id": "aaaa", "url": "/1.png"}])])
+    result = RetrievalResult(
+        chunks=[_chunk(1, "内容 [图:aaaa]", [{"id": "aaaa", "url": "/1.png"}])]
+    )
     assert result.to_context() == result.build_context().text

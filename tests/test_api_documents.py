@@ -159,7 +159,9 @@ async def test_response_does_not_leak_the_server_path(api_client, alice):
 
 
 async def test_unsupported_extension_rejected(api_client, alice):
-    r = await _upload(api_client, name="木马.exe", content=b"MZ\x90\x00", mime="application/x-msdownload")
+    r = await _upload(
+        api_client, name="木马.exe", content=b"MZ\x90\x00", mime="application/x-msdownload"
+    )
     assert r.status_code == 415
     assert "不支持" in r.json()["detail"]
 

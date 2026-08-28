@@ -53,11 +53,18 @@ jobs:
 
       # ⚠️ **别用 `uv sync --all-extras`**：它会连 parse-full 一起装，
       # 那个 extra 带的是 docling → torch，几个 G，CI 上纯粹是浪费。
-      # 这三个 extra 才是测试真正 import 的：
+      # 这五个 extra 才是测试真正 import 的：
       #   parse  → docx / pptx / pypdf     agent → pydantic_ai     eval → yaml
+      #   hybrid → jieba（W1.2）           obs   → opentelemetry（W1.1）
+      #
+      # ⚠️ hybrid 和 obs **必须装**，否则 `test_hybrid.py` 会整片 skip、
+      # `test_obs.py` 会走 importorskip——两份都变成"绿的，但什么都没验"。
+      # 混合检索改的是检索，而检索是这个项目里唯一一处"改了会让答案变、
+      # 但不会报错"的地方；它的隔离断言正是最不能悄悄跳过的那几条。
+      # 下面 pytest 的 `-rs` 就是为了让这种跳过在 CI 日志里藏不住
       - name: 装依赖
         working-directory: backend
-        run: uv sync --extra parse --extra agent --extra eval
+        run: uv sync --extra parse --extra agent --extra eval --extra hybrid --extra obs
 
       # ⚠️ **下面一律直接调 `.venv/bin/...`，不用 `uv run`**（deploy.sh 里
       # 同样的坑，2026-08-23 踩过）。`uv run` 会先把环境同步回 pyproject 的
@@ -67,9 +74,17 @@ jobs:
         working-directory: backend
         run: .venv/bin/alembic upgrade head
 
+      # ⚠️ **`../tests ../eval` 不能省**（ADR-18）。这两个目录在仓库根、不在
+      # `backend/` 下，所以 `ruff check .` 一行扫不到——在此之前它们从来没被
+      # lint 过，而这一步一直是绿的，看起来像在管。纳入的第一次就抓到一条
+      # F841：`test_eval_scoring.py` 里那道「…is contamination」算完
+      # `配图串台率` 就把它扔了，同组另外两道都断言了，唯独它没有。
+      #
+      # ⚠️ 配置来自 `backend/pyproject.toml`，靠 ruff「本目录没配置就用 CWD 那份」
+      # 的回退——所以 `working-directory` 必须是 backend
       - name: ruff
         working-directory: backend
-        run: .venv/bin/ruff check .
+        run: .venv/bin/ruff check . ../tests ../eval
 
       # `-rs` = 把跳过的用例连原因一起列出来。`-q` 只报一句「1 skipped」，
       # 而 CI 上一条**没人知道被跳过**的用例，和没有这条用例是一回事

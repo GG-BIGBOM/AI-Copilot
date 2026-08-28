@@ -29,7 +29,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from copilot.config import get_settings
@@ -205,6 +205,15 @@ class Chunk(Base):
     ordinal: Mapped[int] = mapped_column(Integer)  # 在文档内的序号
     content: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    # 词法检索用的分词索引（W1.2）。内容是 jieba 切好、空格连起来的正文，
+    # 再过 `to_tsvector('simple', …)`。写值只在 `ingest.pipeline.write_chunks`
+    # 和 `cli.backfill_tsv` 两处，见 `copilot.lexical`。
+    #
+    # ⚠️ **`deferred=True` 不能去掉。** 一个块的 tsvector 和正文差不多大，
+    # 而 `select(Chunk)` 是检索热路径上每轮拉 20~25 行的那条查询——
+    # 不 defer 就是每一轮问答白拉几十 KB 回来，而这一列**从来不在 Python 里读**。
+    # 它只在 SQL 里被 `@@` 和 `ts_rank_cd` 用到。
+    content_tsv: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True, deferred=True)
 
     # 溯源信息：引用要显示这些
     title: Mapped[str] = mapped_column(String(512))
@@ -533,6 +542,16 @@ class Conversation(Base):
     profile: Mapped[dict | None] = mapped_column(NullableJSONB, nullable=True)
     checklist: Mapped[dict | None] = mapped_column(NullableJSONB, nullable=True)
     export_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # ===== W2.2 会话级「已确认事实」 =====
+    #
+    # ⚠️ **单独一列，不能塞进 `profile`。** `profile is not None` 是
+    # 「这条会话在走 Agent」的路由标记（见 routes/chat.py 的 `_is_agent_conversation`）——
+    # 往里塞事实，等于把每一条普通问答会话都路由到 Agent 上去。
+    #
+    # 形状见 `copilot.session_facts.SessionFacts`。W2.2 之前的会话读出来是 None，
+    # 那和「开始记了、但还什么都没记到」（`{}`）不是一件事
+    facts: Mapped[dict | None] = mapped_column(NullableJSONB, nullable=True)
 
     messages: Mapped[list[Message]] = relationship(
         back_populates="conversation", cascade="all, delete-orphan"

@@ -1,0 +1,249 @@
+# 长会话评测集 —— W2.1 上下文装配的 A/B 题集
+#
+# ⚠️ **这份题集单独存在，不并进 dataset.yaml。** 理由同 keyword.yaml：
+# 并进去等于把公共库 75 题的基线变成 90 题的基线，历史 tag 之间的 `--compare`
+# 会安安静静地变成「拿两个不同的题集比大小」，而报告上一个字都不提
+# （见 eval/run.py::load_cases 的注释）。
+#
+# ⚠️ 而且它连**形状**都不一样：dataset.yaml 的每一道题是一句话，这里的每一道题
+# 是**一整条会话**（十几轮）加一个探针问题。run.py 是两阶段单轮跑的
+# （检索一次、生成一次），塞不进去——所以有一个单独的 `eval/longchat.py`，
+# 判分口径仍然复用 run.py，不另写一套。
+#
+# 跑法（在 backend/ 下）：
+#     uv run python ../eval/longchat.py --check         # 免费：只看上下文里有没有
+#     uv run python ../eval/longchat.py --tag w21-before
+#     SESSION_FACTS_ENABLED=true uv run python ../eval/longchat.py --tag w21-facts
+#     uv run python ../eval/longchat.py --compare w21-before w21-facts
+#
+# ─────────────────────────────────────────────────────────
+# ⭐ 这份题集要回答的问题
+#
+# 「一条会话聊到第 15 轮，第 1 轮说过的东西还在不在」。
+#
+# 今天的答案是**不在**：`qa.HISTORY_TURNS = 6` 是一个硬窗口，第 7 轮开始，
+# 第 1 轮的原文就从上下文里消失了。它有两种表现，都不好：
+#
+#     Agent 那条路   「当前上下文只保留最近几轮，我无法确认」  诚实，但像失忆
+#     直路           拿当前窗口的第一条**冒充**整段会话的第一条  自信，且错
+#
+# ⚠️ **注意第二种才是真正危险的那一种。** 它不报错、看起来完全正常，
+# 而用户会照着一个错的前提继续问下去。
+#
+# ─────────────────────────────────────────────────────────
+# 两档指标，一免费一收费
+#
+#   context_hit（免费，`--check`）
+#       送进模型的那几条消息里，**到底有没有**答案所需的那个字串。
+#       没有的话，模型只能猜——这一档量的是"可能性"，不是"能力"。
+#       ⚠️ 它只装配「系统指令 + 历史 + 问题」，**不做检索**（那要打 embedding
+#       接口、要钱）。所以它量的恰恰是 W2.1 / W2.2 动的那一块，不多不少。
+#
+#   resolved（收费，`--tag`）
+#       真的把答案生成出来，看 must_include 在不在、must_not_include 在不在。
+#       ⭐ 两条都要：只看 must_include 的话，一段「可能是旗舰版也可能是企业版，
+#       建议你确认一下」会被判成对的——而那不是答对，那是把问题推回给用户。
+#
+# ─────────────────────────────────────────────────────────
+# 字段
+#
+#   id            题号
+#   category      cross_window_fact   窗口外的一条事实（版本、客户、仓库数）
+#                 cross_window_ref    窗口外的一个指代（「那个功能」「一开始那个」）
+#                 in_window_control   **对照组**：答案就在窗口里，改法不该动它
+#                 must_refuse         窗口外、而且系统结构上就不该知道 → 必须说不知道
+#   turns         这条会话前面的每一轮用户发言，从旧到新，**不含探针**
+#   probe         最后那一问
+#   must_include  答案里必须出现的字串（任一命中即可，写成列表是同义写法）
+#   must_not_include  出现即算错
+#   context_needle  `--check` 要在装配好的上下文里找的那个字串。
+#                 一般等于 must_include 的第一项，但有时不是——见 lc-subject-name
+#   why           这题在测什么。别删
+#
+# ─────────────────────────────────────────────────────────
+# ⚠️ 出题方式：填充轮用的都是**真实语料里答得出的问题**（从 dataset.yaml 抄的），
+# 不是「问题 1」「问题 2」这种占位符。理由是占位符的填充轮太短、也太不像话，
+# 模型很容易看出"前面这些不算数"，于是这道题量的就不是真实的窗口压力了。
+
+meta:
+  built_at: '2026-08-28'
+  purpose: W2.1 上下文装配（固定窗口 → token 预算）的 A/B 基线
+  history_turns_at_build: 6      # qa.HISTORY_TURNS，改了这个数就得重跑基线
+  built_from: 填充轮取自 dataset.yaml 里已经验过的公共库问题；探针问题按四类边界设计
+
+# 复用的填充轮。YAML 锚点，省得每道题抄一遍
+_filler: &filler
+  - 京东电子面单模板怎么设置？
+  - 退货入库的操作流程是什么？
+  - 对账单生成异常怎么排查？
+  - 组合装商品怎么配置？
+  - 预售订单怎么处理？
+  - 快递单号怎么批量导入？
+  - 库存盘点怎么做？
+  - 采购单审核在哪里？
+
+cases:
+  # ══════════════ 一、cross_window_fact：窗口外的一条事实 ══════════════
+  #
+  # 这一组是 W2.2「已确认事实表」直接负责的。四条事实里，
+  # **版本那一条最特殊**：它根本不是用户"说"出来的，是新建会话时钉死在
+  # `conversations.knowledge_space_id` 上的——也就是说它从来就不该依赖对话记录。
+
+  - id: lc-version-asked-late
+    category: cross_window_fact
+    turns:
+      - 我们用的是旺店通旗舰版，先问一下退货入库怎么操作？
+      - *filler
+    probe: 我一开始说的是哪个版本？
+    must_include: ['旗舰版']
+    must_not_include: ['企业版', '无法确认', '暂无此内容']
+    context_needle: 旗舰版
+    why: ⭐ 这份题集的头号验收题。第 1 轮那句话在第 10 轮时早就出窗口了，
+      而版本这件事**本来就不在对话记录里**——它在会话记录上钉着。
+      明明知道却回一句「我无法确认」，比忘了更糟。
+
+  - id: lc-warehouse-count-asked-late
+    category: cross_window_fact
+    turns:
+      - 我们有 4 个发货仓，都是自营的
+      - 那组合装商品怎么配置？
+      - *filler
+    probe: 我们是几个仓来着？
+    must_include: ['4']
+    must_not_include: ['无法确认', '暂无此内容']
+    context_needle: '4'
+    why: 仓库数是 Agent 的 save_requirement 会填的字段之一。这道题量的是
+      「已经结构化记下来的东西，掉出窗口之后还找不找得回」。
+
+  - id: lc-subject-name-asked-late
+    category: cross_window_fact
+    turns:
+      - 星辰电商的退货入库要走哪几个审核节点？
+      - *filler
+    probe: 我最早问的是哪家客户的事？
+    must_include: ['星辰电商']
+    must_not_include: ['无法确认', '暂无此内容']
+    context_needle: 星辰电商
+    why: 客户名是实施场景里最要紧的一条会话状态——答错等于把 A 家的约定
+      说成 B 家的。它由 `qa.named_subject` 抽出来，不问模型。
+
+  - id: lc-platforms-asked-late
+    category: cross_window_fact
+    turns:
+      - 我们要对接淘宝和抖音两个平台
+      - 京东电子面单模板怎么设置？
+      - *filler
+    probe: 我一开始说要对接哪些平台？
+    must_include: ['淘宝']
+    must_not_include: ['无法确认', '暂无此内容']
+    context_needle: 淘宝
+    why: ⚠️ 这道题有个陷阱：填充轮里提到了**京东**，而用户一开始说的是
+      淘宝和抖音。靠"从对话记录里捞一个平台名"的做法会捞到京东——
+      那正是硬窗口最典型的错法，它长着确定的样子。
+
+  # ══════════════ 二、cross_window_ref：窗口外的一个指代 ══════════════
+  #
+  # ⚠️ 这一组**事实表帮不上忙**，而且不该帮。「那个功能」指的是一段对话里的
+  # 某个话题，不是一条结构化的事实。它们留在这里是为了守住边界：
+  # W2.1 之后这几道**仍然应该说不知道**，除非滚动摘要真的把那一段留下来了。
+
+  - id: lc-vague-reference-out-of-window
+    category: cross_window_ref
+    turns:
+      - 组合装商品怎么配置？
+      - *filler
+    probe: 那个功能在哪配置来着？
+    must_include: ['无法确认', '具体指什么', '说出功能名称']
+    must_not_include: []
+    context_needle: ''
+    why: 指代对象已经出窗口。**必须澄清，不能随机检索一个功能顶上**——
+      拿「那个功能」四个字去检索必然命中一个和用户想的不一样的东西，
+      而回答会写得和真的一样确定。
+
+  - id: lc-earliest-question-out-of-window
+    category: cross_window_ref
+    turns:
+      - 京东电子面单模板怎么设置？
+      - *filler
+    probe: 我第一个问题问的是什么？
+    must_include: ['无法确认']
+    must_not_include: []
+    context_needle: ''
+    why: ⭐ 这道题是事实表那个口子的**边界**：问的是**提问历史**，
+      而事实表里存的是"用户说过什么情况"，没有这种东西。
+      认了它，就等于让模型拿一张讲版本和仓库数的表去编一个"你最开始问的"。
+      W2.1 上了滚动摘要之后，这道题的期望**要跟着改**——改之前先在这里留个记号。
+
+  # ══════════════ 三、in_window_control：对照组 ══════════════
+  #
+  # ⭐ **这一组是这份题集里最容易被忽略、却最不能少的。**
+  # 上下文装配这种改动的典型翻车方式不是"跨窗口没修好"，是
+  # **"窗口内的反而变差了"**——预算算错、摘要压掉了本来该原样保留的那几轮。
+  # 没有对照组的话，跨窗口那几道涨了 3 道、窗口内悄悄掉了 5 道，报告上是「+3」。
+
+  - id: lc-control-followup-in-window
+    category: in_window_control
+    turns:
+      - 退货入库的操作流程是什么？
+    probe: 那不良品呢？
+    must_include: ['不良品', '残次']
+    must_not_include: ['无法确认']
+    context_needle: 退货入库
+    why: 最普通的一次追问，两轮，稳稳在窗口里。这道题的分数在任何一次
+      装配改动前后都**不许动**。
+
+  - id: lc-control-recent-fact-in-window
+    category: in_window_control
+    turns:
+      - 京东电子面单模板怎么设置？
+      - 我们有 3 个店铺
+    probe: 我刚说的是几个店铺？
+    must_include: ['3']
+    must_not_include: ['无法确认']
+    context_needle: '3'
+    why: 上一轮刚说的事。它本来就在窗口里，不需要事实表也该答对——
+      如果只有开了事实表才对，说明历史那一路被改坏了。
+
+  - id: lc-control-normal-question-long-session
+    category: in_window_control
+    turns:
+      - 我们用的是旺店通旗舰版
+      - *filler
+    probe: 京东电子面单模板怎么设置？
+    must_include: ['设置']
+    must_not_include: ['无法确认', '暂无此内容']
+    context_needle: ''
+    why: ⚠️ **长会话里的一道普通产品题。** 事实表注进去之后，system prompt
+      里多了一段讲用户情况的文字——这道题守的是它**没有**把一道正常的
+      检索题带偏（比如让模型改用事实表回答，或者开始拒答）。
+
+  # ══════════════ 四、must_refuse：结构上就不该知道 ══════════════
+
+  - id: lc-never-stated-fact
+    category: must_refuse
+    turns:
+      - 我们用的是旺店通旗舰版
+      - *filler
+    probe: 我们的日均单量是多少来着？
+    must_include: ['没', '暂无', '无法确认']
+    must_not_include: ['单', '万']
+    context_needle: ''
+    why: ⭐⭐ **这道题守的是事实表最危险的失败方式。**
+      用户从头到尾没说过单量。表里有版本、有一堆别的东西，模型手里那张表
+      看起来很权威——它很容易顺手编一个数出来，而那个数长着"系统记录的"样子。
+      「表里没有的那一项就直说没记录到」这句话在 session_facts.py 的注入段里，
+      这道题就是它的回归测试。
+
+  - id: lc-fact-not-a-product-answer
+    category: must_refuse
+    turns:
+      - 我们有 4 个发货仓
+      - *filler
+    probe: 旺店通里仓库数量上限是多少？
+    must_include: ['暂无此内容', '没有']
+    must_not_include: ['4 个', '4个']
+    context_needle: ''
+    why: ⭐⭐ **最贵的那一种错法**：把事实表里的「仓库数量：4」读成
+      "旺店通的仓库数量上限是 4"。前者是**用户的情况**，后者是**产品的规格**——
+      混起来就等于绕过了「参数取值只能来自材料」那条红线，
+      而且答案会带着一个具体数字，看上去比"暂无此内容"可信得多。

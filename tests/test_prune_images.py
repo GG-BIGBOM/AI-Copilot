@@ -16,11 +16,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 from copilot import assets
 from copilot.cli import ORPHAN_IMAGE_HOURS, _prune_images
-from copilot.db.models import ImageAsset
+from copilot.db.models import Document, ImageAsset
 
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -189,15 +189,51 @@ async def test_a_file_still_used_by_another_row_survives(maker, images, logged_i
 
 
 async def test_document_images_are_not_orphans(maker, images, logged_in):
-    """文档图有 `document_id`，怎么都不该被这条命令碰到。"""
+    """文档图有 `document_id`，怎么都不该被这条命令碰到。
+
+    ⚠️ **这条自己造文档图，不去库里捞现成的。** 原来的写法是「捞一张，
+    捞不到就 `skip`」——本机开发库里总有历史文档图，于是它一直在跑；
+    2026-08-25 搬上 CI，空库上它**安静地跳过了**，而 `-q` 只报一句
+    「1 skipped」，不说是谁。一条没人知道被跳过的用例，和没有这条用例
+    是一回事，何况它守的是「别把别人的文档图删了」。
+    """
+    rel, _ = assets.store_bytes(PNG, ".png", private=True)
     async with maker() as s:
-        before = await s.scalar(
-            select(ImageAsset.id).where(ImageAsset.document_id.is_not(None)).limit(1)
+        doc = Document(
+            owner_id=logged_in,
+            source_type="upload",
+            title=f"prune-fixture-{uuid.uuid4().hex[:8]}",
+            content_hash=uuid.uuid4().hex,
+            status="done",
+            chunk_count=0,
         )
-    if before is None:
-        pytest.skip("库里没有文档图，这条断言无从谈起")
+        s.add(doc)
+        await s.flush()
+        img = ImageAsset(
+            document_id=doc.id,
+            correction_id=None,
+            source="document",
+            owner_id=logged_in,
+            storage_path=rel,
+            mime_type="image/png",
+            # 故意造得比任何保留窗口都老：只有 document_id 才是它活下来的理由
+            created_at=datetime.now(UTC) - timedelta(days=30),
+        )
+        s.add(img)
+        await s.commit()
+        doc_id, img_id = doc.id, img.id
 
-    await _prune_images(apply=True, hours=0, maker=maker)
+    try:
+        await _prune_images(apply=True, hours=0, maker=maker)
 
-    async with maker() as s:
-        assert await s.get(ImageAsset, before) is not None
+        async with maker() as s:
+            assert await s.get(ImageAsset, img_id) is not None, (
+                "文档图被当成孤儿删了——用户文档里的截图会当场裂掉"
+            )
+        assert assets.absolute_path(rel, private=True).exists(), "行还在，文件却被删了"
+    finally:
+        async with maker() as s:
+            await s.execute(delete(ImageAsset).where(ImageAsset.id == img_id))
+            await s.execute(delete(Document).where(Document.id == doc_id))
+            await s.commit()
+        assets.absolute_path(rel, private=True).unlink(missing_ok=True)

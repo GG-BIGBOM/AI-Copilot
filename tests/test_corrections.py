@@ -35,7 +35,9 @@ def write_correction(dirpath, name, **kw):
 
 
 def yuque_doc(body="批量换货一次最多 300 单。", url=URL):
-    return SourceDoc(title="打单发货 · 京东电子面单", markdown=body, source_type="yuque", source_url=url)
+    return SourceDoc(
+        title="打单发货 · 京东电子面单", markdown=body, source_type="yuque", source_url=url
+    )
 
 
 # ---------- 解析 ----------

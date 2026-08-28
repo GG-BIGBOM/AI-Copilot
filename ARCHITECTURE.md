@@ -58,10 +58,37 @@ JWT 放 **HttpOnly cookie**，不放 localStorage——后者任何 XSS 都能�
 问题
  ├─ 多轮改写：把「那不良品呢」补全成独立问题，**只拿它去检索**
  ├─ 向量召回 top_k=20     Postgres + pgvector，bge-m3（1024 维）
+ ├─ 词法召回 20           jieba 切词 → tsvector + GIN → ts_rank_cd（W1.2）
+ │   └─ 先按文档频率砍掉高频词，再 OR 查询（`_rare_terms`，见下）
+ ├─ RRF 融合              两路名次融成一个 top_k 的候选池，k=60
  ├─ 重排 rerank_k=5       bge-reranker-v2-m3
  ├─ 阈值 0.005            只滤明显垃圾（分数绝对值很低，靠相对差距）
  └─ build_context()       拼上下文 + 把 [图:a3f9] 重编号成 [图1][图2]
 ```
+
+### 词法那一路：加它是为了「用户什么都不说，直接把编码贴进来」
+
+⭐ **A/B 说清了它到底修好了什么**（45 题关键词子集，2026-08-28）：
+
+```
+完整问句 30 题    dense 29/30  →  hybrid 29/30    一道题的名次都没变
+裸粘贴   15 条    dense  6/15  →  hybrid 15/15    MRR@5 0.367 → 0.933
+```
+
+也就是说 bge-m3 + 重排在**完整问句**上已经饱和；真正断掉的是
+`JTSD`、`23381383`、`ownerCode` 这类只贴一个串的提问。理由和取舍见 ADR-16。
+
+⚠️ **最要紧的一步不是 RRF，是先砍高频词**（`retrieve._rare_terms`）。
+`ts_rank_cd` 不含 IDF，不砍的话「物流同步报错 CD01#…」会被"物流""同步""报错"
+带偏到讲物流最密集的那几块。判据用**语料自己的文档频率**（默认 2%），
+不是手写停用词表——那样"哪些词是废话"由语料回答。
+
+⚠️ **它不放宽任何东西。** 词法只往候选池里塞人，最终留谁仍由重排分和阈值决定，
+和 M11 P3 的私有库召回名额是同一个形状。所以它**不可能**把一个低于阈值的
+东西放进答案里。
+
+⚠️ 三个前提缺一个都**静默退回纯向量**（不报错）：没装 jieba、没跑迁移、
+没回填 `content_tsv`。静默是刻意的——一个检索增强不该有能力把整个站点变成 500。
 
 ⭐ **重编号和拼上下文必须一起产出**（`ContextBundle`）。分成两个方法算的话，
 迟早出现编号和图片对不上——而那种错的表现是「答案配了错误的截图」，
@@ -236,6 +263,42 @@ TTFB、总时长、token、答案长度、是否拒答、**答案来源**、ok /
   已经半死），**shield 住取消**（被中断的那一轮恰恰最该留下记录）。
 
 保留策略与清理见 [OPERATIONS.md](OPERATIONS.md)。
+
+---
+
+## 八·五、span 树（W1.1）
+
+`request_trace` 一轮一行，答不了「p95 的 9771ms 花在哪一段」。
+OpenTelemetry 把同一轮拆开：
+
+```
+chat.turn                        route / mode / answer_source / ttfb_ms / tokens
+  ├─ route                       decision = canned | verified | retrieve
+  ├─ rewrite                     有历史才有这一段
+  ├─ retrieve                    chunk_count / private_hits / top_score
+  │   ├─ retrieve.embed          embedding（在协程侧计时，不进线程）
+  │   ├─ retrieve.dense          向量召回 SQL
+  │   ├─ retrieve.lexical        词法召回（HYBRID_ENABLED 时才有）
+  │   └─ retrieve.rerank         candidates / passed / top_score
+  ├─ tool:answer_kb              Agent 路径才有；它内部再套一层上面这些
+  └─ generate                    从发出请求到最后一个正文字
+```
+
+⭐ **根 span 包在 `chat()` 的生产者外面**（`routes/chat.py::_traced`），
+不是在每个生产者里各开一个：三条路（直路 / Agent / 寒暄）都要有根 span，
+而"这一轮走的哪条路"只有 `chat()` 知道。
+
+⚠️ **它和 trace.py 是同一个坑的两半**：span 必须在**生成器内部**开和关。
+`StreamingResponse` 是在处理函数返回之后才开始消费流的——
+在 `chat()` 里 `with obs.span(...)` 包住 `return`，量出来的是
+"装配一个响应对象花了 0.1ms"。
+
+⚠️ **看板上的数字和台账那一行来自同一个函数**（`TraceDraft.summary()`）。
+分开算的话，看板说 `answer_source=kb`、表里写着 `general_knowledge`，
+没有任何办法知道该信哪个——那正是 M13 立的"每个数只有一个定义"。
+
+三条不能破的规矩和 trace.py 一样：埋点绝不影响回答、默认关、SDK 是可选依赖。
+详见 ADR-15 和 `copilot/obs.py` 文件头。
 
 ---
 

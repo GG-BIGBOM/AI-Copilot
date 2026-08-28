@@ -22,6 +22,23 @@
 但具体的界面路径、字段名、参数上限绝不会凭记忆编。**
 那条线的来龙去脉在 DECISIONS.md，量它的那套评测在 EVALUATION.md。
 
+## 五分钟跑起来
+
+```bash
+cp backend/.env.example .env     # 填 SILICONFLOW_API_KEY 和 LLM_API_KEY
+docker compose up
+```
+
+等 `init` 那个容器打印「样例语料入库完成」，开 <http://localhost:3000>，
+用 `demo@example.com / demo12345` 登录。带 20 篇[脱敏样本语料](samples/)，
+可以直接问「`SAMPLE-POSTB` 对应哪家快递？」。
+
+⚠️ **两个 API key 绕不过去**——一个 RAG 系统没有 embedding 和 LLM 就只是个空壳。
+SiliconFlow 有免费额度。
+
+⚠️ **生产不用 Docker**（ADR-1，那台机器只有 1.6GB 内存）。
+这套 compose 只服务一件事：让评审者不必先装 Postgres+pgvector 才能看见它。
+
 ## 架构概览
 
 ```
@@ -31,8 +48,10 @@
 nginx ──► FastAPI（uvicorn 单 worker）
               │
               ├─ 检索：Postgres + pgvector ─► SiliconFlow embedding / rerank
+              │        └─ 混合检索：jieba + tsvector/GIN，RRF 融合（ADR-16）
               ├─ 生成：DeepSeek（简答）/ Kimi（详解）
               ├─ Agent：Pydantic AI，answer_kb 是终结工具
+              ├─ 追踪：OpenTelemetry span 树 ─► Langfuse（默认关，ADR-15）
               └─ 队列：Postgres FOR UPDATE SKIP LOCKED ─► 解析 worker（独立进程）
 ```
 
@@ -93,7 +112,11 @@ uv run python ../eval/run.py --check                    # 只验检索，不花�
 uv run python ../eval/run.py --tag baseline             # 公共库 75 题
 uv run python ../eval/risk_boundary.py --tag risk       # 风险边界 48 题
 uv run python ../eval/routing.py                        # 路由 63 题
+uv run python ../eval/run.py --dataset ../eval/keyword.yaml --check   # 关键词 45 题
 ```
+
+关键词那一份是 W1.2 混合检索的 A/B 题集，**改前先量**：
+`HYBRID_ENABLED=false` 再跑一遍就是对照组（35/45 → 44/45，见 ADR-16）。
 
 指标口径、A/B 规则、判分器失效怎么处理，全在 [EVALUATION.md](EVALUATION.md)。
 **最要紧的一条：`INVALID`（判分器自己挂了）不计入准确率。**
@@ -101,12 +124,20 @@ uv run python ../eval/routing.py                        # 路由 63 题
 ## 部署
 
 ```bash
+cp deploy/.env.example deploy/.env    # 填 COPILOT_HOST，仅此一次
 bash deploy/deploy.sh
 ```
+
+⚠️ **服务器地址不在仓库里**（这是个公开仓库），放在 `deploy/.env`。
+没填的话 `deploy.sh` 会直接报错退出，而不是"默认推到某台机器"。
 
 七步：本机自检 → 本机构建前端 → 推后端 → 推勘误层 → 同步 systemd 单元 →
 推前端产物 → 装依赖/迁移/重启。**服务器上永不执行 `npm run build`、
 永不加载 ML 模型**——这台机器只有 1.6GB 内存，这两条是生死线。
+
+新机器初始化：`deploy/setup-server.sh` → **`deploy/harden.sh`**（关 SSH
+密码登录、装 fail2ban）→ 再 `deploy.sh`。**加固要在放数据之前**，
+理由和实测到的爆破量在 [OPERATIONS.md 第八节](OPERATIONS.md)。
 
 日常运维（备份、恢复、日志、限流、质量报告、事故处置）见
 [OPERATIONS.md](OPERATIONS.md)。
@@ -117,6 +148,9 @@ bash deploy/deploy.sh
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 每一层怎么工作，隔离和流式在哪里收口 |
 | [EVALUATION.md](EVALUATION.md) | 四套评测集、指标定义、baseline、A/B 规则 |
-| [OPERATIONS.md](OPERATIONS.md) | 部署、备份恢复、systemd、日志、事故检查表 |
+| [OPERATIONS.md](OPERATIONS.md) | 部署、备份恢复、systemd、日志、**安全基线**、事故检查表 |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI：和 `deploy.sh` 第 1 步跑同一批检查 |
 | [DECISIONS.md](DECISIONS.md) | 为什么不用 Docker / Redis / Graph RAG…（ADR） |
-| [plan.md](plan.md) | 历史台账。**看当前状态请看它最上面的 NOW / NEXT** |
+| [samples/](samples/) | 20 篇脱敏样本语料，`docker compose up` 会自动灌进去 |
+| [plan.md](plan.md) | 实施计划。**只留还没做的事**，看当前状态请看最上面的 NOW |
+| [ARCHIVE.md](ARCHIVE.md) | 历史台账：M0–M20 的逐项任务、排查过程和证据 |

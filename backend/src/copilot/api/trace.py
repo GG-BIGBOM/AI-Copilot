@@ -182,6 +182,40 @@ class TraceDraft:
         self.ok = False
         self.error = f"{type(exc).__name__}: {exc}"[:ERROR_LIMIT]
 
+    # ---------- 对外读数 ----------
+
+    def summary(self) -> dict:
+        """这一轮的汇总数字。**台账那一行和 span 上的属性用的是同一份。**
+
+        ⭐ 分开算是这里唯一真正的风险：看板上说 `answer_source=kb`、
+        表里那一行写着 `general_knowledge`，两个数都对不上时，
+        没有任何办法知道该信哪个——而这正是 admin 控制台立的那条规矩
+        「每个数只有一个定义」（M13）。所以这个方法是唯一出处。
+
+        `ttfb_ms` 在流被打断、或者压根没出正文时是 None，照实返回 None，
+        不填 0：0 的意思是"快得测不出来"，而那是另一回事。
+        """
+        return {
+            "route": self.route,
+            "mode": self.mode,
+            "chunk_count": self.chunk_count,
+            "top_score": self.top_score,
+            "private_hits": self.private_hits,
+            "model": self.model,
+            "tokens": self.tokens,
+            "answer_chars": self.answer_chars,
+            "no_answer": self.no_answer,
+            "answer_source": classify_answer_source(
+                route=self.route,
+                tools=self.tools,
+                answer=self.answer,
+                no_answer=self.no_answer,
+                verified=self.verified,
+            ),
+            "ttfb_ms": None if self._ttfb is None else int(self._ttfb * 1000),
+            "ok": self.ok,
+        }
+
     # ---------- 落库 ----------
 
     async def save(self) -> None:

@@ -38,6 +38,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from pydantic_ai import RunContext
 
+from copilot import obs
 from copilot.agent.checklist import REQUIREMENT_FIELDS, Checklist
 from copilot.agent.deps import AgentDeps
 from copilot.config import get_settings
@@ -68,48 +69,60 @@ async def answer_kb_for_deps(deps: AgentDeps) -> str:
     from copilot.qa import ask_stream
 
     buf: list[str] = []
-    try:
-        streamed = await ask_stream(
-            deps.session,
-            deps.question,
-            deps.embedder,
-            deps.reranker,
-            deps.llm,
-            # ⚠️ 隔离红线：同 search_kb，owner 和知识版本都只能来自 deps
-            user_id=deps.user_id,
-            space_id=deps.space_id,
-            history=deps.history,
-            mode=deps.mode,
-            general=deps.general,
-        )
-        deps.verified_hit = streamed.verified_id is not None
-        # 配图在正文之前发，理由见 deps.emit_images()
-        deps.images = list(streamed.images)
-        await deps.emit_images()
+    # ⭐ 终结工具是 Agent 那条路上唯一花时间的一步（W1.1）。它内部还会再挂上
+    # `route` / `retrieve` / `generate`——也就是说 Agent 路径的 span 树只比直路
+    # 多一层 `tool:answer_kb`，两条路因此可以放在同一张看板上直接对比。
+    #
+    # ⚠️ 埋在这个共用实现里，不埋在 `answer_kb` 那个薄壳上：runner 的硬防线
+    # （模型漏调工具时）走的也是这里，埋在壳上会漏掉那一半——而那一半恰恰是
+    # 最值得看的一半。
+    with obs.span("tool:answer_kb", mode=deps.mode) as sp_tool:
+        try:
+            streamed = await ask_stream(
+                deps.session,
+                deps.question,
+                deps.embedder,
+                deps.reranker,
+                deps.llm,
+                # ⚠️ 隔离红线：同 search_kb，owner 和知识版本都只能来自 deps
+                user_id=deps.user_id,
+                space_id=deps.space_id,
+                history=deps.history,
+                mode=deps.mode,
+                general=deps.general,
+                # W2.2：两条路注入同一段事实表。渲染在路由层做了一次，
+                # 这里只是原样转交——**不要在这里重新渲染**，那就是双路差异的开头
+                facts=deps.facts_prompt,
+            )
+            deps.verified_hit = streamed.verified_id is not None
+            # 配图在正文之前发，理由见 deps.emit_images()
+            deps.images = list(streamed.images)
+            await deps.emit_images()
 
-        async for kind, piece in iterate_in_threadpool(streamed.stream):
-            # Agent 这一路只要正文。推理草稿（详解档才有）先丢掉——
-            # Agent 自己的过程展示走的是 tool trace，再叠一层草稿只会更吵
-            if kind != "content":
-                continue
-            buf.append(piece)
-            await deps.emit_text(piece)
-    except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
-        logger.warning("answer_kb 失败：%s", e, exc_info=True)
-        if not buf:
-            return "查知识库的时候出错了（外部服务异常）。可以让我再试一次。"
-        # 已经吐出去一半了，收不回来。把它定成本轮答案，别让 Agent 再写一段
+            async for kind, piece in iterate_in_threadpool(streamed.stream):
+                # Agent 这一路只要正文。推理草稿（详解档才有）先丢掉——
+                # Agent 自己的过程展示走的是 tool trace，再叠一层草稿只会更吵
+                if kind != "content":
+                    continue
+                buf.append(piece)
+                await deps.emit_text(piece)
+        except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
+            logger.warning("answer_kb 失败：%s", e, exc_info=True)
+            if not buf:
+                return "查知识库的时候出错了（外部服务异常）。可以让我再试一次。"
+            # 已经吐出去一半了，收不回来。把它定成本轮答案，别让 Agent 再写一段
+            deps.final_answer = "".join(buf)
+            return "回答到一半出错了，已生成的部分用户已经看到。告诉他可以重试。"
+
         deps.final_answer = "".join(buf)
-        return "回答到一半出错了，已生成的部分用户已经看到。告诉他可以重试。"
-
-    deps.final_answer = "".join(buf)
-    # ⚠️ **覆盖而不是合并。** 用户看到的 [1][2] 来自直路自己的编号；
-    # `deps.citations` 里原有的是普通工具留下的（那些材料用户根本没看到），
-    # 合并会让编号和正文对不上——点开 [1] 看到的是另一篇文档。
-    deps.citations = [c.to_dict() for c in streamed.citations]
-    deps.private_hits = max(deps.private_hits, streamed.private_hits)
-    deps.retrieved.append(streamed.context_text)
-    return "已经把答案直接给用户了。不要复述、不要补充、不要总结，本轮到此结束。"
+        # ⚠️ **覆盖而不是合并。** 用户看到的 [1][2] 来自直路自己的编号；
+        # `deps.citations` 里原有的是普通工具留下的（那些材料用户根本没看到），
+        # 合并会让编号和正文对不上——点开 [1] 看到的是另一篇文档。
+        deps.citations = [c.to_dict() for c in streamed.citations]
+        deps.private_hits = max(deps.private_hits, streamed.private_hits)
+        deps.retrieved.append(streamed.context_text)
+        sp_tool.set(answer_chars=len(deps.final_answer), verified=deps.verified_hit)
+        return "已经把答案直接给用户了。不要复述、不要补充、不要总结，本轮到此结束。"
 
 
 async def answer_kb(ctx: RunContext[AgentDeps]) -> str:
@@ -197,16 +210,19 @@ async def search_kb(ctx: RunContext[AgentDeps], query: str) -> str:
         query: 检索用的问题或关键词。用中文，尽量具体（含界面名、功能名更准）。
     """
     deps = ctx.deps
+    # ⚠️ 只包住检索那一段。后面的编号重映射是纯内存操作（微秒级），
+    # 包进来只会让 span 树多一层看不出信息的框
     try:
-        result = await search(
-            deps.session,
-            query,
-            deps.embedder,
-            deps.reranker,
-            # ⚠️ 隔离红线：owner 和知识版本都只能来自 deps，不能是入参
-            user_id=deps.user_id,
-            space_id=deps.space_id,
-        )
+        with obs.span("tool:search_kb", query_chars=len(query or "")):
+            result = await search(
+                deps.session,
+                query,
+                deps.embedder,
+                deps.reranker,
+                # ⚠️ 隔离红线：owner 和知识版本都只能来自 deps，不能是入参
+                user_id=deps.user_id,
+                space_id=deps.space_id,
+            )
     except Exception as e:  # noqa: BLE001 - 见文件头第 2 条
         logger.warning("search_kb 失败 query=%r：%s", query[:60], e, exc_info=True)
         return "检索失败了（外部服务异常）。可以换个说法再试一次，或者先问别的。"

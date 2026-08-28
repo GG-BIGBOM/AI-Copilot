@@ -1,0 +1,52 @@
+# 后端镜像（W1.3，只给本地 compose 用）。
+#
+# ⚠️ **生产不用它**。线上是 uv sync + systemd，见 deploy/deploy.sh 和 ADR-1。
+# 这个文件的唯一目标是让评审者不必在自己机器上装 Python 3.12 和一堆 extra。
+
+FROM python:3.12-slim
+
+# ⭐ uv 直接从官方镜像里拷二进制，不 pip install uv：
+# 后者要先起一个 pip 解析依赖树，而我们要的只是一个静态二进制
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    # ⚠️ 必须显式给。容器里目录被拍平成 /app，`_resolve_root()` 的
+    # "向上找 .env.example" 那一趟仍然能找对，但显式声明省掉一整类
+    # "读不到 .env 于是静默用默认值连 kb:kb" 的排查（见 config.py 文件头）
+    COPILOT_ROOT=/app \
+    PATH="/app/backend/.venv/bin:$PATH"
+
+WORKDIR /app
+
+# ⭐ 先只拷依赖声明，装完再拷源码。改一行 Python 不会让依赖层失效——
+# 这一层装的是四百多个包，重装一次要几分钟
+COPY backend/pyproject.toml backend/uv.lock /app/backend/
+WORKDIR /app/backend
+# ⚠️ extra 要和 deploy.sh 那一行对齐：parse（上传解析）、agent（出方案）、
+# hybrid（W1.2 的 jieba）、obs（W1.1 的 OTel SDK）。
+# **`--extra parse-full` 不能加**——它拖进 docling → torch，镜像会涨到几个 G
+RUN uv sync --frozen --no-dev \
+      --extra parse --extra agent --extra hybrid --extra obs --extra eval
+
+WORKDIR /app
+COPY backend /app/backend
+COPY corrections /app/corrections
+COPY samples /app/samples
+COPY eval /app/eval
+COPY deploy/docker /app/deploy/docker
+
+# 装成可编辑包，这样 `copilot` 这个命令行入口能用
+WORKDIR /app/backend
+RUN uv sync --frozen --no-dev \
+      --extra parse --extra agent --extra hybrid --extra obs --extra eval
+
+WORKDIR /app
+# `data/` 在 compose 里挂的是 named volume；这里先建出来，
+# 免得第一次跑时 upload_dir 不存在
+RUN mkdir -p /app/data/uploads /app/data/images /app/data/private-images /app/data/exports
+
+EXPOSE 8000
+CMD ["uvicorn", "copilot.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from copilot import obs
 from copilot.api import logging_setup, providers, ratelimit
 from copilot.api.routes import admin as admin_routes
 from copilot.api.routes import answer_corrections as answer_correction_routes
@@ -35,8 +36,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # 追踪（W1.1）。**默认关，而且起不来也不影响服务**——
+    # `setup_tracing` 永远不抛，失败只记一行日志（见 obs.py 第 1 条）
+    obs.setup_tracing()
     yield
-    # 关停时收干净：httpx 连接池、数据库连接池
+    # 关停时收干净：httpx 连接池、数据库连接池、还没冲出去的那批 span。
+    # ⚠️ span 先冲：`shutdown()` 是有网络往返的，放在池子关完之后
+    # 更容易撞上"进程都快没了才开始发"
+    obs.shutdown()
     providers.close_all()
     await engine.dispose()
 

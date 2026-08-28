@@ -23,9 +23,8 @@ import uuid
 
 import pytest
 from chat_helpers import FakeEmbedder
-from test_isolation import PassThroughReranker
-
 from sqlalchemy import delete, select
+from test_isolation import PassThroughReranker
 
 from copilot import spaces
 from copilot.db.models import Chunk, Document, KnowledgeSpace
@@ -189,7 +188,9 @@ async def test_common_space_is_visible_from_every_space(maker, flagship_id, othe
 # ---------- 私有文档：两根轴同时生效 ----------
 
 
-async def test_private_document_respects_space(maker, api_client, logged_in, flagship_id, other_space):
+async def test_private_document_respects_space(
+    maker, api_client, logged_in, flagship_id, other_space
+):
     """⭐ 自己的文档也不跨空间。
 
     两根轴各管各的：`owner_id` 管「谁的」，`knowledge_space_id` 管「哪一版」。
@@ -278,8 +279,18 @@ async def test_ingested_chunks_inherit_the_document_space(maker, other_space):
     await _cleanup(maker, tag)
 
 
-async def test_a_new_conversation_is_pinned_to_a_space(api_client, logged_in, maker):
-    """⭐ 新会话必须钉死一个知识版本，而且是默认那个。"""
+async def test_a_new_conversation_is_pinned_to_a_space(
+    api_client, logged_in, maker, fake_providers
+):
+    """⭐ 新会话必须钉死一个知识版本，而且是默认那个。
+
+    ⚠️ `fake_providers` 是**必需的**，哪怕「你好」一次模型调用都不花。
+    它顺带换掉的是 `chat_module.SessionLocal`——寒暄流在**流里**自己开会话
+    （见 chat.py 文件头），不换的话那一段会打到真实连接池上。
+    本机跑是绿的，2026-08-25 搬上 CI 当场炸成
+    `got Future attached to a different loop`：每个 async 用例一个事件循环，
+    而连接池会把上一个循环里建的连接留给下一个用例。
+    """
     from chat_helpers import ask
     from sqlalchemy import select
 

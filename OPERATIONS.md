@@ -14,8 +14,13 @@
 ## 一、部署
 
 ```bash
+cp deploy/.env.example deploy/.env    # 填 COPILOT_HOST，仅此一次
 bash deploy/deploy.sh
 ```
+
+⚠️ **服务器地址不在仓库里**（公开仓库，见第八节）。`deploy.sh` 和
+`backup-pull.sh` 都从 `deploy/.env` 读 `COPILOT_HOST`，环境变量优先。
+**没有地址就报错退出**——刻意不留"默认推到某台机器"这种行为。
 
 七步：
 
@@ -26,8 +31,13 @@ bash deploy/deploy.sh
 [4/7] 推送勘误层        ⚠️ rm -rf 再解包，所以网页写的勘误绝不能落在这个目录
 [5/7] 同步 systemd 单元 + 运维脚本
 [6/7] 推送前端产物
-[7/7] 装依赖、跑迁移、重启
+[7/7] 装依赖、跑迁移、**回填词法索引**、重启
 ```
+
+⚠️ 第 7 步里那句 `copilot backfill-tsv` 是 W1.2 加的，顺序不能动：
+**在 alembic 之后**（列得先存在）、**在 restart 之前**（重启后新代码
+就开始走词法那一路了，没回填就是空召回）。它是幂等的——只补
+`content_tsv` 还是 NULL 的块，每次部署跑一遍几乎免费。
 
 之后自动跑：**公网验收**（走 nginx，不是 localhost）+ **备份体检**。
 
@@ -40,8 +50,14 @@ CORS_ORIGINS=          线上前后端同源，留空即可
 
 ### 装依赖的坑
 
-⚠️ **`backend/` 下别裸跑 `uv sync`**——它会卸掉 `parse` / `agent` / `eval`
-这几个 extra，部署自检当场变红。要用 `uv sync --all-extras`。
+⚠️ **`backend/` 下别裸跑 `uv sync`**——它会卸掉 `parse` / `agent` / `eval` /
+`hybrid` / `obs` 这几个 extra，部署自检当场变红。要用 `uv sync --all-extras`。
+
+⚠️ **服务器上装的 extra 是 `parse agent hybrid`**（见 `deploy.sh`），
+不含 `obs`（OTel SDK，默认关，见下）也不含 `eval`（评测只在本机跑）。
+**漏装 `hybrid` 不会报错**：`HYBRID_ENABLED` 虽然默认开着，
+但拿不到 jieba 时会静默退回纯向量检索，症状只是"裸粘贴一个编码搜不到"。
+journal 里那句 `HYBRID_ENABLED=true 但没装 jieba` 就是它。
 
 ⚠️ **服务器上跑 CLI 只能用 `.venv/bin/copilot`**，`uv run` 会卸掉 extra。
 
@@ -149,6 +165,42 @@ curl -s localhost:8000/api/feedback/recent | jq
 
 ⭐ 这就是那个闭环的入口：**差评 → 看是检索没召回还是模型没答好 → 补一道评测题**。
 没有这一步，👎 就真的只是个计数器。
+
+### span 树：一轮里哪一段慢（W1.1）
+
+`request_trace` 只有 `ttfb_ms` 和 `total_ms`，答不了"这 9 秒花在哪"。
+要拆开看就得开追踪。**线上默认关，而且 SDK 默认不装**（理由见 ADR-15）。
+
+先在本机看，不需要任何后端：
+
+```bash
+cd backend
+uv sync --extra obs
+TRACING_ENABLED=true TRACING_CONSOLE=true uv run copilot serve --reload
+```
+
+span 会直接打到终端。这样"埋点对不对"和"导出通不通"是两件可以分开排查的事。
+
+线上要开的话（⚠️ **先在本机实测 SDK 的常驻内存**，那台机器只有 1.6GB）：
+
+```bash
+# 1) 装 SDK —— 注意要把现有 extra 一起列出来，uv sync 是声明式的
+.venv/bin/uv sync --no-dev --extra parse --extra agent --extra hybrid --extra obs
+# 2) .env 里填四行
+#    TRACING_ENABLED=true
+#    TRACING_SAMPLE_RATIO=0.2          生产别全采
+#    OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces
+#    LANGFUSE_PUBLIC_KEY= / LANGFUSE_SECRET_KEY=
+systemctl restart copilot-api
+journalctl -u copilot-api -n 20 | grep 追踪已开启
+```
+
+⚠️ **两个 Langfuse key 只填一个的表现是 401**，而导出在后台线程里——
+401 只会刷一行 warning，应用照常服务、看板上永远是空的。
+所以缺一个就干脆别开（代码里也是这么判的）。
+
+⚠️ **要退回去只改一行**：`TRACING_ENABLED=false` + 重启。
+不必卸包、不必回滚代码——`obs.span()` 关掉时是纯空操作。
 
 ---
 

@@ -60,7 +60,8 @@ def test_canned_route_wins_over_everything():
 
 def test_non_terminal_tools_are_tool_source():
     """出方案那条路：正文是围着工具结果写的，既不是材料也不是常识。"""
-    assert classify(route="agent", tools=["generate_plan", "save_requirement"], answer="配置清单如下：") == "tool"
+    plan_tools = ["generate_plan", "save_requirement"]
+    assert classify(route="agent", tools=plan_tools, answer="配置清单如下：") == "tool"
     assert classify(route="agent", tools=["my_documents"], answer="你传过 3 份文档。") == "tool"
 
 
@@ -76,7 +77,9 @@ def test_answer_kb_with_citations_is_kb_not_tool():
 def test_answer_kb_without_citations_is_general_knowledge():
     """终结工具跑了、但答案一个编号都没标 —— 那就是它走了常识那条分支。"""
     assert (
-        classify(route="agent", tools=["answer_kb"], answer="安全库存是为应对需求波动预留的缓冲量。")
+        classify(
+            route="agent", tools=["answer_kb"], answer="安全库存是为应对需求波动预留的缓冲量。"
+        )
         == "general_knowledge"
     )
 

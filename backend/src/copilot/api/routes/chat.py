@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import FileResponse, StreamingResponse
 
-from copilot import usage
+from copilot import obs, usage
 from copilot.api import providers, stream
 from copilot.api.schemas import (
     BulkDeleteRequest,
@@ -49,7 +49,7 @@ from copilot.api.schemas import (
 from copilot.api.trace import TraceDraft
 from copilot.auth.deps import CurrentUser, SessionDep
 from copilot.config import get_settings
-from copilot.db.models import Conversation, Message, RequestTrace
+from copilot.db.models import Conversation, KnowledgeSpace, Message, RequestTrace
 from copilot.db.session import SessionLocal
 from copilot.qa import (
     DEFAULT_MODE,
@@ -57,8 +57,10 @@ from copilot.qa import (
     ask_stream,
     cited_only,
     is_no_answer,
+    named_subject,
     small_talk_reply,
 )
+from copilot.session_facts import SessionFacts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -121,6 +123,68 @@ async def _resolve_conversation(
 def _title_from(question: str) -> str:
     q = " ".join(question.split())
     return q[:TITLE_MAX] if len(q) <= TITLE_MAX else q[: TITLE_MAX - 1] + "…"
+
+
+async def _turn_index(session: AsyncSession, conv_id: uuid.UUID) -> int:
+    """这一轮是第几轮提问（1 起）。
+
+    ⚠️ **必须在本轮提问落库之前调**，同 `_recent_turns`；落库之后再调，
+    第 1 轮会被数成第 2 轮，事实表里所有的「第 N 轮说的」全部偏一位。
+    """
+    n = await session.scalar(
+        select(func.count(Message.id)).where(
+            Message.conversation_id == conv_id, Message.role == "user"
+        )
+    )
+    return (n or 0) + 1
+
+
+async def _record_facts(
+    session: AsyncSession,
+    conv: Conversation,
+    question: str,
+    turn: int,
+    profile=None,
+) -> SessionFacts:
+    """把这一轮能**确定**下来的事实记进 `conversations.facts`（W2.2）。
+
+    ⭐ **一条都不问模型。** 三个来源都是代码能自己算出来的：
+
+        ERP 版本   `conv.knowledge_space_id` → 空间名。结构上就是对的，
+                   而且它**根本不在对话记录里**——用户从来没"说"过版本，
+                   是他在新建会话时选的
+        客户/主体   `qa.named_subject`，复用私有材料闸门那条正则
+        需求 7 项   Agent 的 `save_requirement` 已经写进 `profile` 的，镜像过来
+
+    让模型每轮抽一次事实是另一种做法，这里**明确不用**：抽错的那一条会被钉在
+    上下文里，之后每一轮都在重复同一个错误，而它长着"系统确认过"的样子。
+    少记一项只是回到今天的行为，记错一项是新增的伤害。
+
+    ⚠️ **和 `SESSION_FACTS_ENABLED` 无关，永远记。** 开关管的是注不注入。
+    这样真开的那天，存量会话手里已经有账本了，而不是从那一刻起才开始攒。
+    """
+    facts = SessionFacts.load(conv.facts)
+    changed = False
+
+    if conv.knowledge_space_id is not None and "knowledge_space" not in facts.facts:
+        space = await session.get(KnowledgeSpace, conv.knowledge_space_id)
+        if space is not None:
+            changed |= facts.note("knowledge_space", space.name, turn)
+
+    if (subject := named_subject(question)) is not None:
+        changed |= facts.note("subject", subject, turn)
+
+    if profile is not None:
+        changed |= facts.note_requirements(profile, turn)
+
+    if changed:
+        conv.facts = facts.dump()
+    return facts
+
+
+def _facts_for_prompt(facts: SessionFacts) -> SessionFacts | None:
+    """开关关着就不注入。**记录和注入是两件事**，见 `_record_facts` 末尾。"""
+    return facts if get_settings().session_facts_enabled else None
 
 
 INTERRUPTED_MARK = "\n\n（生成已中断，内容可能不完整）"
@@ -234,8 +298,10 @@ async def _chat_stream(
     try:
         async with SessionLocal() as session:
             conv = await _resolve_conversation(session, user_id, client_id, question)
-            # 先读历史再落本轮提问，顺序不能反（见 _recent_turns）
+            # 先读历史再落本轮提问，顺序不能反（见 _recent_turns / _turn_index）
             history = await _recent_turns(session, conv.id)
+            turn = await _turn_index(session, conv.id)
+            facts = await _record_facts(session, conv, question, turn)
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -259,6 +325,10 @@ async def _chat_stream(
                 space_id=conv.knowledge_space_id,
                 history=history,
                 mode=mode,
+                # W2.2：末 6 轮之外的那几条事实（版本、客户、仓库数）从这里进来。
+                # 开关关着时 `_facts_for_prompt` 返回 None，这里就是空串，
+                # prompt 逐字节回到 W2.2 之前
+                facts=(f.human() if (f := _facts_for_prompt(facts)) else ""),
             )
 
             # 配图**在正文之前**发，和引用相反。因为前端要边流边把 [图1] 换成
@@ -279,46 +349,58 @@ async def _chat_stream(
             buf: list[str] = []
             writer = _AnswerWriter(session, conv.id)
 
-            try:
-                async for kind, piece in iterate_in_threadpool(text_stream):
-                    # ⭐ **推理草稿边出边发。**
-                    # 详解档走的 kimi-k2.6 是推理模型，实测第一个草稿字 1 秒就到，
-                    # 而**第一个正文字要 8~60 秒**。不发草稿的话，那几十秒前端
-                    # 一个字都没有——用户看到的就是「选了详解，它不回答」。
-                    # 草稿走 reasoning part，和正文分开：里面尽是「材料里没提到…」
-                    # 这种自我推翻的话，混进正文就成了一条会骗人的答案。
-                    if kind == "reasoning":
-                        if not reason_open:
-                            yield stream.reasoning_start(reason_id)
-                            reason_open = True
-                        yield stream.reasoning_delta(reason_id, piece)
-                        continue
+            # `generate` = 从发出请求到最后一个正文字（W1.1）。
+            #
+            # ⚠️ **它必须包住整个消费循环，不能只包 `ask_stream` 那一句。**
+            # `ask_stream` 返回的是一个**还没开始跑**的迭代器——模型调用发生在
+            # 第一次 `next()` 的时候，也就是下面这个 `async for` 里。只包那一句，
+            # 量出来的是"拼了个 messages 列表花了 0.1ms"，而 TTFB 的大头一点没量到。
+            with obs.span("generate", model=draft.model, mode=mode) as sp_gen:
+                try:
+                    async for kind, piece in iterate_in_threadpool(text_stream):
+                        # ⭐ **推理草稿边出边发。**
+                        # 详解档走的 kimi-k2.6 是推理模型，实测第一个草稿字 1 秒就到，
+                        # 而**第一个正文字要 8~60 秒**。不发草稿的话，那几十秒前端
+                        # 一个字都没有——用户看到的就是「选了详解，它不回答」。
+                        # 草稿走 reasoning part，和正文分开：里面尽是「材料里没提到…」
+                        # 这种自我推翻的话，混进正文就成了一条会骗人的答案。
+                        if kind == "reasoning":
+                            if not reason_open:
+                                yield stream.reasoning_start(reason_id)
+                                reason_open = True
+                            yield stream.reasoning_delta(reason_id, piece)
+                            continue
 
-                    # ⭐ **第一个正文字到了才发 `text-start`。**
-                    # 原来是在调模型之前就发，于是 AI SDK 立刻从 `submitted`
-                    # 切到 `streaming`——前端那句「正在理解问题」消失，换成一条
-                    # 空答案加一个闪烁光标。用户看到的就是「没有回答内容」。
-                    if reason_open:
-                        yield stream.reasoning_end(reason_id)
-                        reason_open = False
-                    if not text_open:
-                        yield stream.text_start(text_id)
-                        text_open = True
-                    draft.first_token()  # 只认第一次，见 TraceDraft.first_token
-                    buf.append(piece)
-                    yield stream.text_delta(text_id, piece)
-                    if writer.due:
-                        await writer.write("".join(buf), final=False)
-            except (asyncio.CancelledError, GeneratorExit) as exc:
-                # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0
-                await writer.interrupted("".join(buf))
-                # ⭐ 被打断的这一轮**也要记账**。用户点停止本身就是一种反馈
-                # （多半是答得不对或者太慢），而这恰恰是最该留下记录的一轮
-                draft.failed(exc)
-                draft.answer = "".join(buf)
-                draft.answer_chars = len(draft.answer)
-                await draft.save()
-                raise
+                        # ⭐ **第一个正文字到了才发 `text-start`。**
+                        # 原来是在调模型之前就发，于是 AI SDK 立刻从 `submitted`
+                        # 切到 `streaming`——前端那句「正在理解问题」消失，换成一条
+                        # 空答案加一个闪烁光标。用户看到的就是「没有回答内容」。
+                        if reason_open:
+                            yield stream.reasoning_end(reason_id)
+                            reason_open = False
+                        if not text_open:
+                            yield stream.text_start(text_id)
+                            text_open = True
+                        draft.first_token()  # 只认第一次，见 TraceDraft.first_token
+                        buf.append(piece)
+                        yield stream.text_delta(text_id, piece)
+                        if writer.due:
+                            await writer.write("".join(buf), final=False)
+                except (asyncio.CancelledError, GeneratorExit) as exc:
+                    # 取消**有时候**能立刻送到这里，那就顺手补一次，把丢失降到 0
+                    await writer.interrupted("".join(buf))
+                    # ⭐ 被打断的这一轮**也要记账**。用户点停止本身就是一种反馈
+                    # （多半是答得不对或者太慢），而这恰恰是最该留下记录的一轮
+                    draft.failed(exc)
+                    draft.answer = "".join(buf)
+                    draft.answer_chars = len(draft.answer)
+                    await draft.save()
+                    raise
+                sp_gen.set(
+                    # ⚠️ 从 draft 取，不在这里另算一份秒表：这一列在台账里已经有了
+                    ttfb_ms=draft.summary()["ttfb_ms"],
+                    answer_chars=len("".join(buf)),
+                )
             if reason_open:
                 yield stream.reasoning_end(reason_id)
                 reason_open = False
@@ -418,6 +500,8 @@ async def _agent_stream(
                     Message.role.in_(("user", "assistant")),
                 )
             )
+            turn = await _turn_index(session, conv.id)
+            facts = await _record_facts(session, conv, question, turn)
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -444,6 +528,10 @@ async def _agent_stream(
                 mode=mode,
                 profile=Requirement(**(conv.profile or {})),
                 checklist=Checklist(**conv.checklist) if conv.checklist else None,
+                # W2.2：和直路注入同一张表。None = 开关关着，行为退回 W2.2 之前。
+                # ⚠️ 这里给的是**对象**不是渲染结果——runner 那道
+                # 「历史被裁掉了」的闸门要问它「这一项你有没有」（见 _beyond_window）
+                facts=_facts_for_prompt(facts),
             )
 
             writer = _AnswerWriter(session, conv.id)
@@ -492,6 +580,11 @@ async def _agent_stream(
             # Agent 通常只是提个问题、一个字段都没记——写成 None 的话，
             # 下一轮就被路由回直路，对话直接散掉（线上实测踩到过）。
             conv.profile = deps.profile.model_dump(exclude_none=True)
+            # ⭐ W2.2：需求档案填了什么，事实表跟着记一份（含轮次和改口历史）。
+            # **在写回 profile 之后做**——这一轮 `save_requirement` 刚填的那几项
+            # 只存在于 `deps.profile` 里，早一步做就会漏掉本轮
+            if facts.note_requirements(deps.profile, turn):
+                conv.facts = facts.dump()
             if deps.checklist is not None:
                 conv.checklist = deps.checklist.model_dump()
             if deps.download_url:
@@ -752,6 +845,32 @@ async def _active_plan_flow(
     return bool(conv.profile) or any(trigger in conv.title for trigger in AGENT_TRIGGERS)
 
 
+async def _traced(
+    producer: AsyncIterator[str], draft: TraceDraft, question: str
+) -> AsyncIterator[str]:
+    """把整条流包进 `chat.turn` 这个根 span 里（W1.1）。
+
+    ⭐ **为什么是包一层而不是在每个生产者里各开一个。**
+    三条路（直路 / Agent / 寒暄）都要有根 span，而"这一轮走的哪条路"
+    只有 `chat()` 知道——生产者不该自己猜自己是谁（同 `TraceDraft` 那段注释）。
+    包一层，三条路自动都有，将来加第四条也不必记得补。
+
+    ⚠️ **span 必须在生成器内部开和关。** `StreamingResponse` 是在这个函数
+    返回**之后**才开始消费流的，在 `chat()` 里 `with obs.span(...)` 包住
+    `return` 那一句，span 会在第一个字节发出去之前就关掉——量出来的是
+    "装配一个响应对象花了 0.1ms"，而不是这一轮问答花了多久。
+    这和 trace.py 文件头那条「它不是中间件」是同一个坑。
+
+    汇总属性从 `draft.summary()` 取：**看板和台账不许各算一份**。
+    """
+    with obs.span("chat.turn", question_chars=len(question)) as turn:
+        async for part in producer:
+            yield part
+        # 流走完了 draft 才填齐（`answer_source` 要等答案、`ttfb_ms` 要等首字）。
+        # 放在 `async for` 之后是刻意的——放前面拿到的是一行空数据
+        turn.set(**draft.summary())
+
+
 @router.post("/chat")
 async def chat(
     body: ChatRequest, request: Request, user: CurrentUser, session: SessionDep
@@ -799,7 +918,7 @@ async def chat(
         request_id=getattr(request.state, "request_id", None),
     )
     return StreamingResponse(
-        producer(user.id, question, body.id, body.mode, draft),
+        _traced(producer(user.id, question, body.id, body.mode, draft), draft, question),
         media_type="text/event-stream",
         headers=stream.SSE_HEADERS,
     )

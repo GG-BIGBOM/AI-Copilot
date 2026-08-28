@@ -1,0 +1,35 @@
+# 前端镜像（W1.3，只给本地 compose 用）。
+#
+# ⚠️ **生产不用它**。线上是本机 `npm run build` → rsync `out/` → nginx 直接发，
+# 因为那台机器只有 1.6GB 内存，`next build` 会 OOM（见 deploy.sh 和 ADR-1）。
+# 这里能 build，是因为它跑在评审者自己的机器上。
+#
+# ⚠️ 构建上下文是**仓库根**，不是 `frontend/`——为的是让 nginx 的配置
+# 能和别的部署文件一起待在 `deploy/docker/` 下。根目录下的 `.dockerignore`
+# 会把 node_modules / out / data 挡在上下文之外，所以并不会因此变慢。
+
+# ---------- 构建 ----------
+FROM node:20-slim AS build
+WORKDIR /app
+
+# ⚠️ `NEXT_PUBLIC_*` 是**构建期**烤进产物的，静态导出没有运行时环境变量
+# （见 frontend/lib/api.ts 文件头）。所以它必须是 build arg 而不是 env——
+# 写成 env 的话，改了地址重启容器毫无作用，而页面上只会看到一片 CORS 错误
+ARG NEXT_PUBLIC_API_BASE=http://localhost:8000
+ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
+
+# 先只拷锁文件：改页面不会让 npm ci 那一层失效
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---------- 运行 ----------
+# 产物是纯静态文件，用一个几 MB 的 nginx 发就够了。
+# ⭐ 不用 `next start`：那要常驻一个 Node 进程，而 `output: "export"`
+# 生成的东西根本不需要它——保持和线上同一种发法（nginx 发 out/）
+FROM nginx:alpine
+COPY --from=build /app/out /usr/share/nginx/html
+COPY deploy/docker/nginx-static.conf /etc/nginx/conf.d/default.conf
+EXPOSE 3000

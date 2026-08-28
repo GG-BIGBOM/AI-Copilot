@@ -97,6 +97,24 @@ _TRUNCATED_REFERENCE_RE = re.compile(
 _EXPORT_RE = re.compile(r"(?:导出|下载|excel|xlsx)", re.IGNORECASE)
 
 
+def _beyond_window(deps: AgentDeps, question: str) -> bool:
+    """这一问指向的东西，是不是**真的**已经不在这一轮的上下文里了。
+
+    ⭐ W2.2 之前这就是 `deps.history_truncated` 一个布尔量。它当时是对的：
+    窗口外的东西只存在于被裁掉的对话原文里，裁了就是没了。
+    事实表出现之后不再是这样——版本、仓库数、客户名这几项**不依赖对话记录**
+    （版本干脆就是 `conversations.knowledge_space_id`），窗口裁不裁它们都在。
+
+    所以判据从「窗口裁了吗」变成「窗口裁了，**而且**事实表也答不出」。
+    `SessionFacts.answers()` 要求问句里出现那一项的别名、且表里真的有那一项，
+    两个条件都成立才算"答得出"——差一个就退回原来的边界话术，
+    而那个方向（说不知道）是安全的那一边。
+    """
+    if not deps.history_truncated:
+        return False
+    return not (deps.facts is not None and deps.facts.answers(question))
+
+
 def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | ModelResponse]:
     """把库里的 (role, content) 历史转成 Pydantic AI 的消息。
 
@@ -144,7 +162,18 @@ async def run_agent_stream(
     # 历史窗口已经裁掉时，含糊指代没有可靠的对象。必须在 Agent 启动前
     # 截断这条路径；否则模型可能先调用 answer_kb，再把随机命中的功能当成
     # 「那个功能」，后面的无工具回退保护就来不及了。
-    if deps.history_truncated and (
+    #
+    # ⭐ **W2.2 给这道闸门开了一个口子：事实表里有的，不算"无法确认"。**
+    # 「我一开始说的是哪个版本」在此之前一律被短路成一句「我无法确认」，
+    # 而版本这件事**从来就不在对话记录里**——它是会话创建时钉死在
+    # `conversations.knowledge_space_id` 上的。明明知道却说不知道，
+    # 比忘了更糟：用户会以为这个系统连自己选的版本都记不住。
+    #
+    # ⚠️ 口子开得很窄，判据在 `SessionFacts.answers()`：问句里要出现那一项的
+    # 别名、**并且**表里真的有那一项。只要有一个不成立就照旧短路——
+    # 「我最开始问的是什么问题」问的是**提问历史**，事实表里没有这种东西，
+    # 它仍然、也应该，得到那句边界话术
+    if _beyond_window(deps, question) and (
         _EARLIEST_HISTORY_RE.search(question) or _TRUNCATED_REFERENCE_RE.search(question)
     ):
         boundary_text = (
@@ -278,10 +307,10 @@ async def run_agent_stream(
     # 没有终结答案时，才把 Agent 自己写的那段吐出来：追问、时间、闲聊。
     # 有终结答案的话这段一定是复述或「希望对你有帮助」，丢掉正好。
     if deps.final_answer is None and (text := latest_draft(drafted)):
-        truncated_reference = deps.history_truncated and _TRUNCATED_REFERENCE_RE.search(
-            deps.question
-        )
-        if deps.history_truncated and _EARLIEST_HISTORY_RE.search(deps.question):
+        # 判据同上面那道闸门，走同一个函数：事实表答得出的不算"窗口外"
+        beyond = _beyond_window(deps, deps.question)
+        truncated_reference = beyond and _TRUNCATED_REFERENCE_RE.search(deps.question)
+        if beyond and _EARLIEST_HISTORY_RE.search(deps.question):
             # 当前窗口的第一条不等于整段会话第一条。让模型猜会制造一段看似确定的
             # 假记忆；这里用结构化状态直接说明边界。
             text = "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"

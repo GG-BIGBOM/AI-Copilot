@@ -1,0 +1,141 @@
+# 本地一键起（W1.3）。**生产不用这个。**
+#
+# ⚠️⚠️ **ADR-1「生产不上 Docker」没有被推翻。** 线上那台机器只有 1.6GB 内存，
+# 跑的是 systemd + nginx + 本机构建好的前端静态产物（见 deploy/deploy.sh）。
+# 这份 compose 存在的理由**只有一个**：让第一次打开这个仓库的人
+# 五分钟内能问出第一个带引用的答案，而不是先去装 Postgres、装 pgvector、
+# 配 uv、配 extra、再想办法弄一份语料。
+#
+# 两套部署方式并存不是矛盾——它们服务的约束不同：
+#     生产    1.6GB 内存，一个人运维，要的是"少一层是一层"
+#     评审者  一条命令，跑完就删，要的是"别让我装东西"
+#
+# ---------------------------------------------------------------
+# 用法
+#
+#   cp backend/.env.example .env    # 填两个 key，见下
+#   docker compose up
+#   # 等 init 那个容器打印「样例语料入库完成」，然后开 http://localhost:3000
+#   # 登录：demo@example.com / demo12345
+#
+# ⚠️ **必须自己填两个 key**，这是绕不过去的：
+#     SILICONFLOW_API_KEY   embedding + rerank（有免费额度）
+#     LLM_API_KEY           生成答案（DeepSeek）
+# 一个 RAG 系统没有这两样就只是个空壳。**不要把 key 提交进仓库。**
+# ---------------------------------------------------------------
+
+name: copilot
+
+services:
+  db:
+    # ⭐ 用官方 pgvector 镜像，不用 postgres 官方镜像再自己装扩展：
+    # 后者要么 build 一次要么进容器 apt，两条都会把"一条命令"变成"几条命令"
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+      POSTGRES_DB: kb
+      # 容器里的库是一次性的，用最快的设置。**别把这两行抄到生产上**
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # 暴露出来是为了本机能直接 psql 进去看，不是给外网用的
+      - "15432:5432"
+    healthcheck:
+      # ⚠️ 没有这个 healthcheck，init 会在 Postgres 还没起来时就跑 alembic，
+      # 报出来的是一个连接错误——而看的人会以为是配置写错了
+      test: ["CMD-SHELL", "pg_isready -U kb -d kb"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  init:
+    # 一次性容器：迁移 → 建知识版本 → 灌样例语料 → 回填词法索引 → 建演示账号。
+    # ⭐ 独立成一个 service 而不是塞进 api 的 entrypoint：
+    # api 会重启（改代码、崩溃），而这些步骤只该跑一次。混在一起的话，
+    # 每次重启都要重新走一遍——其中「灌语料」是要花 embedding 额度的
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kb:kb@db:5432/kb
+      COPILOT_ROOT: /app
+      # ⚠️ 这一行是 `copilot seed-user` 唯一的放行开关，服务器上根本不存在。
+      # 见 cli.py 里那段注释
+      COPILOT_ALLOW_SEED_USER: "1"
+      DEMO_EMAIL: ${DEMO_EMAIL:-demo@example.com}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo12345}
+    volumes:
+      - uploads:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/app/deploy/docker/init.sh"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kb:kb@db:5432/kb
+      COPILOT_ROOT: /app
+      # 本地是 http，cookie 不能带 Secure，否则浏览器根本不存它（见 config.py）
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # ⭐ compose 里默认把追踪打到容器日志（W1.1）。
+      # 不配任何后端也能看见 span 树的形状——"埋点对不对"和"导出通不通"
+      # 因此是两件可以分开排查的事
+      TRACING_ENABLED: ${TRACING_ENABLED:-true}
+      TRACING_CONSOLE: ${TRACING_CONSOLE:-true}
+      TRACING_ENVIRONMENT: compose
+    volumes:
+      - uploads:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command:
+      ["uvicorn", "copilot.api.app:create_app", "--factory",
+       "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    # 上传文档的解析队列。**独立进程**，和线上的 copilot-worker.service 一致——
+    # 解析会吃内存，和 API 挤在一个进程里的话，一份大 PDF 能把答题也拖垮
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kb:kb@db:5432/kb
+      COPILOT_ROOT: /app
+    volumes:
+      - uploads:/app/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command: ["copilot", "worker"]
+
+  web:
+    build:
+      # 上下文是仓库根（不是 frontend/），好让 nginx 配置和别的部署文件
+      # 一起待在 deploy/docker 下。.dockerignore 挡住了 node_modules / out
+      context: .
+      dockerfile: deploy/docker/Dockerfile.frontend
+      args:
+        # ⚠️ Next 的静态导出是**构建期**把这个值烤进产物的，不是运行期读的。
+        # 改了它必须 `docker compose build web`，重启 web 是没用的——
+        # 这一条踩过的人都记得
+        NEXT_PUBLIC_API_BASE: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  uploads:

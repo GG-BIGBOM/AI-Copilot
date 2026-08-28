@@ -202,7 +202,10 @@ def test_only_the_draft_after_the_last_tool_call_is_sent():
         drafted,
     )
     _translate(
-        PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="好的，已记录。仓库是自营、云仓还是委外？")),
+        PartDeltaEvent(
+            index=0,
+            delta=TextPartDelta(content_delta="好的，已记录。仓库是自营、云仓还是委外？"),
+        ),
         drafted,
     )
 
@@ -614,6 +617,93 @@ async def test_truncated_history_blocks_tool_calls_for_vague_reference(maker):
     assert "请直接说出功能名称" in answer
     assert text_of(chunks) == answer
     assert deps.used_tools == set()
+
+
+async def test_facts_table_lifts_the_window_boundary_for_what_it_knows(maker):
+    """⭐⭐ W2.2：事实表里有的那一项，不算"窗口外"。
+
+    「我一开始说的是哪个版本」在此之前一律被短路成一句「我无法确认」——
+    **而版本这件事从来就不在对话记录里**：它是新建会话时钉死在
+    `conversations.knowledge_space_id` 上的。明明知道却回一句不知道，
+    比忘了更糟，用户会以为这系统连自己选的版本都记不住。
+    """
+    from copilot.session_facts import SessionFacts
+
+    facts = SessionFacts()
+    facts.note("knowledge_space", "旗舰版", 1)
+
+    async with maker() as s:
+        deps = _deps(s, history_truncated=True, facts=facts)
+        chunks, answer = await drain(
+            "我一开始说的是哪个版本？",
+            deps,
+            scripted("你选的是旗舰版。"),
+        )
+
+    assert "无法确认" not in answer, "事实表里明明有版本，却回了边界话术"
+    assert "旗舰版" in answer
+
+
+async def test_facts_table_does_not_lift_the_boundary_for_what_it_lacks(maker):
+    """⚠️ 口子只开给表里**真的有**的那一项。
+
+    表里只有版本，用户问的是仓库数——照旧走边界话术。放行的话，
+    模型手里是一张讲版本的表和一个关于仓库数的问题，它会编一个出来。
+    """
+    from copilot.session_facts import SessionFacts
+
+    facts = SessionFacts()
+    facts.note("knowledge_space", "旗舰版", 1)
+
+    async with maker() as s:
+        deps = _deps(s, history_truncated=True, facts=facts)
+        chunks, answer = await drain(
+            "我一开始说的是几个仓来着？",
+            deps,
+            scripted("你说的是 4 个仓。"),
+        )
+
+    assert "无法确认" in answer
+    assert "4 个仓" not in answer
+
+
+async def test_asking_about_the_earliest_question_still_hits_the_boundary(maker):
+    """⭐ 「我第一个问题是什么」问的是**提问历史**，事实表里没有这种东西。
+
+    这一条是上面那个口子的边界：认了它，就等于让模型拿一张讲版本和仓库数的表
+    去回答"你最开始问的是什么"——它会编一个出来，而且长着确定的样子。
+    """
+    from copilot.session_facts import SessionFacts
+
+    facts = SessionFacts()
+    facts.note("knowledge_space", "旗舰版", 1)
+    facts.note("warehouse_count", "4", 2)
+
+    async with maker() as s:
+        deps = _deps(s, history_truncated=True, facts=facts)
+        chunks, answer = await drain(
+            "第一个问题我问的是什么？",
+            deps,
+            scripted("你第一个问的是订单审核在哪里。"),
+        )
+
+    assert "无法确认" in answer
+    assert "订单审核" not in answer
+
+
+async def test_untruncated_history_is_unaffected_by_the_facts_table(maker):
+    """窗口没裁的时候，事实表在不在都不该改变这条路径的行为。"""
+    from copilot.agent.runner import _beyond_window
+    from copilot.session_facts import SessionFacts
+
+    facts = SessionFacts()
+    facts.note("knowledge_space", "旗舰版", 1)
+
+    async with maker() as s:
+        assert _beyond_window(_deps(s), "我一开始说的是哪个版本") is False
+        assert _beyond_window(_deps(s, facts=facts), "我一开始说的是哪个版本") is False
+        # 裁了、又没有事实表 —— 就是 W2.2 之前那个布尔量本身
+        assert _beyond_window(_deps(s, history_truncated=True), "随便什么") is True
 
 
 async def test_guard_does_not_fire_when_a_tool_did_run(maker):

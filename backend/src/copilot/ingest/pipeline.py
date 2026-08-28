@@ -24,10 +24,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import bindparam, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from copilot import assets, spaces
+from copilot import lexical as lexical_mod
 from copilot.config import get_settings
 from copilot.db.models import Chunk as ChunkRow
 from copilot.db.models import Document
@@ -138,6 +139,46 @@ async def ingest_documents(
     return stats
 
 
+async def _write_tsv(session: AsyncSession, document_id: uuid.UUID) -> int:
+    """给这篇文档的块补上 `content_tsv`（W1.2）。返回写了几块。
+
+    ⭐ **切词在 Python 侧（jieba），`to_tsvector` 只负责收下已经切好的词。**
+    Postgres 没有中文分词配置，理由和用法见 `copilot.lexical` 文件头。
+
+    ⚠️ **没装 jieba 时静静跳过，不抛。** `hybrid` 是可选 extra，
+    服务器上默认不装；入库因为一个默认关着的功能而失败，是不能接受的。
+    代价是这些块的 `content_tsv` 为 NULL——而 NULL 在词法查询里就是
+    "不命中"，也就是退回纯向量检索，那本来就是 `HYBRID_ENABLED=false` 的行为。
+
+    ⚠️ **一条 executemany，不是一块一个 round trip。** 语雀全量入库是
+    5000 块量级，一块一次的话光网络往返就要几十秒——而这一步本该是免费的。
+    """
+    if not lexical_mod.available():
+        return 0
+    rows = (
+        await session.execute(
+            select(ChunkRow.id, ChunkRow.content).where(ChunkRow.document_id == document_id)
+        )
+    ).all()
+    params = [
+        {"cid": cid, "tok": lexical_mod.tokenize(content)} for cid, content in rows
+    ]
+    if not params:
+        return 0
+    await session.execute(
+        # ⚠️ **打在 `__table__` 上，不是打在 ORM 实体上。**
+        # `update(ChunkRow)` + 一串参数字典会走 SQLAlchemy 的
+        # "ORM bulk update by primary key" 那条路，它要求每个字典里
+        # 有一个叫 `id` 的键，报出来的是 "No primary key value supplied"——
+        # 一个和"我明明写了 WHERE"完全对不上的错误。走 Core 就没有这层猜测。
+        update(ChunkRow.__table__)
+        .where(ChunkRow.__table__.c.id == bindparam("cid"))
+        .values(content_tsv=func.to_tsvector("simple", bindparam("tok"))),
+        params,
+    )
+    return len(params)
+
+
 async def write_chunks(
     session: AsyncSession,
     doc: Document,
@@ -191,6 +232,16 @@ async def write_chunks(
             for c, vec in zip(chunks, vectors, strict=True)
         ]
     )
+    # ⚠️ 必须先 flush：新块还在 session 的待写队列里，
+    # `_write_tsv` 是按 `document_id` 去库里查的，不 flush 会一块都查不到——
+    # 表现是"新入库的文档词法检索永远搜不到"，而且没有任何报错
+    await session.flush()
+
+    # 词法索引（W1.2）。**和块一起写，不做成异步补算**——补算意味着
+    # 有一段时间里新块只有向量没有分词，而那段时间里的答案会时好时坏，
+    # 没有任何报错，也无从复现。
+    await _write_tsv(session, doc.id)
+
     # M14-B 双写：块上的 `images` 仍是事实来源，这里再落一份带 owner 的资产行，
     # 好让私有图能走要鉴权的 `/api/images/{id}`。**放在 add_all 之后**——
     # 它要按这一轮的图去删旧行，得先知道这一轮有哪些图

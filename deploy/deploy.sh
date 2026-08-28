@@ -47,8 +47,11 @@ CRLF_CHECK=$(cat <<'PYEOF'
 import pathlib, sys
 bad = sorted(
     str(f)
+    # ⚠️ **rglob 不是 glob。** `deploy/docker/init.sh` 跑在容器里的 Linux
+    # shell 下，一个  就是 `bad interpreter`；而它在 deploy/ 的子目录里，
+    # 非递归的 glob 根本看不见它（W1.3 加进来的时候差点漏掉）
     for pattern in ("*.sh", "*.service", "*.timer", "*.conf")
-    for f in pathlib.Path("deploy").glob(pattern)
+    for f in pathlib.Path("deploy").rglob(pattern)
     if b"\r\n" in f.read_bytes()
 )
 if bad:
@@ -66,12 +69,22 @@ PYEOF
 # 而且它卸完就走，下次在本机跑评测还得手动装回来。
 # 服务器那一段（第 7 步）早就为同样的理由改成直接调 `.venv/bin/...` 了，
 # 本机这一段一直漏着。要重装回来：
-#   cd backend && uv sync --extra parse --extra agent --extra eval
+#   cd backend && uv sync --extra parse --extra agent --extra eval --extra hybrid --extra obs
 PY=backend/.venv/bin/python
 [ -x "$PY" ] || PY=backend/.venv/Scripts/python.exe   # Git Bash on Windows
 [ -x "$PY" ] || { echo "找不到 backend/.venv，先 uv sync 一次"; exit 1; }
 echo "$CRLF_CHECK" | "$PY" - || exit 1
-( cd backend && "../$PY" -m ruff check . && "../$PY" -m pytest -q )
+# ⚠️ **`../tests ../eval` 不能省**（ADR-18）。这两个目录在仓库根、不在
+# `backend/` 下，`ruff check .` 一行扫不到它们——在此之前它们**从来没被 lint 过**，
+# 而 CI 和这里都绿着，看起来像在管。真代价不是风格：`tests/test_eval_scoring.py`
+# 里有一道叫「…is contamination」的用例算完指标就把它扔了（F841），
+# 也就是那条判据一直没人验过。测试是这个项目唯一的安全网，它自己没人看着。
+#
+# ⚠️ 配置来自 `backend/pyproject.toml`，靠的是 ruff「本目录没有配置就用 CWD 那份」
+# 的回退——所以这一句必须在 `cd backend` **之后**跑。哪天有人在仓库根加了
+# `pyproject.toml`，tests/ 会改用那一份；漏配 select 的话行长会从 100 掉到 88，
+# 表现是**当场变红**而不是悄悄放行，这个方向是安全的。
+( cd backend && "../$PY" -m ruff check . ../tests ../eval && "../$PY" -m pytest -q )
 ( cd frontend && npm test && npm run lint && npx tsc --noEmit )
 
 # 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
@@ -157,17 +170,23 @@ echo "==> [7/7] 装依赖、跑迁移、重启"
 # ⚠️⚠️ 同理，**别在服务器上裸跑 `uv run`**。它会先把环境同步成 pyproject
 #    的默认样子（带 dev 组、不带 extra），等于悄悄改了生产的 venv。
 #    临时验证请用 `.venv/bin/python -c ...` 直接调解释器，绕开 uv 的同步。
-#    真动了的话，把上面这条 `uv sync --no-dev --extra parse --extra agent`
+#    真动了的话，把上面这条 `uv sync --no-dev --extra parse --extra agent --extra hybrid`
 #    原样重跑一遍就能拉回声明状态。
 #
 # ⭐ `--extra agent` 是 M7 的（pydantic-ai + openpyxl）。它拖进来四十来个包，
 #    但**只在有人真的要方案时才 import**（`routes/chat.py` 里那几个 import
 #    写在函数内部，不在模块顶层）。所以普通问答的常驻内存不受影响——
 #    这在 1.6GB 的机器上不是洁癖，是能不能装的问题。
+#
+# ⭐ `--extra hybrid` 是 W1.2 的（jieba）。纯 Python、约 20MB、不碰 torch，
+#    所以它上得了这台机器。**漏装不会报错**：`HYBRID_ENABLED` 虽然默认开着，
+#    但 `copilot.lexical` 拿不到 jieba 时会静默退回纯向量检索，
+#    只在日志里留一句 warning——症状是"裸粘贴一个编码搜不到"，
+#    而那正是 hybrid 唯一真正修好的那条路（见 DECISIONS.md ADR-8）。
 $SSH "set -e
       export PATH=/root/.local/bin:\$PATH COPILOT_ROOT=$APP_DIR
       cd $APP_DIR
-      uv sync --no-dev --extra parse --extra agent 2>&1 | tail -2
+      uv sync --no-dev --extra parse --extra agent --extra hybrid 2>&1 | tail -2
       # ⚠️ **迁移用 .venv/bin/alembic，不能用 uv run alembic。**
       # uv run 会先把环境同步成 pyproject 的默认样子——带 dev 组、**不带 extra**，
       # 正好把上一行刚装好的 parse/agent 卸掉。表现极其难查：部署脚本全绿、
@@ -180,6 +199,11 @@ $SSH "set -e
       # 然后把输出拼进远程命令里。踩过一次：注释里写了一句
       # “uv run alembic”加反引号，结果本机真去 spawn 了一个不存在的 alembic。
       .venv/bin/alembic upgrade head 2>&1 | tail -2
+      # 词法索引回填（W1.2）。**幂等**：只补 content_tsv 还是 NULL 的块，
+      # 已经算过的一块都不碰，所以每次部署都跑一遍是安全且几乎免费的。
+      # ⚠️ 顺序不能反：它要在 alembic 之后（列得先存在），
+      # 在 restart 之前（重启后新代码就开始走词法那一路了，没回填就是空召回）
+      .venv/bin/copilot backfill-tsv 2>&1 | tail -2
       chown -R copilot:copilot $APP_DIR
       systemctl restart copilot-api copilot-worker
       systemctl is-active copilot-worker copilot-sync.timer

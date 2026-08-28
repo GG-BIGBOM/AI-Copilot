@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,17 @@ from copilot.agent.checklist import Checklist, Requirement
 from copilot.providers.base import Embedder, Reranker
 from copilot.providers.llm import ChatLLM
 from copilot.qa import DEFAULT_MODE
+
+if TYPE_CHECKING:  # 运行时不导入，否则成环
+    from copilot.session_facts import SessionFacts
+
+# ⚠️ **`SessionFacts` 只能是类型注解，不能在运行时 import。**
+# `session_facts` 要读 `agent.checklist.REQUIREMENT_FIELDS`（字段清单只许有一份），
+# 而 `import copilot.agent.checklist` 会先跑 `agent/__init__.py`，那里面
+# 一路 import 到这个文件——真导入的话就是
+# `session_facts → agent → agent.deps → session_facts` 一个死环。
+# 文件头已经有 `from __future__ import annotations`，注解本来就是字符串，
+# dataclass 也不会去解析它，所以这里什么都不缺。
 
 # 终结工具往外吐东西的出口。`(kind, payload)`：
 #     ("text", "旺店")   正文增量，直接进用户看到的那条消息
@@ -49,7 +61,19 @@ class AgentDeps:
     history: list[tuple[str, str]] = field(default_factory=list)
     # True 表示更早的消息因 HISTORY_TURNS 上限被省略。模型必须知道这件事，
     # 否则问「第一个问题是什么」时会把当前窗口第一条冒充整段会话第一条。
+    #
+    # ⚠️ W2.2 之后它**仍然不能删**，但读法要跟着变：事实表能答出来的那几项
+    # （哪一版 ERP、几个仓、哪家客户）已经不受窗口限制了，此时再回一句
+    # 「我无法确认」就是明明知道却说不知道。判据见 runner 里那道闸门
     history_truncated: bool = False
+    # ⭐ 会话级已确认事实（W2.2）。**None = 这一轮不注入**。
+    #
+    # ⚠️ 「开关关着」和「表是空的」都表现为不注入，但它们不是一回事：
+    # 关关着的时候路由层**照样记录**（写库、跨轮累积），只是不把这个对象交进来。
+    # 这个顺序是刻意的——真开的那天，存量会话手里已经有账本了。
+    # 谁决定开不开，就由谁传：那个人是路由层，`ask_stream` 自己不读配置
+    # （评测要能在同一次运行里 A/B 两版 prompt）
+    facts: SessionFacts | None = None
     # True 表示本轮属于实施方案收集流程。不能只看 `profile.filled()`：用户可能在
     # 第一轮一句话给齐 7 项，此时模型尚未调用工具，profile 仍是空的；若仍套用
     # 普通问答的 3 次工具上限，会在保存到第 4 项时整轮失败。
@@ -122,6 +146,11 @@ class AgentDeps:
         """
         if self.emit is not None and self.images and not self.images_sent:
             await self.emit("images", None)
+
+    @property
+    def facts_prompt(self) -> str:
+        """事实表渲染成的那一段，没有就是空串。两条路注入的是同一份文本。"""
+        return self.facts.human() if self.facts is not None else ""
 
     @property
     def context_text(self) -> str:

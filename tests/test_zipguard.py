@@ -43,7 +43,8 @@ def test_real_office_files_are_nowhere_near_the_limits(tmp_path):
     而翻车的样子是用户上传失败。这条断言把余量本身钉死——
     以后有人想调小阈值，得先让这条测试同意。
     """
-    for path, kind in ((make_docx(tmp_path / "a.docx"), "Word"), (make_pptx(tmp_path / "b.pptx"), "PPT")):
+    made = ((make_docx(tmp_path / "a.docx"), "Word"), (make_pptx(tmp_path / "b.pptx"), "PPT"))
+    for path, kind in made:
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
         raw = sum(i.file_size for i in infos)

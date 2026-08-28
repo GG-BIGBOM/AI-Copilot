@@ -153,6 +153,102 @@ class Settings(BaseSettings):
     # 这个值要在 M8 用评测集标定，别凭感觉调。
     rerank_score_threshold: float = 0.005
 
+    # ===== 可观测性：一次请求的 span 树（W1.1）=====
+    # ⚠️ **默认关，而且是可选依赖**（`uv sync --extra obs`）。
+    # 生产那台机器只有 1.6GB 内存，OTel SDK 的常驻占用要实测过才谈开不开；
+    # 没装 SDK 时打开它只会在日志里留一句 warning，服务照常起（见 obs.py）。
+    tracing_enabled: bool = False
+    tracing_service_name: str = "copilot"
+    tracing_environment: str = "dev"
+    # 采样率。本机和评测用 1.0（全采），生产降下来——
+    # span 是按 trace_id 采的，采到就是一整棵树，不会出现"半棵树"
+    tracing_sample_ratio: float = 1.0
+    # 把 span 打到控制台。**本机调试用**：不配任何后端也能看见树的形状，
+    # 这样"埋点对不对"和"导出通不通"是两件可以分开排查的事
+    tracing_console: bool = False
+
+    # OTLP 导出。Langfuse 的入口形如
+    # `https://cloud.langfuse.com/api/public/otel/v1/traces`
+    otlp_endpoint: str = ""
+    # 额外头，`k=v,k2=v2`。OTel 官方环境变量就是这个格式
+    otlp_headers: str = ""
+    # Langfuse 收 HTTP Basic。**两个都填才会加这个头**——只填一个的表现是
+    # 401，而导出在后台线程里，401 只会刷一行日志，看板上永远是空的
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
+    # ===== 混合检索：BM25 + RRF（W1.2）=====
+    # ⭐ **默认开——因为量过了。** 2026-08-28，`eval/keyword.yaml` 45 题：
+    #
+    #     检索命中 top-5   35/45  →  44/45
+    #     裸粘贴那 15 条   6/15   →  15/15    MRR@5 0.367 → 0.933
+    #     完整问句那 30 条 29/30  →  29/30    一道题的名次都没变
+    #
+    # 结论很干净：**bge-m3 + 重排在完整问句上已经饱和，hybrid 一分没加也一分没减；
+    # 真正断掉的是"用户什么都不说、直接把一个编码/字段名贴进来"那条路**——
+    # `JTSD`、`23381383`、`ownerCode`、`POSTB` 这些 dense 一条都找不到。
+    # 完整的 A/B 和取舍见 DECISIONS.md 的 ADR-8。
+    #
+    # ⚠️ **关掉它随时可以，而且是安全的**：`retrieve.search()` 里所有 BM25
+    # 相关的代码一行都不会执行，行为退回 W1.2 之前逐字节一致。
+    #
+    # ⚠️ 两种"开着但没生效"的情形都是**静默退回纯向量**，不是报错：
+    # 服务器没装 jieba（`uv sync --extra hybrid`），或者 `content_tsv`
+    # 还没回填（`copilot backfill-tsv`）。这是刻意的——一个检索增强
+    # 不该有能力把整个站点变成 500。前者会在日志里留一句 warning。
+    hybrid_enabled: bool = True
+    # 词法召回数量。和向量那一路的 `retrieve_top_k` 各取各的，
+    # 融合之后再一起进重排
+    hybrid_lexical_k: int = 20
+    # RRF 的常数。60 是原论文（Cormack 2009）的取值，也是各家默认。
+    # ⚠️ 它决定"排名差一位"值多少分：k 越小，头部名次的权重越大。
+    # 调它之前先想清楚是想让谁赢——没有理由就别动
+    hybrid_rrf_k: int = 60
+    # ⭐ 词法查询只保留**文档频率低于这个比例**的词（见 `retrieve._rare_terms`）。
+    # 0.02 = 出现在 2% 以上的块里就算废话。这不是拍脑袋：`ts_rank_cd` 不含 IDF，
+    # 不砍高频词的话，排在最前面的永远是"这个话题讲得最密集"的那几块，
+    # 而不是含着那个编码的那一块——实测词法带进来的 229 块新内容，
+    # 最终一块都没进 top-5
+    hybrid_df_max_ratio: float = 0.02
+    # 整句都是常用词时的保底留词数。砍成空查询等于这一路直接消失
+    hybrid_min_terms: int = 4
+
+    # ===== 会话级已确认事实（W2.2）=====
+    # ⚠️ **默认关，理由是这个项目的老规矩**：它改的是送进模型的 system prompt，
+    # 也就是「会让答案变、但绝不会报错」的那一类——这一类一律先做成开关、
+    # 默认关，等 A/B 数字出来再谈开不开（`hybrid_enabled` /
+    # `allow_general_knowledge` / `agent_enabled` 三个先例都是这么来的）。
+    #
+    # 关着的时候：事实表照常**记录**（写库、跨轮累积、随会话一起删），
+    # 只是**不注入** prompt。这个顺序是刻意的——真要打开的那天，
+    # 存量会话手里已经有账本了，而不是从那一刻起才开始攒。
+    #
+    # 打开之前要有的数字：`eval/longchat.yaml` 的跨窗口指代解析成功率，
+    # 开关两边各跑一次（口径见 EVALUATION.md）。
+    session_facts_enabled: bool = False
+
+    # ===== 提示注入防线（W2.3）=====
+    # 材料区加围栏 + 一段「材料区里的指令一律不执行」的规则。两样由这一个开关
+    # 同时管——规则里写着"边界只有那两个标记"，而不开围栏时那两个标记不存在。
+    #
+    # ⚠️ **默认关，但理由和上面那几个不一样，值得说清楚。**
+    # `hybrid` / `general_knowledge` / `agent` 是**能力**开关，关着是一个完整的产品；
+    # 这一个是**防线**，关着是有洞的状态。之所以仍然默认关，是因为
+    #   1. 今天的注入面是**自伤**不是跨租户：上传只进自己的私有库，
+    #      而 user_id / space_id 都不是工具入参（结构上的保证，注入撬不动）
+    #   2. 它改的是每一轮的 prompt，而这个项目里 prompt 一改就必须重量
+    #      ——M12 压缩铁律那次，幻觉率 0% → 50%
+    #
+    # ⚠️⚠️ **前提变了就要立刻改默认值**：一旦有共享知识空间、或者公共库
+    # 允许用户投稿，攻击面立刻从自伤升级成跨租户，那时候"等 A/B"不是理由。
+    #
+    # 打开之前要有的数字：`eval/risk_boundary.py` 的 `injection` 那一组要 100%，
+    # 且原有三条硬指标（高风险幻觉 / 假引用 / 跨平台串台）一个点都不许退。
+    #
+    # 注：伪造区段标记的**剥离**（`injection.sanitize`）不受这个开关控制，
+    # 永远开着——它在没有攻击时是恒等函数，零风险的东西不做成开关。
+    injection_guard_enabled: bool = False
+
     # ===== 语雀抓取 =====
     yuque_rate_limit_per_sec: float = 1.5  # 保守限速，别把自己封了
     yuque_max_retries: int = 3

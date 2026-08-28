@@ -1,0 +1,378 @@
+# 关键词型评测子集 —— W1.2 混合检索（BM25 + RRF）的 A/B 题集
+#
+# ⚠️ **这份题集单独存在，不并进 dataset.yaml。**
+# 并进去等于把公共库 75 题的基线变成 105 题的基线，历史 tag 之间的 `--compare`
+# 会安安静静地变成「拿两个不同的题集比大小」，而报告上一个字都不提。
+# 跑法：
+#     uv run python ../eval/run.py --dataset ../eval/keyword.yaml --check
+#     uv run python ../eval/run.py --dataset ../eval/keyword.yaml --tag kw-dense
+#     HYBRID_ENABLED=true ... --tag kw-hybrid
+#     uv run python ../eval/run.py --compare kw-dense kw-hybrid
+#
+# ⭐ **这 30 道题是为了回答一个问题：hybrid 到底有没有用。**
+# 所以它们全是**纯向量最该输的那一类**——报错原文、平台编码、接口字段名、
+# 版本号、参数上限。这些串在 embedding 空间里几乎没有"意思"：
+# `JTSD` 和 `YUNDA` 挨得很近，`1.5.6.8` 和 `1.5.9.6` 也挨得很近，
+# 而问的人要的恰恰是那一个格子。
+#
+# ⚠️ 同 dataset.yaml：**每一道题的答案都是从真实语料里抄出来的**。
+# 出题方式是先用 SQL 把含报错串 / 大写编码 / 三段版本号 / 数量上限的块捞出来读，
+# 再针对读到的具体事实出题。凭想象出的题会让指标好看却毫无意义。
+#
+# ⚠️ **`--check` 就够做这次决策了。** 它只量检索（`source_hit`：期望那篇文档
+# 有没有进 top-5），不调 LLM、不花钱。而 hybrid 改的**只有候选池**——
+# 生成那一层一个字都没动。检索命中率不动的话，答案准确率也没有理由动。
+# 真要出付费的那一轮，用同样的 `--dataset` 跑两个 tag 再 `--compare`。
+
+meta:
+  corpus: 语雀 wdterpqjb（旗舰版ERP）4573 块，2026-08-28 快照
+  built_at: '2026-08-28'
+  built_from: SQL 捞出含报错串/大写编码/版本号/数量上限的块，逐块阅读后出题
+  purpose: W1.2 混合检索（BM25 + RRF）的 A/B。改前先量，没提升就撤掉并写进 DECISIONS.md
+
+cases:
+  # ============ 报错原文（8 题）============
+  # 这一类是 hybrid 最该赢的：用户会**原样粘贴**报错串，而报错串本身
+  # 是一段没有语义的英文/中文碎片，向量检索只能靠它周围那几个字猜。
+
+  - id: kw-err-nosuchmailno
+    kind: fact
+    q: 物流同步回传报错 no such mailNo 是什么原因？
+    source: 物流映射错误处理方式
+    must_include: ['淘工厂']
+    why: 纯英文报错串。向量把它当成一串无意义 token，词法能精确命中原文
+
+  - id: kw-err-gate-invalid-packet
+    kind: fact
+    q: 登录账号报错 gate invalid packet 怎么处理？
+    source: ERP登录常见报错
+    must_include: ['网络']
+    why: 同上。这条的答案（网络问题、换热点、关防火墙）在语义上和问句毫无重合
+
+  - id: kw-err-already-connected
+    kind: fact
+    q: 登录报错 Cannot open already connected session. 怎么解决？
+    source: ERP登录常见报错
+    must_include: ['杀毒']
+    why: 报错串很长且是完整英文句，最容易被向量当成"某种通用连接问题"
+
+  - id: kw-err-cd01
+    kind: fact
+    q: 物流同步报错 CD01#未在状态机中找到规则#CD01 要怎么处理？
+    source: 物流同步常见报错
+    must_include: ['物流同步']
+    why: 中英混合的错误码。`CD01` 是唯一的判别信息，其余全是通用词
+
+  - id: kw-err-1009-illegal-request
+    kind: fact
+    q: 物流同步报错 [1009] illegal request parameter 怎么办？
+    source: 物流同步常见报错
+    must_include: ['映射']
+    why: 带方括号的错误码 + 英文串。方括号在向量里是噪声，在词法里是定位点
+
+  - id: kw-err-duplicate-mailno
+    kind: fact
+    q: 国美平台物流同步失败，报错"该运单号已超过允许的重复填写次数！不允许提交"，为什么？
+    source: 物流同步常见报错
+    must_include: ['两个']
+    why: 长中文报错串。整句原样出现在语料里，词法能整段对上
+
+  - id: kw-err-shanrong-empty-cpcode
+    kind: fact
+    q: 善融商城物流同步报错"该发货记录物流公司代码为空"该怎么修？
+    source: 物流同步常见报错
+    must_include: ['物流映射']
+    why: 平台名（善融商城）+ 报错串。两个都是低频词，正是词法的强项
+
+  - id: kw-err-transfer-pending
+    kind: fact
+    q: 删除货品时报错"待调入量不为0"，要去哪个界面处理？
+    source: 删除货品
+    must_include: ['调拨单管理']
+    why: 报错串 + 要一条界面路径。答错的代价是客户照着点点不到
+
+  # ============ 平台 / 接口编码（7 题）============
+
+  - id: kw-code-jtsd
+    kind: fact
+    q: 微信视频号发货设置里，极兔快递对应的平台物流编码 JTSD 出现在哪篇文档？它对应哪家快递？
+    source: 微信视频号电子面单
+    must_include: ['极兔']
+    why: 编码本身就是查询词。⚠️ 注意 jieba 会把「极兔」切成两个单字，
+      所以这题真正靠的是 `JTSD` 这个 token
+
+  - id: kw-code-yunda
+    kind: fact
+    q: 平台物流编码 YUNDA 对应哪家快递公司？
+    source: 微信视频号电子面单
+    must_include: ['韵达']
+    why: 同上换一行。两行都对才能说明映射表的行对应关系保住了
+
+  - id: kw-code-qtck-qtrk
+    kind: fact
+    q: 奇门库存异动不支持 DBCK/DBRK 类型，orderType 建议改用哪两个编码？
+    source: wms
+    must_include: ['QTCK', 'QTRK']
+    why: 四个大写编码在一句话里。向量对这类"一串大写字母"几乎无分辨力
+
+  - id: kw-code-postb
+    kind: fact
+    q: 订单发货回传失败提示"未知物流公司：POSTB"，要在哪里改？
+    source: wms
+    must_include: ['物流']
+    why: 编码 + 界面路径。POSTB 在全库出现次数极少，是干净的词法定位点
+
+  - id: kw-code-jospin
+    kind: fact
+    q: 获取单号报错 JOSPIN 与商家编码校验和审批失败，要检查什么？
+    source: 获取单号常见报错
+    must_include: ['客户编号']
+    why: JOSPIN 是京东侧的专有编码，只在这一块里出现过
+
+  - id: kw-code-qimen-appkey
+    kind: fact
+    q: 外部 ERP 分销商做奇门自助对接时，旺店通的 WMS AppKey 是多少？
+    source: 奇门分销
+    must_include: ['23381383']
+    why: 纯数字凭证。向量对数字串完全没有分辨力，这题是这份子集里最极端的一道
+
+  - id: kw-code-entryordercode
+    kind: fact
+    q: 采购单回传的报文里，entryOrderCode 这个字段对应系统里的哪个单号？
+    source: wms
+    must_include: ['采购单号']
+    why: 驼峰式接口字段名。用户会原样贴报文字段来问
+
+  # ============ 版本号（5 题）============
+  # ERP 的功能几乎每一条都写着"X.Y.Z 版本新增"，而版本号之间的向量距离
+  # 小到没有意义——1.5.6.8 和 1.5.9.6 在 embedding 里几乎是同一个点。
+
+  - id: kw-ver-reservation-order
+    kind: fact
+    q: 采购单支持选择入库预约单入库是从哪个版本开始的？
+    source: 入库预约单
+    must_include: ['1.5.6.8']
+    why: 版本号是答案本身。检索必须找到"入库预约单管理"那一篇
+
+  - id: kw-ver-purchase-return-reentry
+    kind: fact
+    q: "采购退货后二次入库直接入到原采购单中，这个配置项是哪个版本加的？"
+    source: 采购退货流程
+    must_include: ['1.4.6.6']
+    why: 同一篇里出现好几个版本号，要挑对是哪一个功能对应哪一个
+
+  - id: kw-ver-purchase-return-outer-warehouse
+    kind: fact
+    q: 采购退货后二次入库到原采购单，从哪个版本开始支持外仓？
+    source: 采购退货流程
+    must_include: ['1.5.9.6']
+    why: ⭐ 和上一题**同一段原文、不同的版本号**。答错说明它只找到了段落、
+      没读懂括号里那句"（1.5.9.6版本后支持外仓使用）"
+
+  - id: kw-ver-app-item-query
+    kind: fact
+    q: 旺店助手 APP 新增单品/组合装查询是哪个版本？
+    source: 货品查询
+    must_include: ['1.5.9.8']
+    why: APP 版本号自成一套（1.5.x.x），和 ERP 主版本混在同一个库里
+
+  - id: kw-ver-app-item-query-reqid
+    kind: fact
+    q: 旺店助手 APP 单品/组合装查询这个功能的需求 ID 是多少？
+    source: 货品查询
+    must_include: ['1280269']
+    why: 纯数字需求 ID。全库唯一，是词法能赢、向量必输的典型
+
+  # ============ 参数上限 / 数量限制（6 题）============
+  # 这一类错了最贵：用户照着一个编出来的上限去配置，配到一半系统拒绝。
+
+  - id: kw-limit-app-batch-query
+    kind: fact
+    q: 旺店助手 APP 的批量查询一次最多支持多少条？
+    source: APP
+    must_include: ['500']
+    why: 数字型答案。多篇 APP 文档都写着同一个 500，任一篇命中都算对
+
+  - id: kw-limit-custom-attribute
+    kind: fact
+    q: 自定义属性列表最多能添加多少个属性？
+    source: 自定义属性
+    must_include: ['100']
+    why: 界面里的一个硬上限。编错了用户会以为自己配置有问题
+
+  - id: kw-limit-goods-designation
+    kind: fact
+    q: 货品指定物流和仓库的数量上限是多少？最高能调到多少？
+    source: 旗舰版功能常见问题
+    must_include: ['30000', '10万']
+    why: 一个默认值 + 一个可调上限。两个数都要，只答一个是 partial
+
+  - id: kw-limit-auto-audit-delay
+    kind: fact
+    q: 店铺自动审核的延时时间上限是多久？换算成分钟是多少？
+    source: 自动审核
+    must_include: ['3天', '4320']
+    why: 同一件事的两种写法都在原文里，考的是有没有真的读到那一句
+
+  - id: kw-limit-logistics-batch-change
+    kind: fact
+    q: 发货后物流批量变更一次最多可以变更多少单？
+    source: 物流操作
+    must_include: ['30']
+    why: 小数字，且同篇文档里还有别的数字（版本号），容易串
+
+  - id: kw-limit-outer-warehouse-push
+    kind: fact
+    q: 自动推送货品到外仓的定时任务多久跑一次？一次最多推送多少个货品？
+    source: 外仓设置
+    must_include: ['3分钟', '50']
+    why: 频率 + 数量两个参数。实施时按错的数配，客户会以为推送坏了
+
+  # ============ 接口字段名（4 题）============
+
+  - id: kw-field-packages
+    kind: fact
+    q: 销售出库单回传失败提示"数据格式错误，不存在 packages 标识"，是什么问题？
+    source: wms
+    must_include: ['回传']
+    why: 英文字段名 packages。它是个常见英文单词，向量会把它当成"包裹"
+
+  - id: kw-field-sid
+    kind: fact
+    q: 调拨单回传失败，报文里显示 sid not found，sid 指的是什么？
+    source: wms
+    must_include: ['卖家账号']
+    why: 三个字母的字段名，向量几乎无法定位；答案是一句明确的定义
+
+  - id: kw-field-ownercode
+    kind: fact
+    q: 从委外仓库撤回采购单失败，报文里没有回传 ownerCode，这个字段是什么？
+    source: wms
+    must_include: ['货主']
+    why: 驼峰字段名 + 中文释义。用户贴报文来问时问的就是这个
+
+  - id: kw-field-oldcpcode
+    kind: fact
+    q: 阿里巴巴淘工厂物流同步报错 Required argument oldCpCode，出现在哪篇文档里？
+    source: 物流映射错误处理
+    must_include: ['物流']
+    why: ⭐ 这道题**只考检索**（`--check` 的 source_hit）。原文里没有写解决办法，
+      所以生成那一档只要求它别编——答案里出现具体步骤反而是幻觉
+
+  # ============ 裸粘贴（15 题）============
+  #
+  # ⭐⭐ **W1.2 的信号全在这一组里，其余 30 题一个字都没动。**
+  #
+  # 上面那 30 道是完整的自然语言问句，实测 hybrid 开关切换**零变化**——
+  # bge-m3 + 重排在这类问句上已经饱和（29/30、MRR@5 0.911），
+  # 因为问句里那些上下文词（"物流同步""报错""版本"）本身就够定位到文档。
+  #
+  # 而真实场景里最常见的一种输入是**用户什么都不说，直接把串贴进来**：
+  # 客服群里转来一句报错、一个平台编码、一个接口字段名。这时上下文一个字都没有，
+  # 向量检索手上只有一串没有语义的字符。2026-08-28 实测这 15 条：
+  #
+  #     命中 top-5   dense 6/15  →  hybrid 15/15
+  #     MRR@5        dense 0.367 →  hybrid 0.933
+  #
+  # `kind: probe` 是刻意选的——dataset.yaml 对 probe 的定义是
+  # 「材料里有，但问法偏/绕，也该答出来，量**假阴性率**」，
+  # 而"用户只贴了一个编码"正是这个定义的极端形态。
+  #
+  # ⚠️ 这一组**只判检索**（`--check` 的 source_hit）。裸粘贴一个编码时
+  # "答得对不对"没有唯一答案，硬写 `must_include` 是在给判分器出难题，
+  # 而这一组要量的东西在检索那一层就已经量完了。
+
+  - id: kw-paste-nosuchmailno
+    kind: probe
+    q: no such mailNo
+    source: 物流映射错误处理
+    why: "裸粘贴报错。dense 也能中（#2），因为这三个词凑在一起够独特"
+
+  - id: kw-paste-gate-invalid-packet
+    kind: probe
+    q: gate invalid packet
+    source: ERP登录常见报错
+    why: 同上。三个常见英文单词的组合，dense 侥幸能中
+
+  - id: kw-paste-cd01
+    kind: probe
+    q: CD01#未在状态机中找到规则#CD01
+    source: 物流同步常见报错
+    why: 带 # 的错误码。整串原样出现在语料里
+
+  - id: kw-paste-1009
+    kind: probe
+    q: "[1009] illegal request parameter"
+    source: 物流同步常见报错
+    why: 方括号错误码
+
+  - id: kw-paste-jtsd
+    kind: probe
+    q: JTSD
+    source: 微信视频号电子面单
+    why: "⭐ 单个平台编码。dense 完全找不到（#None）——四个大写字母在 embedding
+      空间里没有任何意思。词法 #1"
+
+  - id: kw-paste-yunda
+    kind: probe
+    q: YUNDA
+    source: 微信视频号电子面单
+    why: "同上。dense #None → hybrid #1"
+
+  - id: kw-paste-qimen-appkey
+    kind: probe
+    q: "23381383"
+    source: 奇门分销
+    why: ⭐ 纯数字凭证。这是全项目最能说明"为什么要 hybrid"的一条：
+      向量对数字串完全没有分辨力，dense #None
+
+  - id: kw-paste-jospin
+    kind: probe
+    q: JOSPIN
+    source: 获取单号常见报错
+    # ⚠️ YAML 里 ` #` 会被当成注释起点，所以带 `#N` 的说明必须整段加引号
+    why: "⚠️ **这一条 hybrid 反而掉了一位（#1 → #2）。** 留着不删：
+      A/B 里唯一一处退步，删掉它这份题集就成了只报喜的证据"
+
+  - id: kw-paste-postb
+    kind: probe
+    q: POSTB
+    source: wms
+    why: "物流公司编码。dense #None → hybrid #1"
+
+  - id: kw-paste-entryordercode
+    kind: probe
+    q: entryOrderCode
+    source: wms
+    why: "驼峰接口字段名。dense #None——驼峰词被切碎后语义全无"
+
+  - id: kw-paste-ownercode
+    kind: probe
+    q: ownerCode
+    source: wms
+    why: 同上。这两条一起说明"贴一个字段名来问"这条路在 dense 下是断的
+
+  - id: kw-paste-reqid
+    kind: probe
+    q: "1280269"
+    source: 货品查询
+    why: "需求 ID。dense #None → hybrid #1"
+
+  - id: kw-paste-oldcpcode
+    kind: probe
+    q: oldCpCode
+    source: 物流映射错误处理
+    why: dense 也能中。留着做对照——不是每个字段名 dense 都会输
+
+  - id: kw-paste-qtck-qtrk
+    kind: probe
+    q: QTCK QTRK
+    source: wms
+    why: "两个编码并列。dense #None → hybrid #1"
+
+  - id: kw-paste-sid-not-found
+    kind: probe
+    q: sid not found
+    source: wms
+    why: "三个极常见英文词的组合。dense #None——正因为每个词都太常见，
+      向量把它当成一句普通英文"

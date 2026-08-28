@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import pytest
@@ -53,16 +54,17 @@ async def scrub_images(maker):
     async with maker() as s:
         rows = list(
             (
-                await s.execute(select(ImageAsset).where(ImageAsset.id.not_in(before or {uuid.uuid4()})))
+                await s.execute(
+                    select(ImageAsset).where(ImageAsset.id.not_in(before or {uuid.uuid4()}))
+                )
             ).scalars()
         )
         for row in rows:
-            try:
+            # ValueError = 路径越界，那样的行本来就不该存在；清理阶段不为它中断
+            with contextlib.suppress(ValueError):
                 assets.absolute_path(row.storage_path, private=row.owner_id is not None).unlink(
                     missing_ok=True
                 )
-            except ValueError:  # pragma: no cover - 路径越界的行本来就不该存在
-                pass
         await s.execute(delete(ImageAsset).where(ImageAsset.id.not_in(before or {uuid.uuid4()})))
         await s.commit()
 

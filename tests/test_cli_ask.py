@@ -59,7 +59,13 @@ async def test_ask_prints_the_answer_and_hides_the_draft(
     from copilot.cli import _ask
 
     _, body = public_chunk
-    wire_cli([("reasoning", "先想一想……"), ("content", "先绑定物流账号[1]，"), ("content", "再打印面单。")])
+    wire_cli(
+        [
+            ("reasoning", "先想一想……"),
+            ("content", "先绑定物流账号[1]，"),
+            ("content", "再打印面单。"),
+        ]
+    )
 
     await _ask(body, show_chunks=False)
 

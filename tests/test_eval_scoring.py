@@ -429,6 +429,11 @@ def test_an_image_from_a_retrieved_but_uncited_document_is_contamination():
     ]
     m = run.score(results, cases)
     assert results[0].foreign_image_refs == [2]
+    # ⚠️ 这一句是 2026-08-28 把 tests/ 纳入 lint 时补的（ADR-18）：
+    # 原来这里只断言了 `foreign_image_refs`，`m` 算完就扔——同组另外两道题
+    # （0.0% 和 100.0%）都断言了指标，唯独这道"是串台"的没有。
+    # 也就是说 `score()` 把这一条算进分子没有，一直没人验过。
+    assert m["配图串台率"] == 100.0
 
 
 def test_invalid_image_reference_is_a_deterministic_failure():

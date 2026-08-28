@@ -271,6 +271,14 @@ class Config:
     # 它同时是结果档案的一部分（见 `resolved()`）：两轮结果只有空间不同时，
     # 存出来的 config 必须看得出来，否则 `--compare` 会拿两个题集比大小。
     space: str = DEFAULT_SPACE
+    # 这一轮跑的是哪份题集（W1.2）。**必须进 `resolved()`**，
+    # 理由和 `space` 一模一样：两轮结果只有题集不同时，存出来的 config
+    # 看不出来的话，`--compare` 会拿两个题集比大小而报告上一个字都不提
+    dataset: str = "dataset.yaml"
+    # 混合检索开关（W1.2）。⚠️ 这是**改了会让检索结果变、但不会报错**的那类开关，
+    # 所以它必须出现在结果档案里——不然 hybrid 那一轮和 baseline 那一轮
+    # 存出来的 config 完全相同，而两者的数字不一样，没有任何办法解释
+    hybrid: bool | None = None
 
     def system_prompt(self) -> str | None:
         if self.prompt == "current":
@@ -300,6 +308,8 @@ class Config:
             "prompt": self.prompt,
             "path": "agent" if self.agent else "direct",
             "space": self.space,
+            "dataset": self.dataset,
+            "hybrid": s.hybrid_enabled if self.hybrid is None else self.hybrid,
             "top_k": self.top_k or s.retrieve_top_k,
             "rerank_k": self.rerank_k or s.rerank_top_k,
             "threshold": s.rerank_score_threshold if self.threshold < 0 else self.threshold,
@@ -490,11 +500,22 @@ def foreign_image_refs(answer: str, images: list[dict], titles: set[str]) -> lis
 
 
 def load_cases(
-    only: str | None = None, scope: str = "public", space: str = DEFAULT_SPACE
+    only: str | None = None,
+    scope: str = "public",
+    space: str = DEFAULT_SPACE,
+    dataset: Path | None = None,
 ) -> tuple[dict, list[dict]]:
+    """读题集。`dataset` 留空就是 `dataset.yaml`（W1.2 起可以换成别的子集）。
+
+    ⚠️ **换题集必须换文件，不能往主题集里加一个新 `kind`。**
+    `load_cases` 默认把公共库 flagship 的题全取出来——往 `dataset.yaml` 里
+    塞 30 道关键词题，等于把 75 题的基线变成 105 题的基线，
+    而历史 tag 之间的 `--compare` 会安安静静地变成"拿两个不同的题集比大小"。
+    这正是 `scope` 那一行注释在防的事，只是这次的轴是"哪一批题"。
+    """
     import yaml
 
-    data = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
+    data = yaml.safe_load((dataset or DATASET).read_text(encoding="utf-8"))
     # ⭐ scope 默认只取公共库的题。**这条不能省**：私有库的题打的是别人的
     # 文档集，混进来会让历史 tag 之间的 --compare 变成拿两个不同的题集比大小，
     # 而报告上完全看不出来
@@ -590,10 +611,11 @@ async def corpus_fingerprint(session, space_id, common_id, user_id=None) -> dict
     指纹会继续按老规则算——门禁于是拿着一份**它以为对应、其实不对应**的
     语料快照放行，那比没有指纹更糟。
     """
-    from copilot.db.models import Chunk
-    from copilot.retrieve import _space_filter
     from sqlalchemy import String, func, literal, or_, select
     from sqlalchemy.dialects.postgresql import aggregate_order_by
+
+    from copilot.db.models import Chunk
+    from copilot.retrieve import _space_filter
 
     scope = (
         Chunk.owner_id.is_(None)
@@ -717,11 +739,20 @@ def answer_all(
     system_prompt: str | None = None,
     mode: str = "fast",
     general: bool | None = None,
+    fenced: bool = False,
 ) -> None:
+    """生成答案。
+
+    `fenced`（W2.3）：材料区用围栏包起来。⚠️ **调用方必须让它和 system prompt
+    里那段注入防线同开同关**——规则里写着「边界只有那两个标记」，
+    而不加围栏时那两个标记根本不存在。`risk_boundary.py` 是唯一的调用方，
+    它用同一个 `--guard` 决定这两样。
+    """
     from copilot.config import get_settings
     from copilot.providers.llm import ChatLLM
     from copilot.qa import (
         EMPTY_CONTEXT,
+        FENCED_USER_TEMPLATE,
         NO_ANSWER,
         SYSTEM_PROMPT,
         USER_TEMPLATE,
@@ -765,7 +796,7 @@ def answer_all(
             # 线上那条路会去问模型。评测和线上在这里必须是同一个行为
             cr.answer = NO_ANSWER
         else:
-            user_msg = USER_TEMPLATE.format(
+            user_msg = (FENCED_USER_TEMPLATE if fenced else USER_TEMPLATE).format(
                 context=cr.context or EMPTY_CONTEXT, question=cr.q
             )
             system = prompt
@@ -1325,7 +1356,15 @@ def rescore(tag: str) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
 
     scope = payload.get("scope", "public")
-    _, cases = load_cases(scope=scope, space=payload.get("config", {}).get("space", DEFAULT_SPACE))
+    cfg_saved = payload.get("config", {})
+    # ⚠️ 用**这一轮当初跑的那份题集**重算，不是永远用 dataset.yaml。
+    # 拿主题集去 rescore 一轮关键词子集，75 道题一道都对不上 id，
+    # 结果是"题集里已经没有这些题"然后分母归零——一个看起来跑完了的空报告
+    _, cases = load_cases(
+        scope=scope,
+        space=cfg_saved.get("space", DEFAULT_SPACE),
+        dataset=EVAL_DIR / cfg_saved.get("dataset", "dataset.yaml"),
+    )
     by_id = {c["id"]: c for c in cases}
 
     fields = {f.name for f in dataclasses.fields(CaseResult)}
@@ -1589,6 +1628,12 @@ def main() -> None:
         help="判分失效率超线时仍然打印对比表（默认拒绝，见 compare()）",
     )
     ap.add_argument("--only", default="", help="只跑指定 id 或 kind，逗号分隔")
+    ap.add_argument(
+        "--dataset",
+        default="",
+        metavar="PATH",
+        help="换一份题集（默认 eval/dataset.yaml）。关键词子集：eval/keyword.yaml",
+    )
     # ⭐ 常识兜底的 A/B（M12）。**必须能在同一次运行里指定**，
     # 而不是靠改 .env 再跑一遍：改 .env 那种做法下，两轮之间除了这个开关
     # 还可能悄悄差别的东西（谁记得中途有没有动过别的？），
@@ -1644,8 +1689,14 @@ def main() -> None:
     # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——
     # 混跑等于把两个不同的题集算进同一个准确率
     user_id = resolve_user(args.as_user) if args.as_user else None
+    dataset = Path(args.dataset).resolve() if args.dataset else None
+    if dataset is not None and not dataset.exists():
+        raise SystemExit(f"没有这个题集：{dataset}")
     meta, cases = load_cases(
-        args.only or None, scope="private" if user_id else "public", space=args.space
+        args.only or None,
+        scope="private" if user_id else "public",
+        space=args.space,
+        dataset=dataset,
     )
     if not cases:
         raise SystemExit("这个范围里一道题都没有，检查 --only / --as-user / --space")
@@ -1658,6 +1709,7 @@ def main() -> None:
         mode=args.mode,
         general={"on": True, "off": False}.get(args.general),
         space=args.space,
+        dataset=(dataset.name if dataset else "dataset.yaml"),
     )
 
     if args.check:

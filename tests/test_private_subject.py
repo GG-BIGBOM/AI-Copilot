@@ -95,10 +95,20 @@ async def customer_docs(maker):
         await s.flush()
 
         specs = [
-            (owner.id, f"客户A-实施配置约定-{tag}", "对账规则", "组合装拆分：不启用，按整体发货不拆"),
+            (
+                owner.id,
+                f"客户A-实施配置约定-{tag}",
+                "对账规则",
+                "组合装拆分：不启用，按整体发货不拆",
+            ),
         ]
         specs += [
-            (None, f"流程中拆分条件说明-{tag}", f"第{i}节", f"组合装拆分条件说明第{i}条：满足条件即拆分")
+            (
+                None,
+                f"流程中拆分条件说明-{tag}",
+                f"第{i}节",
+                f"组合装拆分条件说明第{i}条：满足条件即拆分",
+            )
             for i in range(1, 6)
         ]
 
@@ -161,7 +171,8 @@ def test_private_chunk_is_labelled_as_yours():
 
 
 def test_public_chunk_says_so():
-    assert source_label(_chunk("流程中拆分条件说明", private=False)) == "公共知识库 · 流程中拆分条件说明"
+    public = _chunk("流程中拆分条件说明", private=False)
+    assert source_label(public) == "公共知识库 · 流程中拆分条件说明"
 
 
 def test_context_text_carries_the_attribution(customer_docs):
@@ -208,7 +219,9 @@ async def test_private_chunk_survives_being_outranked(customer_docs, flagship_id
     assert result.private_count == 1
 
 
-async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(customer_docs, maker, flagship_id):
+async def test_private_chunk_gets_recalled_even_when_vector_topk_is_full(
+    customer_docs, maker, flagship_id
+):
     """⭐⭐ **私有库的召回名额。这道题是实测逼出来的，不是设计出来的。**
 
     M11 定稿时的判断是「私有文档被 4 个公共块整个挤出 **top-5**」——以为发生在
@@ -414,7 +427,9 @@ def test_both_modes_share_the_same_guard():
     assert deep.endswith(tail)
 
 
-async def test_guard_no_longer_depends_on_whether_a_private_chunk_was_recalled(customer_docs, flagship_id):
+async def test_guard_no_longer_depends_on_whether_a_private_chunk_was_recalled(
+    customer_docs, flagship_id
+):
     """⭐ **原来还有第三个条件「这一轮一个私有块都没召回」，实测删掉了。**
 
     删的理由不是嫌它严，是它**和第 2 步互相拆台**：保底名额保证了至少有一个
@@ -452,7 +467,9 @@ async def test_has_private_chunks_is_the_hard_boundary(customer_docs, flagship_i
         assert await has_private_chunks(s, owner_id) is True
 
 
-async def test_subject_without_relevant_private_hit_refuses_before_generation(customer_docs, flagship_id):
+async def test_subject_without_relevant_private_hit_refuses_before_generation(
+    customer_docs, flagship_id
+):
     """公共默认规则不能被模型改写成某家公司的专属约定。"""
     from chat_helpers import FakeLLM
 

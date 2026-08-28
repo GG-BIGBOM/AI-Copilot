@@ -374,22 +374,43 @@ async def test_embedding_failure_is_retried(maker, owner):
 
 
 async def test_unknown_job_type_fails_without_retry(maker):
+    """⚠️ **这条会自己把队列清干净，两头都清。**
+
+    `claim_next(s, None)` 取的是**最老的** pending，不一定是刚入队那条。
+    库里但凡躺着一条别的 `sync_mars` pending，这条用例就会去判决**那一条**，
+    然后断言自己这条还是 pending —— 而它失败时又留下一条 pending，
+    **于是一旦失败一次，这个库上就永远失败**。
+
+    2026-08-25 在开发库上真的发生了：`jobs` 表里躺着 1 条 pending、
+    4 条 failed 的 `sync_mars`，全是这条用例历次失败留下的。
+    CI 的空库跑得过，本机跑不过 —— 和「靠历史数据撑着」正好是镜像的一对。
+
+    `sync_mars` 是只有这条用例用的假类型，所以整类删掉是安全的。
+    """
     async with maker() as s:
+        await s.execute(delete(Job).where(Job.type == "sync_mars"))
         job = await queue.enqueue(s, "sync_mars", {})
         await s.commit()
         job_id = job.id
 
-    async with maker() as s:
-        job = await queue.claim_next(s, None)
-        # claim_next 不限类型时会取到它；run_job 认不出来就该直接判死
-        assert await run_job(s, job, FakeEmbedder()) is False  # run_job 仍是布尔
+    try:
+        async with maker() as s:
+            job = await queue.claim_next(s, None)
+            assert job is not None and job.id == job_id, (
+                "claim_next 取到的不是刚入队那条——队列里还躺着别的 pending"
+            )
+            # run_job 认不出这个类型就该直接判死
+            assert await run_job(s, job, FakeEmbedder()) is False  # run_job 仍是布尔
 
-    async with maker() as s:
-        stored = await s.get(Job, job_id)
-        assert stored.status == "failed"
-        assert "未知任务类型" in stored.error
-        await s.execute(delete(Job).where(Job.id == job_id))
-        await s.commit()
+        async with maker() as s:
+            stored = await s.get(Job, job_id)
+            assert stored.status == "failed"
+            assert "未知任务类型" in stored.error
+    finally:
+        # ⭐ 放 finally：断言炸了也不能把 pending 留在库里，否则下一次必炸
+        async with maker() as s:
+            await s.execute(delete(Job).where(Job.type == "sync_mars"))
+            await s.commit()
 
 
 async def test_running_state_is_committed_before_the_long_work(maker, owner):
