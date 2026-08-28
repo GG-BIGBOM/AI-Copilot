@@ -29,7 +29,7 @@ from copilot import assets, obs
 from copilot import lexical as lexical_mod
 from copilot.config import get_settings
 from copilot.db.models import Chunk, KnowledgeSpace
-from copilot.injection import sanitize
+from copilot.injection import sanitize, strip_links
 from copilot.providers.base import Embedder, Reranker
 
 logger = logging.getLogger(__name__)
@@ -159,12 +159,21 @@ class RetrievalResult:
         """
         return sum(1 for c in self.chunks if c.private)
 
-    def build_context(self) -> ContextBundle:
+    def build_context(self, *, strip_private_links: bool = False) -> ContextBundle:
         """拼上下文，同时把配图标记重新编号。
 
         块正文里存的是 `[图:a3f9]`（id 随图走，与顺序无关）。这里按在上下文里
         第一次出现的先后，统一换成 `[图1]`、`[图2]`……模型只看得到这些编号，
         因此**只能引用真实存在的图**——它编不出一个 URL 来。
+
+        `strip_private_links`（W2.3 第三层）：把**用户上传**的那些块里的网址和
+        邮箱换成占位符。⚠️ **只摘私有块**——公共语料里的网址是正常内容
+        （4568 块里 320 块有），摘了会把一批正确答案弄残。
+        判据不是「这个网址看不看得出是钓鱼」，是**它从哪来**。
+
+        ⚠️ 它是个**参数**而不是在这里读配置：这个函数被评测直接调用，
+        `--guard on/off` 两轮必须能在同一次运行里各传各的（同 `qa.ask_stream`
+        的 `general` / `facts`）。
         """
         numbering: dict[str, int] = {}
         images: list[dict] = []
@@ -184,10 +193,16 @@ class RetrievalResult:
                 return f"[图{numbering[ident]}]"
 
             body = _IMG_MARK_RE.sub(renumber, rc.content)
-            # ⭐ W2.3：把伪造的区段标记剥掉。**永远做，不看开关**——
+            # ⭐ W2.3 第一层：把伪造的区段标记剥掉。**永远做，不看开关**——
             # 真实语料里不含那串标记，所以这一步对正常内容是恒等的
             # （理由见 injection.py 文件头）
-            parts.append(f"[{rc.citation.n}] 来源：{source_label(rc)}\n{sanitize(body)}")
+            body = sanitize(body)
+            # ⭐ W2.3 第三层：用户上传的那份里的网址 / 邮箱不进上下文。
+            # ⚠️ `rc.private` 这个判据不能换成"看着像不像钓鱼"——那分辨不了，
+            # 而且分辨错的方向是放行。它从哪来是能确定的，看着像不像不是
+            if strip_private_links and rc.private:
+                body = strip_links(body)
+            parts.append(f"[{rc.citation.n}] 来源：{source_label(rc)}\n{body}")
 
         return ContextBundle(text="\n\n".join(parts), images=images)
 

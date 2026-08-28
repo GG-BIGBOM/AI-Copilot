@@ -540,14 +540,20 @@ def system_prompt_for(
         rule3_tail=_RULE3_TAIL_OPEN if general else _RULE3_TAIL_STRICT,
         style=ANSWER_STYLES.get(mode, _STYLE_FAST),
     )
+    # ⚠️ **注入防线紧跟铁律，排在下面那两段之前。**
+    # 判据是「常驻还是按轮触发」：这一段每一轮都在（它讲的是"材料区怎么读"，
+    # 和铁律同级），而 `subject_guard` / `definition` 是按这一问的形状临时追加的。
+    #
+    # ⚠️⚠️ 顺序不是审美问题。`test_guard_is_appended_only_when_asked_for` 要求
+    # 「打开 subject_guard 只能**追加**，不能改动既有部分」——把注入这段排在
+    # 它后面的话，那条不变式当场就破了（2026-08-29 默认值翻成 true 时撞到）。
+    # 常驻的排在条件性的前面，每一段就都还是纯追加。
+    if injection_guard:
+        prompt += inj.guard_rule()
     if subject_guard:
         prompt += _SUBJECT_GUARD
     if definition:
         prompt += _DEFINITION_HINT
-    # ⚠️ 注入防线排在这几段**之后、事实表之前**。它讲的是「材料区怎么读」，
-    # 而上面几段讲的是「怎么答」——先立完规矩再说这批材料该怎么看
-    if injection_guard:
-        prompt += inj.guard_rule()
     # ⚠️ 事实表排在最后。前面几段都在收紧「什么不能答」，而这一段是在给
     # 一批**可以直接用**的信息——放在收紧之前，模型很容易把它读成
     # 「材料的一部分」，然后给它标 [n]
@@ -926,7 +932,13 @@ async def ask_stream(
     if result.is_empty and not allow_general:
         return StreamedAnswer(stream=iter([("content", NO_ANSWER)]), citations=[])
 
-    context = result.build_context()
+    # ⚠️ **一个布尔量管三样**：材料围栏、system prompt 里那段规则、
+    # 以及私有块里的网址摘不摘（W2.3 的三层防线）。分开读配置的话，
+    # 迟早会跑出一个"开了规则没开围栏"的配置，而那是线上不存在的组合
+    fenced = (
+        get_settings().injection_guard_enabled if injection_guard is None else injection_guard
+    )
+    context = result.build_context(strip_private_links=fenced)
 
     # M11 P3 第 3 步。判据抽在 `needs_subject_guard` 里，评测走的是同一个函数
     # 追问可能只写「那对账呢」，主体只存在于改写后的独立问题里。
@@ -958,17 +970,12 @@ async def ask_stream(
             # ⚠️ `renumbered()` 不能省：滤掉公共块之后编号会留下窟窿
             # （线上出现过「来源 · 2」下面列着 1 和 4），见它的 docstring
             result = RetrievalResult(chunks=[c for c in result.chunks if c.private]).renumbered()
-            context = result.build_context()  # 编号跟着材料一起重排，别留旧的
+            # 编号跟着材料一起重排，别留旧的
+            context = result.build_context(strip_private_links=fenced)
 
     # 定义题才追加那一段。判据用**原句和改写后的独立问题**两处：
     # 追问经常只写「那这个又是什么」，主体在改写后的句子里
     wants_definition = is_definition_question(question) or is_definition_question(search_query)
-    # ⚠️ **一个布尔量管两边。** 规则里写着「区段的边界只有那两个标记」，
-    # 而不加围栏时那两个标记根本不存在——分开读配置的话，
-    # 迟早会出现"开了规则没开围栏"，模型去找一个找不到的东西
-    fenced = (
-        get_settings().injection_guard_enabled if injection_guard is None else injection_guard
-    )
     messages = assemble_messages(
         system_prompt_for(
             mode,

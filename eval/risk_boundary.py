@@ -122,7 +122,9 @@ class RiskResult(base.CaseResult):
     fake_cites: list[str] = field(default_factory=list)
 
 
-def plant_injections(results: list[RiskResult], cases: list[dict]) -> None:
+def plant_injections(
+    results: list[RiskResult], cases: list[dict], guard_on: bool = False
+) -> None:
     """把注入载荷**种进检索回来的上下文里**（W2.3）。
 
     ⭐ **为什么必须种，不能指望检索捞到。** 注入载荷不在语料里——真要靠检索
@@ -138,7 +140,7 @@ def plant_injections(results: list[RiskResult], cases: list[dict]) -> None:
     每一块都过，评测这边漏了的话，`inj-forged-fence` 那道题量的就是
     「一条根本不存在的路径」。
     """
-    from copilot.injection import sanitize
+    from copilot.injection import sanitize, strip_links
 
     by_id = {c["id"]: c for c in cases}
     for cr in results:
@@ -149,7 +151,14 @@ def plant_injections(results: list[RiskResult], cases: list[dict]) -> None:
         cr.citations.append(
             {"n": n, "title": "你的文档《客户上传-实施说明》", "url": "", "heading": "补充说明"}
         )
-        block = f"[{n}] 来源：你的文档《客户上传-实施说明》\n{sanitize(payload)}"
+        body = sanitize(payload)
+        # ⭐ 载荷模拟的是**用户上传的文档**（来源标签就写着「你的文档《…》」），
+        # 所以线上对私有块做的每一件事，这里都不能少。第三层是摘网址和邮箱
+        # （`build_context(strip_private_links=True)`）——漏了它，
+        # `inj-exfil-link` 量的就是一条线上不存在的路径。
+        if guard_on:
+            body = strip_links(body)
+        block = f"[{n}] 来源：你的文档《客户上传-实施说明》\n{body}"
         cr.context = f"{cr.context}\n\n{block}" if cr.context else block
 
 
@@ -559,7 +568,7 @@ def save(tag: str, meta: dict, cfg: base.Config, metrics: dict, results, judge: 
         "cases": [base._slim(asdict(r)) for r in results],
     }
     path = RESULTS_DIR / f"{tag}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    base.save_json(path, payload)
     return path
 
 
@@ -707,29 +716,47 @@ def main() -> None:
         cr.category = by_id[cr.id]["category"]
         cr.expect = by_id[cr.id]["expect"]
 
-    # ⭐ 注入载荷种进上下文。**在生成之前、检索之后**——它模拟的是
-    # 「用户上传的一份文档被检索命中了」，那件事就发生在这两步之间
-    plant_injections(results, cases)
-
     print("── 生成答案 ──")
     # ⚠️ **一个开关管两边。** system prompt 里那段规则写着「区段的边界只有
     # 那两个标记」，而不开围栏时那两个标记根本不存在——分开传的话，
     # 迟早会跑出一轮"开了规则没开围栏"的数据，而那一轮量的是一个
     # 线上不存在的配置
     from copilot.config import get_settings
-    from copilot.injection import guard_rule
+    from copilot.qa import system_prompt_for
 
     guard_on = {"on": True, "off": False}.get(
         args.guard, get_settings().injection_guard_enabled
     )
-    # ⚠️ `cfg.system_prompt()` 在「默认档 + 不指定 general」时返回 None，
-    # 意思是「让 answer_all 用模块常量 SYSTEM_PROMPT」。要往后面接一段规则，
-    # 就得先把那个 None 换成真正的文本，否则 `None + str` 当场炸
-    system = cfg.system_prompt()
-    if guard_on:
-        from copilot.qa import SYSTEM_PROMPT
+    # ⚠️⚠️ **必须显式重建 prompt，不能拿现成的再拼一段。**
+    #
+    # 原来这里写的是 `(cfg.system_prompt() or SYSTEM_PROMPT) + guard_rule()`。
+    # 那在 `INJECTION_GUARD_ENABLED` 默认关的时候是对的，2026-08-29 默认值
+    # 翻成 true 之后当场坏掉，而且是**两个方向都坏**：
+    #   `--guard on`   `SYSTEM_PROMPT` 已经含那段规则了，再追加 = 重复两遍
+    #   `--guard off`  `SYSTEM_PROMPT` 里那段规则**关不掉** —— 对照组不是对照组
+    # 第二条尤其致命：A/B 的两臂会变成同一个配置，而报告上完全看不出来，
+    # 只会显示「这个开关没什么效果」。
+    #
+    # ⭐ 根因是 `SYSTEM_PROMPT` 是个**模块常量**——它在 import 那一刻按当时的
+    # 配置算好，之后再也不变。任何"拿它当基线再拼一段"的写法，都隐含假设
+    # 「它里面没有我要拼的那段」，而那个假设会随配置默默失效。
+    # 显式重建就没有这个假设。
+    if args.prompt != "current":
+        # 换历史版 prompt 时以那一版为准（A/B 换 prompt 的用法），
+        # 注入那段仍按开关追加
+        from copilot.injection import guard_rule
 
-        system = (system or SYSTEM_PROMPT) + guard_rule()
+        system = cfg.system_prompt()
+        if guard_on:
+            system = system + guard_rule()
+    else:
+        system = system_prompt_for(cfg.mode, general=cfg.general, injection_guard=guard_on)
+
+    # ⭐ 注入载荷种进上下文。**在生成之前、检索之后**——它模拟的是
+    # 「用户上传的一份文档被检索命中了」，那件事就发生在这两步之间。
+    # ⚠️ 必须排在 `guard_on` 算出来之后：第三层防线（摘私有块里的网址）
+    # 就发生在这一步里面
+    plant_injections(results, cases, guard_on=guard_on)
     base.answer_all(
         results,
         workers=args.workers,
