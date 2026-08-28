@@ -138,12 +138,22 @@ async def test_invite_code_stays_consumed_after_user_deletion(api_client, invite
 async def test_consumed_code_not_offered_as_available(api_client, invite, maker):
     """⚠️ 核销的判据换了，**列表和计数也要跟着换**——否则管理员会看到一批
     已经作废的码还挂在「未使用」里，把它们发出去，对方注册全部失败。
+
+    ⚠️⚠️ **`limit` 由计数推出来，不能写死一个数。**
+    `list_unused_codes` 是 `order_by(created_at) + LIMIT`，而夹具刚发的这个码
+    是**最新**的那一个——它排在最后。写死 `limit=200` 的话，只要开发库里
+    攒够 200 个没用掉的码，这道题就从「偶发红」变成「天天红」，
+    而红的原因和它想验的判据毫无关系（2026-08-29 实测：库里 204 个）。
+
+    这和 `c7363af` 修的是同一类事：**断言不能靠开发库的历史撑着。**
+    拿 `before`（此刻未用的总数）当上限，等于"全部列出来"，
+    库里有多少个历史码都不影响结论。
     """
     from copilot.auth.invites import count_unused_codes, list_unused_codes
 
     async with maker() as s:
         before = await count_unused_codes(s)
-        assert invite in await list_unused_codes(s, limit=200)
+        assert invite in await list_unused_codes(s, limit=before)
 
     r = await api_client.post(
         "/api/auth/register",
@@ -154,7 +164,7 @@ async def test_consumed_code_not_offered_as_available(api_client, invite, maker)
 
     async with maker() as s:
         assert await count_unused_codes(s) == before - 1
-        assert invite not in await list_unused_codes(s, limit=200)
+        assert invite not in await list_unused_codes(s, limit=before)
 
     # 删号之后仍然不算「未使用」
     async with maker() as s:
@@ -162,7 +172,7 @@ async def test_consumed_code_not_offered_as_available(api_client, invite, maker)
         await s.commit()
     async with maker() as s:
         assert await count_unused_codes(s) == before - 1, "删号把作废的码放回了可用池"
-        assert invite not in await list_unused_codes(s, limit=200)
+        assert invite not in await list_unused_codes(s, limit=before)
 
 
 async def test_registration_requires_valid_invite(api_client, maker):
