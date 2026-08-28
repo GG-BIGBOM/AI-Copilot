@@ -85,7 +85,11 @@ echo "$CRLF_CHECK" | "$PY" - || exit 1
 # `pyproject.toml`，tests/ 会改用那一份；漏配 select 的话行长会从 100 掉到 88，
 # 表现是**当场变红**而不是悄悄放行，这个方向是安全的。
 ( cd backend && "../$PY" -m ruff check . ../tests ../eval && "../$PY" -m pytest -q )
-( cd frontend && npm test && npm run lint && npx tsc --noEmit )
+# ⚠️ `next typegen` 排在 tsc 前面，和 CI 那一步同一个理由：
+# `LayoutProps<"/">` 是 Next 16 生成的全局类型，住在 gitignore 掉的 `.next/types/`。
+# 本机通常有上次构建的残留所以看不出来，干净检出上会报
+# `TS2304: Cannot find name 'LayoutProps'`——两边任何一处改了另一处也要改。
+( cd frontend && npm test && npm run lint && npx next typegen && npx tsc --noEmit )
 
 # 勘误体检。**只警告不拦部署**：过期的勘误仍然比错的原文更接近事实，
 # 拦下来只会逼人加 --skip 绕过去，那这条检查就永远没人看了。

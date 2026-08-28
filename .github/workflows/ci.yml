@@ -119,6 +119,22 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      # ⚠️ **`next typegen` 不能省，而且必须排在 tsc 前面。**
+      # `app/layout.tsx` 用的 `LayoutProps<"/">` 是 Next 16 **生成**的全局类型，
+      # 住在 `.next/types/` 里，而那个目录是 gitignore 的。
+      # 干净检出上直接跑 tsc，报的是一句看不懂的
+      #   `error TS2304: Cannot find name 'LayoutProps'`
+      #
+      # ⭐ 本机一直是绿的，因为 `.next/` 还留着上一次 `npm run build` 的产物——
+      # **这正是「本机绿、CI 红」的教科书形态**：本机多了一个谁都没意识到的前置条件。
+      # 这一步从 2026-08-25 起就红着，只是那时 backend 也红，没人往下看第二条。
+      #
+      # 用 `typegen` 不用 `build`：它只生成类型、不打包，几秒钟的事，
+      # 而把整个 `next build` 挪到类型检查前面会让一次类型错误要等两分钟才报出来。
+      - name: 生成路由类型
+        working-directory: frontend
+        run: npx next typegen
+
       - name: 类型检查
         working-directory: frontend
         run: npx tsc --noEmit
