@@ -1329,6 +1329,41 @@ async def _quality_report(
                    f"（保留策略见 copilot prune-traces）")
 
 
+@app.command()
+def mcp(
+    as_user: str = typer.Option(
+        "", "--as-user", help="以哪个账号的身份连接（决定能不能搜到私有文档）"
+    ),
+    space: str = typer.Option("flagship", "--space", help="哪一版 ERP 的知识库"),
+) -> None:
+    """起一个 MCP server（stdio），让 Claude Desktop / Cursor 直接连知识库。
+
+        copilot mcp --as-user you@example.com
+
+    Claude Desktop 的 `claude_desktop_config.json`：
+
+        {"mcpServers": {"wdt-copilot": {
+           "command": "/opt/copilot/.venv/bin/copilot",
+           "args": ["mcp", "--as-user", "you@example.com"]}}}
+
+    ⚠️⚠️ **`--as-user` 只在这里出现一次，它不是任何工具的入参。**
+    模型看不见它，也就改不了它——理由见 `copilot/mcp_server.py` 文件头。
+    ⚠️ 这个进程是**本机**的，不是网络服务：它信任的是"谁能在这台机器上跑
+    这条命令"。别把它挂到公网上。
+    """
+    import asyncio
+    import logging
+    import sys
+
+    from copilot.mcp_server import serve
+
+    # ⚠️ 日志必须走 stderr。stdio 传输把 **stdout 当成协议通道**，
+    # 往里打一行人话就会让客户端解析失败，而报错是一句
+    # 「Unexpected token」——看不出和日志有任何关系
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    asyncio.run(serve(as_user, space))
+
+
 # ⚠️ **这一段必须留在文件最末尾。**
 # 它原来在文件中间（`worker` 和 `corrections-export` 之间），
 # 于是 `python -m copilot.cli <后面那些命令>` 一律报 "No such command"——
