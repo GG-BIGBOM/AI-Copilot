@@ -202,11 +202,21 @@ async def _recent_turns(session: AsyncSession, conv_id: uuid.UUID) -> list[tuple
     排序和 `list_messages` 保持一致（created_at, id）——同一毫秒落库的两条
     要有个稳定的先后，否则历史里的问答会偶发地颠倒。
     """
+    # ⚠️⚠️ **W2.1：开着预算装配器时这里必须多取。**
+    # 装配器要在「窗口内留几条、更早的压成摘要」之间做决定，而它只能看见
+    # 这个函数交给它的东西。SQL 这一层还是只取 6 条的话，第 7 条往前的内容
+    # 根本到不了它手上，摘要段会**恒为空**——而那种失败没有任何症状，
+    # 报告上只会显示"这个功能没什么效果"。
+    #
+    # 开关关着时仍然取 `HISTORY_TURNS` 条，逐字节等同 W2.1 之前：
+    # 多取的那十几条要多读一次库，不该让一个默认关着的功能去付这个钱。
+    s = get_settings()
+    limit = s.history_fetch_turns if s.history_budget_enabled else HISTORY_TURNS
     stmt = (
         select(Message.role, Message.content)
         .where(Message.conversation_id == conv_id, Message.role.in_(("user", "assistant")))
         .order_by(desc(Message.created_at), desc(Message.id))
-        .limit(HISTORY_TURNS)
+        .limit(limit)
     )
     rows = (await session.execute(stmt)).all()
     return [(role, content) for role, content in reversed(rows)]

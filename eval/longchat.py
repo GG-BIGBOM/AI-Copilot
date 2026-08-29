@@ -308,12 +308,31 @@ def score(results: list[ChatResult]) -> dict:
     return m
 
 
+def _switches() -> dict:
+    """这一轮的装配配置。存进结果、也打在报告头上。"""
+    from copilot.config import get_settings
+
+    s = get_settings()
+    return {
+        "history_budget_enabled": s.history_budget_enabled,
+        "history_char_budget": s.history_char_budget,
+        "history_char_limit": s.history_char_limit,
+        "history_digest_budget": s.history_digest_budget,
+        "history_fetch_turns": s.history_fetch_turns,
+    }
+
+
 def print_report(meta: dict, metrics: dict, results: list[ChatResult], facts_on: bool) -> None:
     print()
     print("═" * 62)
     print(f"  长会话评测   题集 {DATASET.name}   built_at {meta.get('built_at', '?')}")
     print(f"  HISTORY_TURNS(题集构建时) {meta.get('history_turns_at_build', '?')}"
           f"   SESSION_FACTS_ENABLED={'true' if facts_on else 'false'}")
+    # ⚠️ W2.1 的开关也要打在头上。两个开关都影响这份题集的分数，
+    # 报告只写一个的话，翻旧报告的人分不清那一轮跑的是哪个配置
+    cfg = _switches()
+    print(f"  HISTORY_BUDGET_ENABLED={'true' if cfg['history_budget_enabled'] else 'false'}"
+          f"   预算 {cfg['history_char_budget']} 字   摘要上限 {cfg['history_digest_budget']} 字")
     print("═" * 62)
     for k in ("题数", "可解析题数", "上下文命中率", "已判题数", "跨窗口解析成功率"):
         if k in metrics:
@@ -352,6 +371,11 @@ def save(tag: str, meta: dict, metrics: dict, results: list[ChatResult], facts_o
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
             "dataset_meta": meta,
             "session_facts_enabled": facts_on,
+            # ⚠️⚠️ **W2.1 的开关和阈值必须一起存。** 这份题集的分数由两个开关
+            # 共同决定，只存一个的话，半年后翻出一轮 100% 的结果，
+            # 没有任何办法知道它跑的是哪个配置——而一份说不清配置的证据
+            # 不是证据。`--compare` 也据此把配置打在表头上
+            "assembly": _switches(),
             "metrics": metrics,
             "cases": [asdict(r) for r in results],
         },
@@ -370,6 +394,18 @@ def compare(tags: list[str]) -> None:
     print()
     print(f"  {'指标':<20}" + "".join(f"{t:>22}" for t in tags))
     print("  " + "─" * (20 + 22 * len(tags)))
+    # ⚠️ 先把两轮的开关摆出来再比数字。**没有这两行，一张 33.3% → 100.0%
+    # 的表说不清是哪个开关起的作用**，而这份题集有两个开关
+    for label, key, where in (
+        ("SESSION_FACTS", "session_facts_enabled", None),
+        ("HISTORY_BUDGET", "history_budget_enabled", "assembly"),
+    ):
+        cells = ""
+        for r in runs:
+            box = r.get(where, {}) if where else r
+            v = box.get(key)
+            cells += f"{('true' if v else 'false') if v is not None else '?':>22}"
+        print(f"  {label:<20}{cells}")
     for k in ("上下文命中率", "跨窗口解析成功率"):
         if any(k in r["metrics"] for r in runs):
             cells = "".join(f"{r['metrics'].get(k, '—')!s:>22}" for r in runs)

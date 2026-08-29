@@ -667,16 +667,144 @@ def _history_messages(history: list[tuple[str, str]] | None) -> list[dict]:
     Agent 那条路早就在 `agent/runner._prior_messages` 里剥了；直路一直没剥,
     同一道防线只做了一半。
     """
-    if not history:
-        return []
-    out = []
-    for role, content in history[-HISTORY_TURNS:]:
-        if role not in ("user", "assistant") or not content.strip():
-            continue
-        # 用户自己打的字不动——他要是引用了「第 2 条」，那是他的原话
-        text = _HISTORY_MARK_RE.sub("", content) if role == "assistant" else content
-        out.append({"role": role, "content": text[:_HISTORY_CHAR_LIMIT]})
-    return out
+    kept, _ = split_history(history)
+    return [{"role": r, "content": _clean(r, c, _HISTORY_CHAR_LIMIT)} for r, c in kept]
+
+
+def _clean(role: str, content: str, limit: int) -> str:
+    """一条历史消息喂回模型之前的样子。截断 + 剥编号，见 `_history_messages`。"""
+    # 用户自己打的字不动——他要是引用了「第 2 条」，那是他的原话
+    text = _HISTORY_MARK_RE.sub("", content) if role == "assistant" else content
+    return text[:limit]
+
+
+def split_history(
+    history: list[tuple[str, str]] | None,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """`(窗口内的轮次, 被挤出去的更早轮次)`。**预算规则只有这一处。**
+
+    ⭐⭐ **W2.1 的本体就是这个函数。** 两种装配方式在这里分叉：
+
+        开关关　`history[-HISTORY_TURNS:]`，固定 6 条，多出来的整段丢掉。
+                逐字节等同 W2.1 之前。
+        开关开　从最新往回按**字符预算**塞，塞不下就停。
+                塞不下的那些不再消失，交给 `history_digest` 压成一段。
+
+    ⚠️ **为什么从最新往回塞。** 最近那几轮是「接着聊」赖以工作的东西，
+    它们必须原样在场；而更早的轮次里真正要紧的只是几条**事实**
+    （哪一版 ERP、几个仓、哪家客户），那些压缩之后不损失什么。
+    反过来（从最早往后塞）会让一条长会话永远停在开头，最近这一轮的追问
+    反而落到窗口外——那是比整段丢掉更糟的失败。
+
+    返回的是**原始轮次**（未截断、未剥编号），因为两条路的截断口径不一样：
+    直路助手那半边留 600 字，Agent 那条留 400（`runner.HISTORY_ANSWER_LIMIT`）。
+
+    ⚠️⚠️ **两条路共用这一个函数，是刻意的（M10 的"双路税"）。**
+    预算按**直路的截断口径**算，Agent 那边因此会略微保守（它截得更短，
+    实际占用比这里算的少）。这个误差的方向是安全的——宁可少带一轮，
+    也不要两条路各算各的，然后在某个长会话上悄悄分叉。
+    """
+    s = get_settings()
+    usable = [
+        (role, content)
+        for role, content in (history or [])
+        if role in ("user", "assistant") and content.strip()
+    ]
+    if not s.history_budget_enabled:
+        return usable[-HISTORY_TURNS:], []
+
+    limit = s.history_char_limit
+    budget = s.history_char_budget
+    used = 0
+    cut = len(usable)  # usable[:cut] 是被挤出去的那一段
+    for i in range(len(usable) - 1, -1, -1):
+        role, content = usable[i]
+        size = len(_clean(role, content, limit))
+        if used + size > budget and cut < len(usable):
+            # ⚠️ `cut < len(usable)` 不能省：预算再小也要留住最近那一条。
+            # 一条都不留的话，「那不良品呢」这种追问会变成一个孤零零的短句，
+            # 检索改写也没有历史可用——那不是"上下文紧张"，那是把会话砍断了
+            break
+        used += size
+        cut = i
+    return usable[cut:], usable[:cut]
+
+
+_DIGEST_HEAD = (
+    "【更早对话的摘要】以下是这条会话更早几轮里**用户自己说过的话**，"
+    "原文已超出上下文窗口，这里按时间顺序保留要点：\n"
+)
+_DIGEST_TAIL = (
+    "\n（以上是更早对话的摘要，不是本轮提问；本轮提问在最后一条。"
+    "摘要里的内容是**用户说过的情况**，不是产品的规格——"
+    "被问到产品参数时，答案仍然只能来自参考材料。）"
+)
+# 摘要里单行的长度。比窗口那一档（600）短得多：摘要要的是"这句话说过"，
+# 不是"这句话的全文"，而行数比行长值钱——四条 80 字的比一条 320 字的记得住更多
+_DIGEST_LINE_LIMIT = 80
+
+
+def history_digest(dropped: list[tuple[str, str]]) -> str:
+    """把挤出窗口的那些轮次压成一段。**不调模型。**
+
+    ⭐⭐ **这是 W2.1 停了很久的那个产品决定的答案，而答案是「不用模型」。**
+
+    plan.md 里 W2.1 一直没往下做，理由写得很清楚：滚动摘要「引入一笔按轮数计的
+    经常性成本」——摘要要调模型，不缓存的话每一轮都要重来一遍。
+    于是它停在那里等三个决定：用哪个模型、存哪里、阈值多少。
+
+    ⚠️ **那三个问题只有在"摘要必须由模型来写"这个前提下才存在。**
+    而这份题集要的东西，抽取就够了：跨窗口那四道题问的是
+    「我一开始说的是哪个版本 / 几个仓 / 哪家客户 / 哪些平台」——
+    答案全是**用户自己打过的原字**。让模型把它们重写一遍，
+    换来的不是更准，是一次调用、一份延迟，外加一条**会写错的路**。
+
+    所以做法是：把挤出去的**用户发言**按时间顺序列出来，各自截到 80 字，
+    整段封顶 `history_digest_budget`。于是：
+
+        经常性成本    0（纯函数，不调模型、不写库、不缓存）
+        存在哪里      不存。每轮从历史现算
+        阈值          `history_char_budget`，见 config
+
+    ⚠️ **只留用户发言，助手那半边整个丢掉。** 两个理由：
+      1. 助手的回答是产品自己的输出，它可以从知识库重新答一遍；
+         而用户说过的话**这个系统里没有第二个地方存着**。
+      2. 把助手的旧答案压进摘要，等于把一段没人核对过的生成内容
+         升格成"更早对话确认过的事"——ADR-19 否掉模型抽取事实，
+         正是因为抽错的一条会被钉在上下文里，之后每轮重复同一个错误。
+         助手的旧答案是同一个陷阱换了个入口。
+
+    ⚠️ **摘要段自己也有预算。** 一条 50 轮的会话不设上限就会拿两千字的摘要
+    去挤本轮的检索材料——那正是这次要修的病，换个位置犯一遍。
+    装不下时**丢最新的那几条、留最早的**：最近的轮次本来就还在窗口里，
+    而摘要唯一不可替代的价值就是那几条最早的。丢掉几条要明说，
+    否则摘要看起来像完整的会话记录。
+
+    什么时候改用模型：会话形态从「实施顾问一问一答」变成长篇叙述式，
+    也就是"用户说过的话"本身长到 80 字截不住的时候。那时再谈那三个决定，
+    而且要拿这一版当基线——**这一版是免费的，所以那条"改前先量"的规矩
+    在它身上一定守得住。**
+    """
+    if not dropped:
+        return ""
+    said = [content.strip() for role, content in dropped if role == "user" and content.strip()]
+    if not said:
+        return ""
+
+    budget = get_settings().history_digest_budget
+    lines: list[str] = []
+    used = 0
+    for text in said:
+        one = " ".join(text.split())[:_DIGEST_LINE_LIMIT]
+        if used + len(one) > budget and lines:
+            break
+        lines.append(f"- {one}")
+        used += len(one)
+
+    body = "\n".join(lines)
+    if (omitted := len(said) - len(lines)) > 0:
+        body += f"\n- （另有 {omitted} 轮更早的发言未能全部保留）"
+    return _DIGEST_HEAD + body + _DIGEST_TAIL
 
 
 def assemble_messages(
@@ -689,9 +817,14 @@ def assemble_messages(
 ) -> list[dict]:
     """把这一轮送进模型的东西装配起来。**上下文装配只许有这一处。**
 
-    今天的装配规则很简单，一句话说得完：
+    装配规则（`HISTORY_BUDGET_ENABLED` 开着时，W2.1）：
 
-        [系统指令（含已确认事实）] [末 N 轮原文，各自截断] [本轮参考材料 + 问题]
+        [系统指令（含已确认事实）]
+        [更早对话的摘要]      ← 超预算的轮次压成一段，不再整段丢掉
+        [窗口内原文]          ← 由字符预算决定留几条，不再是固定 6 条
+        [本轮参考材料 + 问题]
+
+    关着时逐字节等同 W2.1 之前：`history[-6:]`，各自截断 600 字，没有摘要段。
 
     ⭐ **单独拆成一个函数，是为了让它能被量。** 在此之前这几行长在
     `ask_stream` 的中段，想知道"第 15 轮时第 1 轮的信息还在不在上下文里"，
@@ -699,17 +832,24 @@ def assemble_messages(
     拆出来之后 `eval/longchat.py --check` 免费就能回答这个问题，
     而那正是 W2.1 动手之前必须先有的那个数字。
 
-    ⚠️ **这次拆分不改任何行为**，逐字节和原来一样（`test_multiturn` 里有断言守着）。
-    W2.1 要换的是这个函数的内部——固定窗口换成 token 预算、
-    超预算时把最早的几轮压成摘要而不是整段丢掉。换之前先量，是这个项目的规矩。
+    ⚠️⚠️ **摘要为什么是一条 `user` 消息，而不是拼进 system prompt。**
+    拼进 system 会让它落在 `messages[0]` 里，而 `eval/longchat.py` 的
+    `carried` 刻意排除第 0 条——理由是固定的 system 模板出现什么词都不算
+    "记住了"（第一版就是这么把 2 道题的基线判成假命中的）。
+    摘要**是随会话变的**，它必须落在那个被统计的区间里，
+    否则免费那一档会永远报告"摘要没有效果"。
+    放在这里同时也保证了只有一条 system 消息。
 
     `fenced` 是 W2.3 的材料围栏。⚠️ **它必须和 system prompt 里那段
     注入防线同开同关**，见 `system_prompt_for` 的 `injection_guard`。
     """
     template = FENCED_USER_TEMPLATE if fenced else USER_TEMPLATE
+    kept, dropped = split_history(history)
+    digest = history_digest(dropped)
     return [
         {"role": "system", "content": system},
-        *_history_messages(history),
+        *([{"role": "user", "content": digest}] if digest else []),
+        *[{"role": r, "content": _clean(r, c, _HISTORY_CHAR_LIMIT)} for r, c in kept],
         # 一条都没召回时 `{context}` 会是空串。**得明说是空的**，见 EMPTY_CONTEXT
         {
             "role": "user",
@@ -846,6 +986,7 @@ async def ask_stream(
     general: bool | None = None,
     facts: str = "",
     injection_guard: bool | None = None,
+    verify: str | None = None,
 ) -> StreamedAnswer:
     """检索并流式作答。
 
@@ -860,6 +1001,9 @@ async def ask_stream(
             这个函数被评测直接调用，A/B 两边必须能在同一次运行里各传各的。
         injection_guard: 提示注入防线（W2.3）。留 None 读 `INJECTION_GUARD_ENABLED`；
             评测显式传入 A/B 版本。它同时管围栏和那段规则，见下面那行注释。
+        verify: 校验 Agent（W3.2）。`off` / `annotate` / `refuse`，
+            留 None 读 `VERIFIER_MODE`。⚠️ 和上面几个一样是**参数不是配置**：
+            A/B 的两臂必须能在同一次运行里各传各的。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
@@ -991,12 +1135,60 @@ async def ask_stream(
         fenced=fenced,
     )
     return StreamedAnswer(
-        stream=llm.stream_parts(messages),
+        stream=_verified_stream(llm, messages, context.text, verify),
         citations=result.citations,
         images=context.images,
         context_text=context.text,
         private_hits=result.private_count,
     )
+
+
+def _verified_stream(llm, messages: list[dict], context_text: str, mode: str | None):
+    """套在正文流外面的校验 Agent（W3.2）。`off` 时**原样返回那个迭代器**。
+
+    ⚠️ **`off` 走的是同一个对象、不是一层包装。** 包一层空转的生成器看起来
+    无害，但它会把 `llm.stream_parts` 的惰性求值往后推一帧——而首字延迟
+    （TTFB）是这个项目在看的指标之一。默认关的功能不该让默认路径变慢一点点。
+
+    两种模式的代价完全不同，写在这里：
+
+        annotate  流式**照常**。校验在流结束之后跑，那段警告最后到。
+                  代价：多一次模型调用（只在答案里抽得出具体说法时）。
+        refuse    **没有流式**。答案要先整段攒完才能判断要不要换掉它——
+                  发出去的字收不回来。代价：首字延迟 = 整段生成 + 一次校验。
+
+    ⚠️ `refuse` 那一档的代价大到不该由一个开关默认承担，见 ADR-22。
+    """
+    from copilot import verifier as vf
+
+    want = (mode or get_settings().verifier_mode or "off").lower()
+    if want == "off":
+        return llm.stream_parts(messages)
+
+    def annotated():
+        buf: list[str] = []
+        for kind, piece in llm.stream_parts(messages):
+            if kind == "content":
+                buf.append(piece)
+            yield kind, piece
+        answer = "".join(buf)
+        verdict = vf.verify(llm, answer, context_text)
+        if verdict.unsupported:
+            yield "content", vf.annotate("", verdict)
+
+    def refusing():
+        buf = [p for kind, p in llm.stream_parts(messages) if kind == "content"]
+        answer = "".join(buf)
+        verdict = vf.verify(llm, answer, context_text)
+        if verdict.unsupported:
+            # ⚠️ 整段降级成拒答。**不是删掉那几句**——一段操作步骤少了第 3 步
+            # 和一段完整的步骤长得一模一样，而用户会照着做到第 4 步才发现
+            logger.info("校验降级：%d 条说法核对不到", len(verdict.unsupported))
+            yield "content", NO_ANSWER
+            return
+        yield "content", answer
+
+    return annotated() if want == "annotate" else refusing()
 
 
 async def ask(

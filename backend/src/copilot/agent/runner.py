@@ -64,7 +64,7 @@ from copilot.agent.deps import AgentDeps
 from copilot.agent.guard import looks_like_kb_answer
 from copilot.api import stream
 from copilot.config import get_settings
-from copilot.qa import NO_ANSWER, asks_about_subject
+from copilot.qa import NO_ANSWER, asks_about_subject, history_digest, split_history
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +109,22 @@ def _beyond_window(deps: AgentDeps, question: str) -> bool:
     `SessionFacts.answers()` 要求问句里出现那一项的别名、且表里真的有那一项，
     两个条件都成立才算"答得出"——差一个就退回原来的边界话术，
     而那个方向（说不知道）是安全的那一边。
+
+    ⭐⭐ **W2.1 又加了第三个条件：摘要里也没有。**
+    预算装配器上线之后，挤出窗口的轮次不再消失——它们被压成一段摘要跟着
+    进上下文。此时「窗口裁了」和「那段内容没了」**不再是同一件事**。
+    不加这个条件的话，摘要里白纸黑字写着第一轮问的是什么，而 Agent 照旧
+    短路回一句「我无法确认你最开始问的是什么」——比 W2.2 之前更糟，
+    因为这一次系统手里真的有答案，只是自己把嘴堵上了。
+
+    ⚠️ 判据是「摘要**非空**」，不是"摘要里含不含这个问题的答案"。
+    后者要做语义匹配，而这道闸门的作用是**放行**（让 Agent 自己去看摘要），
+    不是替它回答。放行之后模型看着摘要仍然可以说"这里面没有"——
+    那是它读完材料之后的结论，和一句读都没读的短路完全是两回事。
     """
     if not deps.history_truncated:
+        return False
+    if history_digest(split_history(deps.history)[1]):
         return False
     return not (deps.facts is not None and deps.facts.answers(question))
 
@@ -129,9 +143,21 @@ def to_message_history(rows: list[tuple[str, str]]) -> list[ModelRequest | Model
     答案原样带进来，模型看着它就够"答"下一句了，于是跳过检索——实测撞到过
     （见 guard.py 文件头）。而那些编号在新一轮里根本无效：`citations` 是
     每轮重建的，抄过去的 `[3]` 指向的是上一轮的来源。
-    历史的用处是**听懂这一句在问什么**，不是当材料用。"""
+    历史的用处是**听懂这一句在问什么**，不是当材料用。
+
+    ⭐ **W2.1：窗口怎么切、更早的怎么压，和直路共用 `qa.split_history`。**
+    在此之前这个函数拿到什么就转什么，窗口是由调用方（路由层的 SQL LIMIT）
+    定的——也就是说预算规则实际上有两份，一份在 SQL 里、一份在
+    `qa.assemble_messages` 里。开着预算装配器时路由层会多取十几条，
+    这里不跟着切的话，Agent 那条路会拿到一段没有上限的历史。
+
+    ⚠️ 摘要段作为**第一条 user 消息**进去，和直路同一个形态。
+    Agent 会在它之后看到真正的最近几轮，再看到本轮提问。"""
+    kept, dropped = split_history(rows)
     out: list[ModelRequest | ModelResponse] = []
-    for role, content in rows:
+    if digest := history_digest(dropped):
+        out.append(ModelRequest(parts=[UserPromptPart(content=digest)]))
+    for role, content in kept:
         text = (content or "").strip()
         if not text:
             continue
