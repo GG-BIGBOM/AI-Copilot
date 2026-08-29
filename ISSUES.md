@@ -48,20 +48,25 @@ HTTP 429: Your account org-328f… is suspended due to insufficient balance
 
 ### I-1　门禁红着：一轮判分器掉线的证据挡住了好的那一轮
 
-**症状**　`eval/gate.py` 当前退出码非 0：
+**症状**　`eval/gate.py` 当前退出码非 0（2026-08-29 最新一次）：
 
 ```
 ？ UNRELIABLE  公共库 · 直路   w2-direct-noguard   判分失效率 86.7%
 ⛔ FAIL        公共库 · Agent  w2-public-agent     准确率 94.7（要 >=95）
+？ UNRELIABLE  风险边界        w32-annotate        判分失效率超线（--no-judge）
+✓  PASS        另外四条
 ```
 
-**根因**　两件事，分开看：
+**根因**　三件事，分开看：
 
 1. `w2-direct-noguard`（2026-08-28 17:16）是 A/B 的**对照臂**，不是给门禁用的证据，
    但它是「公共库 · 直路」这一套里最新的一轮，而 `gate.newest()` 只按 `ran_at` 取最新。
    那一轮判分器 75 题里挂了 65 题（moonshot 额度），所以它 UNRELIABLE。
    同一天更早的 `w2-public-direct` 是 96.0 / reliable，但被时间戳挡在后面。
 2. `w2-public-agent` 准确率 94.7，比门槛 95 低 0.3 个点（75 题里差 1 道）。
+3. 风险边界那一条是 **W3.2 的 A/B 用 `--no-judge` 跑的**（判分器欠费，见 I-0）。
+   ⭐ 那一轮的**六条规则指标全是 0.0% / 100%**——W3.2 要的数字拿到了，
+   缺的只是语义准确率那一半。UNRELIABLE 在这里是**准确的描述**，不是故障。
 
 **今天为什么没修**　第 1 条**不该靠改门禁来修**。「最新的那一轮说了算」正是
 门禁不能被挑证据的原因——加一个「跳过 UNRELIABLE 取次新」的规则，等于允许
@@ -145,11 +150,14 @@ HTTP 429: Your account org-328f… is suspended due to insufficient balance
 `git status` 会把只改了换行的文件长时间显示成 ` M`（内容其实一致，
 `git diff --numstat` 是 0/0）。
 
-**今天为什么没修**　改的是**本机 git 配置**，不在仓库里，
-换台机器要重新踩一遍——所以真正该做的是在 SETUP.md 里写一句，
-而不是让某个人的机器上少一个坑。
+**这一轮做了什么**　README 的「本地运行」里加了一行
+`git config core.autocrlf false`，并写清了症状——
+改的是**本机 git 配置**，不在仓库里，所以只能靠文档，
+让下一个人不必再花一个下午找"改了又没改"的文件。
 
-**什么条件下必须修**　多一个人参与开发时。
+**什么条件下还要再动**　多一个人参与开发、而他没看那一行的时候。
+真正的堵法是 `.gitattributes` 之外再加一道 pre-commit，
+但为一个只影响 `git status` 显示的问题装一套 hook，代价不成比例。
 
 ### I-9　「那个功能在哪配置来着」这道边界，**直路上从来没有守过**
 
@@ -180,6 +188,58 @@ HTTP 429: Your account org-328f… is suspended due to insufficient balance
 那条判据抽到 `qa` 里，两条路共用，开关默认关，拿
 `eval/longchat.py` 的 `cross_window_ref` 两道题做 A/B。
 
+### I-10　开发库里 `enterprise_desktop` 有 161 篇文档、**0 块**
+
+**症状**　`copilot spaces list`：
+
+```
+enterprise_desktop  客户端企业版  inactive   161   0   0
+```
+
+161 个孤儿 Document 行，一块都没有。测试留下的（多半是隔离题用
+`other_space` 建了文档、没建块、也没删）。
+
+**为什么值得记**　它当场把一条闸门打穿了：`spaces activate` 的第一版
+按**文档数**判"这个空间是不是空的"，161 > 0 → 放行。
+而激活之后检索一条都召不回，用户问什么都得到「知识库暂无此内容」。
+⭐ **一个看起来在守、其实守不住的闸门，比没有闸门更糟**——不会再有人去看它。
+
+**这一轮修了什么**　判据改成**数块**（能被检索到的是块）。
+回归在 `tests/test_spaces_cli.py::test_activate_refuses_a_space_with_no_chunks`。
+
+**孤儿行本身没清**　和 I-3 同一类：分不清哪些是测试造的、哪些是人手动造的。
+M18 真导语料之前要清一次，否则 `spaces list` 的数字对不上。
+
+### I-11　测试之间共享的第三样东西：**模块级引擎的连接池**
+
+**症状**　`tests/test_spaces_cli.py` 里几道 async 测试单跑必过、
+混在一起跑必红，报的是
+
+```
+RuntimeError: Event loop is closed        （asyncpg 的 _cancel_current_command）
+```
+
+**根因**（已查清）　`conftest.py` 文件头写着「测试一律用 NullPool 的独立引擎，
+用完即弃」，而 `copilot.db.session.engine` 是**模块级的、带真连接池**
+（`pool_size=5, max_overflow=5`）。凡是走 `SessionLocal` 的代码
+（`copilot spaces` / `mcp_server.call_tool` / CLI 那几条）用的都是它。
+一道测试用完把连接还回池子，下一道测试在**另一个事件循环**里拿到它 → 炸。
+
+**这一轮修了什么**　conftest 加一个 autouse 夹具，每道测试跑完
+`await shared.dispose()`。
+
+**留在这里的原因**　这是这一轮第三次撞到「测试之间共享了什么」：
+
+| 共享的东西 | 表现 |
+|---|---|
+| 开发库里的 4568 块语料 | E1 偶发红，实测 2/30 |
+| 开发库里攒下的邀请码 | 断言写死 `limit=200`，攒够 200 个就天天红 |
+| 模块级引擎的连接池 | 单跑必过、混跑必红 |
+
+⭐ 三次的形状一模一样：**共享状态 + 一条隐含"我是干净的"假设的断言**。
+⚠️ 没有任何机制在找第四个。可行的形态是把测试跑在一个**每次重建的库**上
+（CI 已经是了，本机不是）——而本机不是的理由是那 4568 块语料重灌一次要付费。
+
 ## 🟢 P2 —— 记账
 
 ### I-6　引用角标偶发裸露 / 配图编号跳号
@@ -208,6 +268,11 @@ HTTP 429: Your account org-328f… is suspended due to insufficient balance
 | 前端「本机绿 CI 红」没有机制防下一次 | 同一份自检清单抄在三个地方。收成 `npm run verify` 一份，`tests/test_ci_contract.py` 盯着 |
 | `eval/results/` 全是 CRLF | 8 处裸用 `Path.write_text`，Windows 上默认把 `\n` 写成 `\r\n`。统一走 `run.save_json` |
 | 两道隔离题恒真 | 见 I-4 |
+| ⭐ 入库判重没有"空间"这一维 | M18 导入企业版时，同名文档要么**静静丢掉**，要么**改写旗舰版那一行**（内容换成企业版的、空间不变）。第二种是跨版本污染发生在入库层，而门禁那套题量的是召回、不是内容——**没有任何症状**。plan.md 猜到了一半，另一半更糟 |
+| `spaces activate` 按文档数判空 | 见 I-10 |
+| 测试之间共享连接池 | 见 I-11 |
+| `plan.md` 第 0.1 步的 systemd 单元名写错 | 写的是 `copilot`，实际是 `copilot-api`。报的是「Unit copilot.service could not be found」——**看起来像服务没装**，而它跑得好好的。2026-08-29 差点据此得出"线上挂了"的结论 |
+| 一个假生产者的签名每加一个参数就要改一次 | `test_multiturn` 里那个 stub 收 5 个位置参数，`ChatRequest` 加了 `space` 之后路由层一调就是 TypeError → 500。改成 `*_` 收尾：它想验的东西和参数个数毫无关系 |
 | `inj-fake-authority` 三轮都被判成「注入成功」 | **判分口径的假阳性**：模型点名假路径是为了拒绝它，而拒绝措辞的清单一条都没匹配上（三轮三种写法）。一条 `==0` 的红线为正确行为变红。按语义家族补齐 + 每条配反向用例 |
 | 校验器把「复制/补发规则」当成界面路径 | `/` 和 `·` 在中文里是"或者"。误报的代价是给正确答案挂一句"未能核对到" |
 | 校验器抽不出 `【设置】-【打印设置】` 这种最常见的路径 | 分隔符没跨过 `】-【`。症状是"校验器很安静"——看起来像它认为一切都有据 |
