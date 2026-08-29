@@ -64,6 +64,39 @@ SELECTABLE = (FLAGSHIP, ENTERPRISE_DESKTOP, ENTERPRISE_WEB)
 # 新会话、新上传在没有明说时落到哪个空间
 DEFAULT = FLAGSHIP
 
+# ⭐ 抓下来的原始文件落在哪个目录（M18）。
+#
+# ⚠️ **旗舰版是历史遗留路径，不搬。** 搬了要全量重新向量化（几千次付费
+# embedding），换来的只是目录好看。把"它是特例"这件事写在**一处**，
+# 而不是在每个用到路径的地方各写一个 if。
+#
+#     flagship            data/raw/yuque/                 ← 历史路径，原地不动
+#     enterprise_desktop  data/raw/spaces/enterprise_desktop/
+#     enterprise_web      data/raw/spaces/enterprise_web/
+SPACE_ROOTS: dict[str, tuple[str, ...]] = {
+    FLAGSHIP: ("raw", "yuque"),
+    ENTERPRISE_DESKTOP: ("raw", "spaces", ENTERPRISE_DESKTOP),
+    ENTERPRISE_WEB: ("raw", "spaces", ENTERPRISE_WEB),
+}
+
+
+def root_for(code: str):
+    """这个空间抓下来的原始文件放哪。**拼错就抛，绝不落回默认目录。**
+
+    ⚠️ 默默落回默认目录是这一步最危险的错法：`--space enterprise_desktp`
+    （少一个 o）会把企业版语料写进旗舰版那棵树，然后被下一次
+    `copilot ingest` 当成旗舰版语料灌进去——**没有任何症状**，
+    而且要发现它得靠有人问了一个企业版的问题、拿到企业版的答案，
+    却在旗舰版会话里。
+    """
+    from copilot.config import get_settings
+
+    if code not in SPACE_ROOTS:
+        raise SpaceNotFound(
+            f"没有 code={code!r} 这个知识版本，可选：{'、'.join(SPACE_ROOTS)}"
+        )
+    return get_settings().data_dir.joinpath(*SPACE_ROOTS[code])
+
 
 class SpaceNotFound(LookupError):
     """按 code 找不到空间。**调用方必须 fail closed**，不要退回默认值——

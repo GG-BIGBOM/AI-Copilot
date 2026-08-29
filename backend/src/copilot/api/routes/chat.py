@@ -71,11 +71,36 @@ TITLE_MAX = 40
 GENERIC_ERROR = "生成回答时出错了，请稍后重试。"
 
 
+async def _space_id_for(session: AsyncSession, code: str | None) -> uuid.UUID:
+    """前端传的知识版本 code → id。**不给就是默认版本；给错就 400。**
+
+    ⚠️⚠️ **绝不退回默认值。** 一次拼错的 code 会静静地把提问送进旗舰版，
+    而用户以为自己在问企业版——那种错误没有任何症状，
+    而且答案会写得和真的一样确定（`spaces.SpaceNotFound` 的 docstring）。
+
+    ⚠️ `inactive` 的空间也要拒绝：表建好了不等于语料导进来了。
+    放行的表现是用户问什么都得到「知识库暂无此内容」，而他会以为系统坏了。
+    判据和 `/api/knowledge-spaces` 那个列表是同一条（`spaces.selectable`），
+    否则会出现"列表里没有、但传上来能用"的空间。
+    """
+    from fastapi import HTTPException
+
+    from copilot import spaces
+
+    if not code:
+        return await spaces.default_id(session)
+    allowed = {s.code: s.id for s in await spaces.selectable(session)}
+    if code not in allowed:
+        raise HTTPException(status_code=400, detail=f"没有可用的知识版本：{code}")
+    return allowed[code]
+
+
 async def _resolve_conversation(
     session: AsyncSession,
     user_id: uuid.UUID,
     client_id: str | None,
     question: str,
+    space_code: str | None = None,
 ) -> Conversation:
     """定位或新建会话。
 
@@ -102,18 +127,23 @@ async def _resolve_conversation(
         existing = await session.get(Conversation, cid)
         if existing is not None:
             if existing.user_id == user_id:
+                # ⚠️⚠️ **已有会话的版本不许改。** 前端传上来的和会话已有的不一致时
+                # 一律按会话原有的走，连报错都不给——报错会让一个正常的追问失败，
+                # 而正确做法（新建会话）前端自己就能做。
+                #
+                # 允许改的后果是：前几轮的答案来自另一个产品，而对话看起来
+                # 完全连贯。用户回头翻这条会话，分不出哪几句是哪一版的。
                 return existing
             cid = None  # 被别人占了，另发一个
 
     # ⭐ 新会话在这里**钉死**知识版本，之后不许改（换版本 = 新建会话）。
     # 老会话（M14 回填过的）已经带着 flagship，不会走到这一行。
-    from copilot import spaces
-
+    space_id = await _space_id_for(session, space_code)
     conv = Conversation(
         id=cid or uuid.uuid4(),
         user_id=user_id,
         title=_title_from(question),
-        knowledge_space_id=await spaces.default_id(session),
+        knowledge_space_id=space_id,
     )
     session.add(conv)
     await session.flush()
@@ -294,6 +324,7 @@ async def _chat_stream(
     client_id: str | None,
     mode: str = DEFAULT_MODE,
     draft: TraceDraft | None = None,
+    space: str | None = None,
 ) -> AsyncIterator[str]:
     draft = draft or TraceDraft(user_id=user_id, question=question, route="direct", mode=mode)
     message_id = stream.new_id("msg")
@@ -307,7 +338,7 @@ async def _chat_stream(
 
     try:
         async with SessionLocal() as session:
-            conv = await _resolve_conversation(session, user_id, client_id, question)
+            conv = await _resolve_conversation(session, user_id, client_id, question, space)
             # 先读历史再落本轮提问，顺序不能反（见 _recent_turns / _turn_index）
             history = await _recent_turns(session, conv.id)
             turn = await _turn_index(session, conv.id)
@@ -473,6 +504,7 @@ async def _agent_stream(
     client_id: str | None,
     mode: str = DEFAULT_MODE,
     draft: TraceDraft | None = None,
+    space: str | None = None,
 ) -> AsyncIterator[str]:
     """M7 的 Agent 路径。默认不走这条（`agent_enabled`）。
 
@@ -499,7 +531,7 @@ async def _agent_stream(
     answer = ""
     try:
         async with SessionLocal() as session:
-            conv = await _resolve_conversation(session, user_id, client_id, question)
+            conv = await _resolve_conversation(session, user_id, client_id, question, space)
             # 和直路用同一个函数取历史。**这里原来是 `order_by(created_at).limit(20)`，
             # 取的是最老的 20 条**——会话一长，带进上下文的就永远是开头那几轮，
             # 而「接着聊」要的恰恰是最近几轮。顺带也统一了截断口径（HISTORY_TURNS）。
@@ -646,6 +678,7 @@ async def _canned_stream(
     client_id: str | None,
     mode: str = DEFAULT_MODE,
     draft: TraceDraft | None = None,
+    space: str | None = None,
 ) -> AsyncIterator[str]:
     """招呼 / 道谢 / 告别 / 问能力——固定回复，**一次模型调用都不花**（M10 P2）。
 
@@ -666,7 +699,7 @@ async def _canned_stream(
 
     try:
         async with SessionLocal() as session:
-            conv = await _resolve_conversation(session, user_id, client_id, question)
+            conv = await _resolve_conversation(session, user_id, client_id, question, space)
             session.add(Message(conversation_id=conv.id, role="user", content=question))
             await session.commit()
 
@@ -902,6 +935,12 @@ async def chat(
             f"今天的用量已达上限（{used}/{quota} tokens），明天再来或联系管理员调整。",
         )
 
+    # ⚠️ **知识版本要在开流之前校验**，和上面那个配额检查同一个理由：
+    # 流一旦开始，HTTP 状态码就已经发出去了，再想返回 400 也来不及——
+    # 只能在流里塞一个 error 片段，而那对客户端来说完全是另一回事。
+    # 这一句的返回值用不上，要的就是它抛不抛。
+    await _space_id_for(session, body.space)
+
     use_agent = await _use_agent(session, user, question, body.id)
     plan_flow = await _active_plan_flow(session, user.id, body.id)
     # ⭐ 寒暄短路（M10 P2）。**顺序不能反**：已经在多轮流程里的会话不走这条。
@@ -928,7 +967,9 @@ async def chat(
         request_id=getattr(request.state, "request_id", None),
     )
     return StreamingResponse(
-        _traced(producer(user.id, question, body.id, body.mode, draft), draft, question),
+        _traced(
+            producer(user.id, question, body.id, body.mode, draft, body.space), draft, question
+        ),
         media_type="text/event-stream",
         headers=stream.SSE_HEADERS,
     )

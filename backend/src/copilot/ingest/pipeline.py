@@ -265,7 +265,31 @@ async def _ingest_one(
     """入库一篇。返回块数；返回 None 表示内容没变、已跳过。"""
     digest = src.content_hash
 
-    # 同一 owner + 同一来源视为同一篇文档
+    # ⚠️ 同上传那条路（`routes/docs.py`）：`knowledge_space_id` 是 NOT NULL，
+    # 不写就是每一次入库都 NotNullViolation。**在建行之前就取好**——
+    # 放到 `session.add()` 之后再 await，会触发 autoflush 把一个字段还没填全的
+    # Document 刷进库，报出来的是「title 不能为空」，指不到真正的原因。
+    # 默认给旗舰版：`copilot ingest` 灌的就是语雀那套旗舰版语料，
+    # 和 M14-A 的回填规则一致。
+    #
+    # ⚠️⚠️ **而且必须排在判重查询之前**，因为判重要按空间过滤（见下）。
+    space_id = space_id or await spaces.default_id(session)
+
+    # 同一 owner + 同一来源 + **同一知识版本** 才算同一篇文档。
+    #
+    # ⭐⭐ **空间这一维是 M18 前补上的，而漏掉它的后果有两种，第二种更糟：**
+    #
+    #     content_hash 一样  →  企业版那一篇被判成「已入库、跳过」，**静静少掉**
+    #     content_hash 不同  →  ⚠️ **改的是旗舰版那一行**：正文换成企业版的，
+    #                           而 `knowledge_space_id` 保持旗舰版不变
+    #
+    # 第二种是**跨版本污染发生在入库层**。`retrieve._space_filter` 是全项目
+    # 唯一一处空间过滤，而它过滤得完全正确——它只能保证"旗舰版空间里的块
+    # 才会被旗舰版的提问召回"，保证不了"旗舰版空间里的块讲的是旗舰版的事"。
+    # ⚠️ 而且没有任何症状：文档数不变、块数不变、门禁的跨空间污染率照样是 0
+    # （那套题量的是召回，不是内容）。
+    #
+    # 回归在 `tests/test_ingest_spaces.py`，两条都有，导入语料之前必须绿。
     stmt = select(Document).where(
         Document.source_url == src.source_url
         if src.source_url
@@ -274,24 +298,14 @@ async def _ingest_one(
     stmt = stmt.where(
         Document.owner_id.is_(None) if owner_id is None else Document.owner_id == owner_id
     )
+    stmt = stmt.where(Document.knowledge_space_id == space_id)
     existing = (await session.execute(stmt)).scalar_one_or_none()
 
     if existing and existing.content_hash == digest and not force and existing.status == "done":
         return None
 
-    # ⚠️ 同上传那条路（`routes/docs.py`）：`knowledge_space_id` 是 NOT NULL，
-    # 不写就是每一次入库都 NotNullViolation。**在建行之前就取好**——
-    # 放到 `session.add()` 之后再 await，会触发 autoflush 把一个字段还没填全的
-    # Document 刷进库，报出来的是「title 不能为空」，指不到真正的原因。
-    # 默认给旗舰版：`copilot ingest` 灌的就是语雀那套旗舰版语料，
-    # 和 M14-A 的回填规则一致
-    if existing is None or existing.knowledge_space_id is None:
-        space_id = space_id or await spaces.default_id(session)
-
     if existing:
         doc = existing
-        if doc.knowledge_space_id is None:
-            doc.knowledge_space_id = space_id
     else:
         doc = Document(
             owner_id=owner_id, source_type=src.source_type, knowledge_space_id=space_id

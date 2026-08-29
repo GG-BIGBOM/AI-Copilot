@@ -529,9 +529,13 @@ async def test_small_talk_does_not_hijack_an_agent_conversation(
         s.add(Conversation(id=conv_id, user_id=logged_in, title="帮我出实施方案", profile={}))
         await s.commit()
 
-    # `_draft` 是 M11 P1 加的第 5 个参数（那一轮的 request_trace 草稿）。
-    # 假的生产者也得收下它，否则路由层一调就是 TypeError → 500
-    async def stub(_user_id, _question, _client_id, _mode=None, _draft=None):
+    # `_draft` 是 M11 P1 加的第 5 个参数（那一轮的 request_trace 草稿），
+    # `_space` 是 M18 加的第 6 个（这一轮问哪一版 ERP）。
+    # 假的生产者也得收下它们，否则路由层一调就是 TypeError → 500。
+    #
+    # ⚠️ 用 `*_` 收尾而不是继续一个个列：这个签名每加一个参数就要来改一次，
+    # 而它想验的东西（寒暄短路有没有把多轮流程截走）和参数个数毫无关系。
+    async def stub(_user_id, _question, _client_id, _mode=None, _draft=None, *_):
         yield "data: {\"type\":\"text-delta\",\"id\":\"t\",\"delta\":\"AGENT\"}\n\n"
 
     monkeypatch.setattr(chat_module, "_agent_stream", stub)

@@ -114,6 +114,15 @@ class ChatRequest(BaseModel):
     # 回答档位：fast 简答（DeepSeek）/ deep 详解（Kimi）。
     # 认不出来的值一律当 fast——老前端不带这个字段，不能因此 422
     mode: Literal["fast", "deep"] = "fast"
+    # ⭐ 哪一版 ERP（M18）。**只在新建会话时起作用**——已有会话的版本钉死不许改。
+    #
+    # ⚠️ 不给默认值字符串、留 None：和 `mode` 同一个处理法，老前端不带这个字段
+    # 不能因此 422。None → `spaces.default_id()`。
+    #
+    # ⚠️⚠️ **传了一个不存在或 inactive 的 code 要报错，绝不退回默认值。**
+    # 退回默认值意味着一次拼错会静静地把提问送进旗舰版，而用户以为自己在问
+    # 企业版——那种错误没有任何症状（见 `spaces.SpaceNotFound`）。
+    space: str | None = None
 
     def last_user_text(self) -> str:
         for msg in reversed(self.messages):

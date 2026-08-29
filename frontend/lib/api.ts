@@ -489,6 +489,18 @@ async function upload<T = UploadResult>(path: string, file: File): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * 一个可选的知识版本（M18）。字段跟后端 `SpaceOut` 对齐。
+ *
+ * ⚠️ **只有 code，没有 id。** id 每套环境都不一样（本机、服务器各建各的），
+ * 把它写进前端就等于把两套环境绑死。会话和空间的绑定在服务端完成。
+ */
+export type KnowledgeSpace = {
+  code: string;
+  name: string;
+  description: string | null;
+};
+
 export const api = {
   register: (body: { email: string; password: string; inviteCode: string }) =>
     request<User>("/api/auth/register", {
@@ -507,6 +519,12 @@ export const api = {
   me: () => request<User>("/api/auth/me"),
 
   conversations: () => request<ConversationSummary[]>("/api/conversations"),
+
+  /**
+   * 用户能选的知识版本。**只列 active 且可选的**——后端已经滤过
+   * （`spaces.selectable`），前端不再自己判断，否则会出现两处判据。
+   */
+  knowledgeSpaces: () => request<KnowledgeSpace[]>("/api/knowledge-spaces"),
 
   messages: (id: string) =>
     request<StoredMessage[]>(`/api/conversations/${id}/messages`),

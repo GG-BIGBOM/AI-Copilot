@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 
@@ -11,7 +11,7 @@ import { PromptStarters } from "@/components/chat/prompt-starters";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useAnswerMode } from "@/lib/answer-mode";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, api, type KnowledgeSpace } from "@/lib/api";
 import type { CopilotUIMessage } from "@/lib/chat-types";
 
 /**
@@ -35,6 +35,28 @@ export function ChatView({
   const [draft, setDraft] = useState("");
   // 档位记在 localStorage 里，不进会话——它是"我习惯要多详细"，不是这段对话的属性
   const [mode, setMode] = useAnswerMode();
+
+  // ⭐ 知识版本（M18）。**和档位不一样，它是这段对话的属性，不是个人偏好**：
+  // 一条会话的版本在服务端是钉死的（换版本 = 新建会话）。所以它只是个
+  // 本地 state，跟着 `key={chatId}` 一起重挂，不进 localStorage。
+  const [spaces, setSpaces] = useState<KnowledgeSpace[]>([]);
+  const [space, setSpace] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    // ⚠️ 拉不到就当只有一个版本（选择器不显示），**不弹错**：
+    // 知识版本是个可选功能，它的接口挂了不该让一个能正常提问的页面
+    // 顶一条红色报错。后端不传 space 时会落到默认版本。
+    api
+      .knowledgeSpaces()
+      .then((rows) => {
+        if (alive) setSpaces(rows);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 每次 render 都 new 一个 transport 会让 useChat 反复重建内部状态
   const transport = useMemo(
@@ -60,7 +82,10 @@ export function ChatView({
   // ⭐ 档位要**每次发送时**带上，不能塞进 transport 的静态 body：
   // transport 是 useMemo 出来的，档位变了它不会重建，用户切换后
   // 下一句话还会按旧档位回答
-  const send = (text: string) => sendMessage({ text }, { body: { mode } });
+  // ⚠️ `space` 只在**新会话的第一句**起作用：服务端对已有会话一律按会话
+  // 原有的版本走（`_resolve_conversation`）。这里照样每次都带上，
+  // 因为前端不知道服务端那条会话建没建——判据在服务端，只许有一处。
+  const send = (text: string) => sendMessage({ text }, { body: { mode, space } });
 
   const composer = (
     <Composer
@@ -71,6 +96,11 @@ export function ChatView({
       onSend={send}
       mode={mode}
       onModeChange={setMode}
+      spaces={spaces}
+      space={space}
+      onSpaceChange={setSpace}
+      // 已经聊起来了 = 版本钉死。选择器降级成只读标签，见 SpacePicker
+      spaceLocked={messages.length > 0}
       placeholder={messages.length === 0 ? "问一个旺店通相关问题……" : "继续提问……"}
     />
   );
@@ -108,7 +138,7 @@ export function ChatView({
         messages={messages}
         status={status}
         mode={mode}
-        onRegenerate={() => regenerate({ body: { mode } })}
+        onRegenerate={() => regenerate({ body: { mode, space } })}
       />
 
       {/* pb 里带 safe-area：iPhone 上不加这个，输入框会被底部的横条压住 */}
@@ -123,7 +153,7 @@ export function ChatView({
                     size="xs"
                     variant="outline"
                     className="shrink-0"
-                    onClick={() => regenerate({ body: { mode } })}
+                    onClick={() => regenerate({ body: { mode, space } })}
                   >
                     重试
                   </Button>

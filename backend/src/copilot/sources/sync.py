@@ -113,6 +113,7 @@ def sync_yuque(
     limit: int | None = None,
     force: bool = False,
     report: Reporter | None = None,
+    root: Path | None = None,
 ) -> SyncStats:
     """抓取整个团队空间下所有公开知识库到本地文件。
 
@@ -121,9 +122,14 @@ def sync_yuque(
         only_books: 只抓这些 book slug；None 表示全抓
         limit: 每个库最多抓几篇，用于小批量验证
         force: 忽略增量判定，全量重抓
+        root: 落到哪个目录。⚠️ **不给就是 `data/raw/yuque`（旗舰版历史路径）**。
+            M18 之后一个团队空间对应一个 ERP 版本，三套语料混在同一棵树里的话，
+            `_manifest.json` 也会共用一份——增量判定会把企业版那一篇的时间戳
+            记在旗舰版名下，下次抓取整批被判成"没变、跳过"。
+            映射表在 `spaces.SPACE_ROOTS`，取路径走 `spaces.root_for()`。
     """
     say = report or (lambda m: None)
-    root = get_settings().data_dir / "raw" / "yuque"
+    root = root or get_settings().data_dir / "raw" / "yuque"
     root.mkdir(parents=True, exist_ok=True)
 
     manifest = {} if force else load_manifest(root)

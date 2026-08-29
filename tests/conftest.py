@@ -104,6 +104,32 @@ async def other_space(maker) -> KnowledgeSpace:
         return await spaces.by_code(s, spaces.ENTERPRISE_DESKTOP)
 
 
+@pytest.fixture(autouse=True)
+async def _dispose_shared_engine():
+    """每道测试跑完，把**模块级**那个引擎的连接池倒空。
+
+    ⭐⭐ **这是文件头那条规矩唯一漏掉的地方。**
+    头上写着「测试一律用 NullPool 的独立引擎，用完即弃」，而
+    `copilot.db.session.engine` 是模块级的、带一个真的连接池
+    （`pool_size=5, max_overflow=5`）——凡是走 `SessionLocal` 的代码
+    （`copilot spaces` / `mcp_server.call_tool` / CLI 那几条）都用的是它。
+
+    表现极其难查：一道测试用完把连接还回池子，池子把它留给下一道测试，
+    而下一道测试跑在**另一个事件循环**里，asyncpg 于是在
+    `_cancel_current_command` 里撞上 `RuntimeError: Event loop is closed`。
+    ⚠️ **单跑那道测试必过，混在一起才红**——和 E1 那次
+    （`test_first_person_question_keeps_public_material`）是同一类故障，
+    只是共享的东西从"开发库里的语料"换成了"连接池里的连接"。
+
+    ⚠️ 代价：走 `SessionLocal` 的测试每次要重连一次。实测整份套件几乎无感
+    （绝大多数测试用的是上面那个 NullPool 夹具，池子本来就是空的）。
+    """
+    yield
+    from copilot.db.session import engine as shared
+
+    await shared.dispose()
+
+
 @pytest.fixture
 async def engine() -> AsyncEngine:
     eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
