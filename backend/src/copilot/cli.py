@@ -11,12 +11,21 @@ M0 阶段各子命令为占位实现，逐个里程碑填充：
 
 from __future__ import annotations
 
+import sys
+
 import typer
 
 # ⚠️ 这里只有 typer 和 metrics 是模块级导入，别再往上加。
 # 其余一律在子命令内部 import：`copilot --help` 要是把 SQLAlchemy、httpx、
 # pydantic-ai 全拖起来，一次补全要等两秒。`metrics` 是纯 dataclass，没有代价
 from copilot import metrics
+
+# Windows 控制台默认 GBK，输出里的 ✓/✗/⚠️ 等字符会让 typer.echo 直接
+# UnicodeEncodeError 崩溃（sync-yuque 每完成一个知识库打一行就会撞上）。
+# hasattr 守一下：pytest 用自己的对象接管 sys.stdout，没有 reconfigure。
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 app = typer.Typer(
     name="copilot",
