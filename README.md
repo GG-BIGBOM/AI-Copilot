@@ -138,6 +138,8 @@ SiliconFlow 有免费额度。
 
 ## 架构概览
 
+![架构图：浏览器经 nginx 到 FastAPI，服务器四个轻进程共占约 700MB／1.6GB 预算；embedding、重排、生成、可选追踪转发到云端按次付费 API](docs/img/architecture.svg)
+
 ```
 浏览器
   │  Next.js 16 静态导出（本机构建，服务器上只有 nginx 发静态文件）
@@ -292,7 +294,7 @@ bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
 | M19-B · 评测中心与持续回归 | 评测门禁已接入部署入口，正式证据已 PASS | 补 `request_trace` 空间相关列，再做趋势页与定时回归 |
 | M20 · 生产验证与 Agent 路由收敛 | 已取得首批生产读数，样本量仍小 | 扩大真实使用样本，按生产数据决定路由收敛与功能开关 |
 
-仍未完成的展示材料：三张图（架构 / span 树 / 门禁截图）和 MCP 录屏。
+仍未完成的展示材料：架构图 ✅，span 树 / 门禁截图和 MCP 录屏还欠。
 
 ## 文档地图
 

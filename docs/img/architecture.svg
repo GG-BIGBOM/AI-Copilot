@@ -1,0 +1,142 @@
+<svg viewBox="0 0 1240 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="架构图：浏览器经 nginx 到 FastAPI，服务器上四个轻进程共占约700MB，处于1.6GB预算内；embedding、重排、生成、可选追踪四类模型调用全部转发到云端按次付费API">
+  <title>架构：为什么 2 核 1.6GB 跑得动</title>
+  <defs>
+    <marker id="arrow-server" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2C5753"/>
+    </marker>
+    <marker id="arrow-cloud" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A9762C"/>
+    </marker>
+  </defs>
+
+  <style>
+    text { font-family: 'PingFang SC','Microsoft YaHei','Noto Sans SC','Helvetica Neue',Arial,sans-serif; }
+    .mono { font-family: 'SFMono-Regular',Consolas,'Cascadia Mono','Liberation Mono',monospace; }
+  </style>
+
+  <rect x="0" y="0" width="1240" height="800" fill="#EEF0E9"/>
+
+  <!-- title -->
+  <text x="40" y="46" font-size="27" font-weight="700" fill="#1D2624">架构：为什么 2 核 1.6GB 跑得动</text>
+  <text x="40" y="72" font-size="14" fill="#5C6B67">吃内存的模型推理全部放到云端；服务器上只留四个轻进程</text>
+
+  <!-- legend -->
+  <g font-size="12" fill="#5C6B67">
+    <line x1="900" y1="100" x2="928" y2="100" stroke="#2C5753" stroke-width="3"/>
+    <text x="936" y="104">服务器本地进程</text>
+    <line x1="1060" y1="100" x2="1088" y2="100" stroke="#A9762C" stroke-width="3" stroke-dasharray="6 5"/>
+    <text x="1096" y="104">云端 API · 按次付费</text>
+  </g>
+
+  <!-- browser -->
+  <rect x="40" y="104" width="168" height="56" rx="10" fill="#F8F9F4" stroke="#C6D0C6"/>
+  <text x="60" y="128" font-size="15" font-weight="700" fill="#1D2624">浏览器</text>
+  <text x="60" y="146" font-size="11" fill="#5C6B67">Next.js 16 · 静态导出</text>
+  <line x1="124" y1="160" x2="124" y2="194" stroke="#2C5753" stroke-width="2" marker-end="url(#arrow-server)"/>
+
+  <!-- server boundary -->
+  <rect x="40" y="196" width="760" height="560" rx="18" fill="#F8F9F4" stroke="#2C5753" stroke-width="2"/>
+  <rect x="64" y="182" width="196" height="30" rx="15" fill="#2C5753"/>
+  <text x="162" y="202" font-size="13" font-weight="700" fill="#F8F9F4" text-anchor="middle">2 核 · 1.6GB ECS</text>
+
+  <!-- nginx row -->
+  <rect x="72" y="228" width="696" height="54" rx="10" fill="#DCE6E1" stroke="#C6D0C6"/>
+  <text x="92" y="250" font-size="15" font-weight="700" fill="#1D2624" class="mono">nginx</text>
+  <text x="752" y="250" font-size="14" fill="#2C5753" text-anchor="end" class="mono">~40 MB</text>
+  <text x="92" y="268" font-size="11.5" fill="#5C6B67">发前端静态文件 · 反代 /api · 直发 /images</text>
+  <line x1="250" y1="282" x2="250" y2="298" stroke="#2C5753" stroke-width="2" marker-end="url(#arrow-server)"/>
+
+  <!-- fastapi row -->
+  <rect x="72" y="300" width="696" height="190" rx="10" fill="#F8F9F4" stroke="#2C5753" stroke-width="1.5"/>
+  <text x="92" y="326" font-size="16" font-weight="700" fill="#1D2624" class="mono">FastAPI</text>
+  <text x="196" y="326" font-size="11.5" fill="#5C6B67">（uvicorn 单 worker）</text>
+  <text x="752" y="326" font-size="14" fill="#2C5753" text-anchor="end" class="mono">~250 MB</text>
+
+  <!-- fastapi feature pills: row 1 -->
+  <g>
+    <rect x="92" y="346" width="220" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6"/>
+    <text x="106" y="366" font-size="12.5" font-weight="700" fill="#1D2624">检索</text>
+    <text x="106" y="384" font-size="10.5" fill="#5C6B67">pgvector 向量 + BM25 混合，RRF</text>
+
+    <rect x="324" y="346" width="220" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6"/>
+    <text x="338" y="366" font-size="12.5" font-weight="700" fill="#1D2624">生成</text>
+    <text x="338" y="384" font-size="10.5" fill="#5C6B67">简答 / 详解两档，三道防幻觉闸门</text>
+
+    <rect x="556" y="346" width="212" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6"/>
+    <text x="570" y="366" font-size="12.5" font-weight="700" fill="#1D2624">Agent</text>
+    <text x="570" y="384" font-size="10.5" fill="#5C6B67">answer_kb 是终结工具，不复述原文</text>
+  </g>
+
+  <!-- fastapi feature pills: row 2 -->
+  <g>
+    <rect x="92" y="410" width="220" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6"/>
+    <text x="106" y="430" font-size="12.5" font-weight="700" fill="#1D2624">路由</text>
+    <text x="106" y="448" font-size="10.5" fill="#5C6B67">寒暄短路 / Agent 灰度 / 直路三选一</text>
+
+    <rect x="324" y="410" width="220" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6"/>
+    <text x="338" y="430" font-size="12.5" font-weight="700" fill="#1D2624">队列</text>
+    <text x="338" y="448" font-size="10.5" fill="#5C6B67">写任务表，parser worker 轮询消费</text>
+
+    <rect x="556" y="410" width="212" height="52" rx="8" fill="#EEF0E9" stroke="#C6D0C6" stroke-dasharray="4 4"/>
+    <text x="570" y="430" font-size="12.5" font-weight="700" fill="#5C6B67">追踪（默认关）</text>
+    <text x="570" y="448" font-size="10.5" fill="#5C6B67">OTel span 树，ADR-15</text>
+  </g>
+
+  <line x1="250" y1="490" x2="250" y2="506" stroke="#2C5753" stroke-width="2" marker-end="url(#arrow-server)"/>
+  <text x="266" y="502" font-size="10.5" fill="#5C6B67">检索 + 写 request_trace</text>
+
+  <!-- postgres row -->
+  <rect x="72" y="508" width="696" height="54" rx="10" fill="#DCE6E1" stroke="#C6D0C6"/>
+  <text x="92" y="530" font-size="15" font-weight="700" fill="#1D2624" class="mono">PostgreSQL</text>
+  <text x="752" y="530" font-size="14" fill="#2C5753" text-anchor="end" class="mono">~250 MB</text>
+  <text x="92" y="548" font-size="11.5" fill="#5C6B67">pgvector + tsvector/GIN · 任务队列表（无 Redis/Celery）</text>
+
+  <!-- worker row -->
+  <rect x="72" y="580" width="696" height="54" rx="10" fill="#DCE6E1" stroke="#C6D0C6"/>
+  <text x="92" y="602" font-size="15" font-weight="700" fill="#1D2624">解析 worker</text>
+  <text x="752" y="602" font-size="14" fill="#2C5753" text-anchor="end" class="mono">~150 MB</text>
+  <text x="92" y="620" font-size="11.5" fill="#5C6B67">独立进程，MemoryMax=400M · 解析 docx/pptx/pdf/图片</text>
+
+  <path d="M 400,580 L 400,562" fill="none" stroke="#2C5753" stroke-width="2" marker-end="url(#arrow-server)"/>
+  <text x="416" y="574" font-size="10.5" fill="#5C6B67">FOR UPDATE SKIP LOCKED 轮询</text>
+
+  <!-- budget ledger -->
+  <line x1="72" y1="652" x2="768" y2="652" stroke="#C6D0C6"/>
+  <text x="72" y="678" font-size="13.5" fill="#1D2624" class="mono">40 + 250 + 250 + 150 = 700 MB 已用</text>
+  <text x="768" y="678" font-size="13.5" font-weight="700" fill="#2C5753" text-anchor="end" class="mono">预算 1.6 GB · 余量 ~300 MB</text>
+  <rect x="72" y="694" width="696" height="10" rx="5" fill="#DCE6E1"/>
+  <rect x="72" y="694" width="304" height="10" rx="5" fill="#2C5753"/>
+  <text x="72" y="722" font-size="10.5" fill="#5C6B67">■ 已用 700MB／1.6GB —— 数字来自 ARCHITECTURE.md 实测</text>
+
+  <!-- cloud zone -->
+  <rect x="848" y="228" width="352" height="406" rx="16" fill="#F1E4CC" stroke="#A9762C" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <rect x="872" y="214" width="210" height="28" rx="14" fill="#A9762C"/>
+  <text x="977" y="233" font-size="12.5" font-weight="700" fill="#F8F9F4" text-anchor="middle">云端 API · 按次付费</text>
+
+  <rect x="872" y="256" width="304" height="90" rx="10" fill="#F8F9F4" stroke="#C6D0C6"/>
+  <text x="888" y="280" font-size="14" font-weight="700" fill="#1D2624" class="mono">SiliconFlow</text>
+  <text x="888" y="300" font-size="11" fill="#5C6B67">bge-m3 向量 embedding（1024 维）</text>
+  <text x="888" y="316" font-size="11" fill="#5C6B67">bge-reranker-v2-m3 重排 top 5</text>
+
+  <rect x="872" y="362" width="304" height="90" rx="10" fill="#F8F9F4" stroke="#C6D0C6"/>
+  <text x="888" y="386" font-size="14" font-weight="700" fill="#1D2624" class="mono">DeepSeek / Kimi</text>
+  <text x="888" y="406" font-size="11" fill="#5C6B67">生成 · 简答 / 详解两档</text>
+  <text x="888" y="422" font-size="11" fill="#5C6B67">流式输出，SSE</text>
+
+  <rect x="872" y="468" width="304" height="90" rx="10" fill="#F8F9F4" stroke="#C6D0C6" stroke-dasharray="4 4"/>
+  <text x="888" y="492" font-size="14" font-weight="700" fill="#5C6B67" class="mono">Langfuse</text>
+  <text x="888" y="512" font-size="11" fill="#5C6B67">OTel span 树落地</text>
+  <text x="888" y="528" font-size="11" fill="#5C6B67">默认关闭，开源自托管可选</text>
+
+  <!-- cross-boundary arrows -->
+  <path d="M 768,358 C 810,358 830,301 848,301" fill="none" stroke="#A9762C" stroke-width="2" marker-end="url(#arrow-cloud)"/>
+  <text x="800" y="352" font-size="10.5" fill="#A9762C" text-anchor="middle">embed / rerank</text>
+
+  <path d="M 768,398 C 810,398 830,407 848,407" fill="none" stroke="#A9762C" stroke-width="2" marker-end="url(#arrow-cloud)"/>
+  <text x="806" y="440" font-size="10.5" fill="#A9762C" text-anchor="middle">generate</text>
+
+  <path d="M 768,436 C 815,436 825,513 848,513" fill="none" stroke="#A9762C" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrow-cloud)"/>
+  <text x="806" y="470" font-size="10.5" fill="#A9762C" text-anchor="middle">trace（关）</text>
+
+  <text x="1024" y="770" font-size="11" fill="#5C6B67" text-anchor="middle">AI Copilot · 语雀知识库 Agent —— 详见 ARCHITECTURE.md</text>
+</svg>
