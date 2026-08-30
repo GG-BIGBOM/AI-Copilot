@@ -6,13 +6,13 @@
 
 ## NOW
 
-**Week 1 做完了。Week 2 全部做完（W2.1 / W2.2 / W2.3）。
-Week 3 做掉了 W3.1（MCP）和 W3.2（校验 Agent），W3.3（M18 企业版语料）还没动。
-Week 4 没动。**
+**Week 1、Week 2 已完成。Week 3 的 W3.1（MCP）、W3.2（校验 Agent）和
+W3.3（M18 企业版语料）的代码均已就位，M18 只欠真实语料抓取与入库。
+Week 4 的文字材料和生产真实读数已完成，只欠三张图和 MCP 录屏。**
 
-⛔ **现在最要紧的一件事不是代码：判分器账户欠费停用了**，所有语义指标
-停在那里，门禁因此下不来。详见 [ISSUES.md](ISSUES.md) I-0 / I-1。
-⭐ 但这一轮的两组 A/B 都拿到了数字——它们要的指标恰好都是**规则判定**的。
+✅ **判分器已恢复，正式评测门禁已于 2026-08-30 重跑为 PASS。** 公共库直路、
+公共库 Agent、私有库直路、私有库 Agent、风险边界、路由、跨空间七项全部通过；
+没有更换判分模型、没有降低阈值、没有跳过最新结果。
 
 四周主线的目标是**把这个项目改造成能拿去面试的作品**，
 岗位：AI Agent 开发 / AI FDE / AI 产品经理。顺序按依赖排：
@@ -22,7 +22,43 @@ Week 4 没动。**
 | ~~**Week 1**~~ | ~~看得见~~ | ✅ 2026-08-28 |
 | ~~**Week 2**~~ | ~~记得住~~ | ✅ 2026-08-29。W2.1 默认关（A/B 已出），W2.2 默认关，W2.3 **默认开** |
 | **Week 3** | 接得上 | 🟡 W3.1 MCP ✅／W3.2 校验 Agent ✅（默认关，指标没动）／W3.3 **代码就位、语料没导** |
-| **Week 4** | 讲得出 | 🟡 README / 案例文 / demo 脚本 / 三份一页纸 / ADR ✅　**生产真实数字 ❌** |
+| **Week 4** | 讲得出 | 🟡 README / 案例文 / demo 脚本 / 三份一页纸 / ADR / **生产真实数字** ✅　三张图 / MCP 录屏 ⬜ |
+
+---
+
+### 四阶段收口进度（2026-08-30，工作区尚未提交）
+
+#### 已完成并实际验证
+
+| 阶段 | 完成内容 | 证据 |
+|---|---|---|
+| 1. 锁文件 | `uv.lock` 已同步 MCP extra；没有无关依赖升级 | `uv lock --check` 退出码 0；差异仅 5 行新增、1 行修改 |
+| 1. 后端静态检查 | Ruff 覆盖 `backend / tests / eval` | `ruff check . ../tests ../eval` PASS |
+| 1. 前端检查 | 单测、ESLint、TypeScript、Next.js 生产构建 | `npm.cmd run verify` PASS；Next.js 16.3.1 |
+| 1. 隐藏依赖问题 | pytest 9.1.1 下异步 autouse fixture 显式交给 `pytest_asyncio` | 门禁 / CI 契约 / compose 定向测试 43 passed |
+| 1. 文档漂移 | README / ARCHITECTURE 的 Next.js 16、AI SDK 7，README roadmap，生产读数状态 | 已修改，三张图与 MCP 录屏仍明确保留为未完成 |
+| 2. 最小连通性 | 原 Moonshot 判分器，未换模型 | `moonshot-v1-128k`；无 429；3 题判分失败率 0% |
+| 2. 公共库直路 | 正式标签 `gate-public-direct` | 准确率 96.0%，幻觉率 0%，判分失效 0 |
+| 2. 公共库 Agent | 正式标签 `gate-public-agent` | 准确率 96.0%，幻觉率 0%，判分失效 0 |
+| 2. 风险边界 | 正式标签 `gate-risk` | 准确率 96.4%，四条硬指标全 0，判分失效 0 |
+| 2. 总门禁 | 七项统一汇总 | `eval/gate.py` 退出码 0，七项全部 PASS |
+| 3. 部署门禁 | 新增 PASS / FAIL / UNRELIABLE 摘要、证据时间、语料指纹、部署类型和审计行 | AI 改动非 PASS 需按 commit 人工确认；安全补丁有明确出口；策略测试 PASS |
+| 4. Docker 静态收口 | 缺 key 提前报清晰错误；API / Web healthcheck；依赖健康条件；持久卷契约测试 | compose 契约测试 PASS |
+
+#### 留给下一次继续
+
+1. **隔离数据库全量 pytest**：本次没有对开发库盲跑；应提交并推送后让 GitHub Actions
+   使用临时 PostgreSQL 跑全套，或另建专用测试库。
+2. **Docker 真机验收**：当前 Windows 机器没有 Docker，尚未执行 `build --no-cache`、
+   从零启动、真实问答、错误 key / 服务不可用体验、重启持久化。
+3. **文档最后对账**：`ISSUES.md` 的 I-0 / I-1 / I-2 和 `EVALUATION.md` 的“当前门禁红”
+   仍是旧状态；提交前应改为已解决或历史记录。README 的门禁当前状态也需改绿。
+4. **最终验证与交付**：重新跑完整 Ruff、前端 verify、`uv lock --check`，再提交
+   `chore: sync lockfile and reconcile project status`、推送远程并确认 CI 全绿。
+5. **仍未完成的产品/作品集项**：M18 真实语料抓取与入库、三张图、MCP 录屏，
+   以及 M19-B 趋势页 / 定时回归和 M20 的扩大生产样本、路由收敛。
+
+⚠️ 当前工作区包含上述代码、正式评测结果和文档修改，**尚未 commit / push**。
 
 ---
 
@@ -109,35 +145,29 @@ plan.md 里 W2.1 停了很久，理由是滚动摘要「引入一笔按轮数计
 
 ---
 
-### ⛔ 门禁下不来，而且**不是代码问题**
+### ✅ 付费判分器与门禁已恢复（2026-08-30）
 
-```
-⛔ 判分器账户欠费停用（Moonshot）→ 所有语义指标 UNRELIABLE
-```
-
-**只有账户持有人能做：充值。** 充完之后按顺序跑这四轮，门禁就能绿：
+继续沿用原来的 Moonshot `moonshot-v1-128k`，先做最小连通性，再按顺序正式重跑：
 
 ```bash
 cd backend
-# ① 公共库两套（I-1 的两条 FAIL 都在这里）
+# ① 公共库两套
 uv run python ../eval/run.py --tag gate-public-direct
 uv run python ../eval/run.py --tag gate-public-agent --agent
-# ② 风险边界（W3.2 那两轮是 --no-judge 跑的，语义那一半没数字）
+# ② 风险边界
 uv run python ../eval/risk_boundary.py --verify off --tag gate-risk
 # ③ 门禁
-uv run python ../eval/gate.py            # 退出码必须 0
+uv run python ../eval/gate.py            # 实际退出码 0
 ```
 
-⚠️ **不要为了让门禁变绿去改门禁。** 「最新的那一轮说了算」正是它不能被
-挑证据的原因；加一条「跳过 UNRELIABLE 取次新」等于允许"跑到满意为止再挑一轮上报"。
+结果：公共库直路 96.0%、公共库 Agent 96.0%、风险边界 96.4%；判分失效率均为 0，
+四条风险硬指标均为 0。门禁沿用“最新一轮说了算”，没有改阈值或挑旧结果。
 
 ---
 
 ### 还开着的事，按「谁能做」排
 
-#### ① 判分器充值（⚠️ 只有你能做）　→ 见上，门禁卡在这里
-
-#### ② W3.3 / M18：企业版语料首次导入（⚠️ 要抓取 + 付费 embedding）
+#### ① W3.3 / M18：企业版语料首次导入（⚠️ 要抓取 + 付费 embedding）
 
 **代码已经全部就位**（2026-08-29），剩下的是抓取和入库那几条命令：
 
@@ -169,7 +199,7 @@ uv run python ../eval/gate.py            # 退出码必须 0
 ⚠️ 顺带：开发库里 `enterprise_desktop` 有 161 篇孤儿文档、0 块（测试留下的），
 真导语料之前要清一次，否则 `spaces list` 的数字对不上。见 ISSUES.md I-10。
 
-#### ③ Week 4：讲得出　—— 只剩「生产真实数字」
+#### ③ Week 4：讲得出　—— 只剩三张图和 MCP 录屏
 
 | # | 东西 | 状态 |
 |---|---|---|
@@ -178,7 +208,7 @@ uv run python ../eval/gate.py            # 退出码必须 0
 | W4.3 | 5 分钟 demo 脚本 | ✅ `docs/demo-5分钟脚本.md`，每步写了"会出什么岔子" |
 | W4.4 | 三份岗位定制一页纸 | ✅ `docs/一页纸-三个岗位版本.md` |
 | W4.5 | ADR 补齐 | ✅ 23 份。四条破的各一份，**三条不破的也各一份**（ADR-1/2/3） |
-| — | **生产真实数字** | ❌ 见下面 ⑦ |
+| — | **生产真实数字** | ✅ 已写入 README（2026-08-29，336 次提问） |
 
 #### ④ 真机跑一次 `docker compose up`（⚠️ 本机没 Docker）
 
@@ -188,11 +218,11 @@ uv run python ../eval/gate.py            # 退出码必须 0
 
 #### ⑥ 阿里云安全组只留 22/80/443（⚠️ 只有你能做）
 
-#### ⑦ 生产真实数字进 README（Week 4 会用）
+#### ⑦ 生产真实数字进 README（✅ 2026-08-29 完成）
 
-`copilot quality-report` 的采集和口径早就有（`metrics.py`），
-但仓库里一个数都没有：TTFB p50/p95、差评率、越过工具直答率、总会话数。
-**有仪器没读数**，对外只能说"我做了评测"。
+`copilot quality-report --days 30` 的真实读数已写入 README：336 次提问、
+TTFB p50 2.7s / p95 9.8s、越过工具直答 0；差评率同时保留了只有 5 次评价的
+小样本警告，没有把不可靠的百分比包装成结论。
 
 #### ⑧ MCP 录一段 30 秒的屏（简历里能放的东西）
 
@@ -794,7 +824,7 @@ async 测试全红。
 
 `next build` 峰值吃 1GB+，在服务器上跑必 OOM。流程固定为：**本机 `npm run build` → 传 `out/` 产物 → Nginx 直接服务静态文件**。
 
-Next.js 15 + AI SDK 6 完整保留，`useChat` 照常工作——只是 `output: 'export'`，服务器上不跑 Node 进程。这同时省下 100–200MB。
+Next.js 16 + AI SDK 7 完整保留，`useChat` 照常工作——只是 `output: 'export'`，服务器上不跑 Node 进程。这同时省下 100–200MB。
 
 > 副作用：不能用 Next.js 的服务端能力（Server Actions、Route Handlers）。本方案里 Next.js 本来就只做 UI、所有逻辑在 FastAPI，**所以零损失**。
 
@@ -910,7 +940,7 @@ PDF 的处理方式：
 | Rerank | `BAAI/bge-reranker-v2-m3`（SiliconFlow，免费） | 精排，对准确率提升最明显 |
 | LLM（生成） | **DeepSeek**（已有 Key），KIMI 备用 | OpenAI 兼容，一套代码切换 |
 | LLM（评测裁判） | Gemini（已有 Key，**仅本机用**） | M8 做 LLM-as-Judge，换个模型打分更客观 |
-| 前端 | **Next.js 15（静态导出）+ Vercel AI SDK 6** | 2026 AI 聊天界面事实标准。`useChat` 直接搬走流式/工具调用/中断/重试。`output: 'export'` 本机构建，服务器不跑 Node |
+| 前端 | **Next.js 16（静态导出）+ Vercel AI SDK 7** | 2026 AI 聊天界面事实标准。`useChat` 直接搬走流式/工具调用/中断/重试。`output: 'export'` 本机构建，服务器不跑 Node |
 | UI | Tailwind + shadcn/ui | 2026 主流组件方案 |
 | 任务队列 | **Postgres `FOR UPDATE SKIP LOCKED`** | 已经有 Postgres，不再引入 Redis/Celery。这是标准做法，不是妥协 |
 

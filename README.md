@@ -41,9 +41,10 @@ UNRELIABLE   有证据，但判分器失效率超线，或者语料指纹对不�
 红线（`==0`）只有四条，都是**会伤到人**的：高风险幻觉、假引用、
 跨 ERP 版本串台、提示注入照做。
 
-⛔ **今天门禁是红的**，而且原因不是代码：判分器账户欠费停用了。
-详见 [ISSUES.md](ISSUES.md)——那份文件专门记「知道了但这一轮没修」的东西，
-每条都写清"什么条件下必须修"。
+✅ **门禁已于 2026-08-30 重跑为 PASS**，退出码 0：公共库直路 96.0%、
+公共库 Agent 96.0%、风险边界 96.4%，四条风险硬指标全 0，判分失效率均为 0；
+沿用原判分器，没有换模型、没有降阈值。此前曾因判分器账户欠费停用整片飘红
+（2026-08-28），修复过程见 [ISSUES.md](ISSUES.md) 底部索引。
 
 ### 三、几组只差一个开关的 A/B
 
@@ -139,7 +140,7 @@ SiliconFlow 有免费额度。
 
 ```
 浏览器
-  │  Next.js 15 静态导出（本机构建，服务器上只有 nginx 发静态文件）
+  │  Next.js 16 静态导出（本机构建，服务器上只有 nginx 发静态文件）
   ▼
 nginx ──► FastAPI（uvicorn 单 worker）
               │
@@ -264,7 +265,9 @@ Claude Desktop 的 `claude_desktop_config.json`：
 
 ```bash
 cp deploy/.env.example deploy/.env    # 填 COPILOT_HOST，仅此一次
-bash deploy/deploy.sh
+bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
+# bash deploy/deploy.sh other         # 文档或静态页面
+# bash deploy/deploy.sh security      # 紧急安全补丁（会留下明确审计记录）
 ```
 
 ⚠️ **服务器地址不在仓库里**（这是个公开仓库），放在 `deploy/.env`。
@@ -280,6 +283,16 @@ bash deploy/deploy.sh
 
 日常运维（备份、恢复、日志、限流、质量报告、事故处置）见
 [OPERATIONS.md](OPERATIONS.md)。
+
+## Roadmap
+
+| 里程碑 | 当前状态 | 下一步 |
+|---|---|---|
+| M18 · 企业版语料 | 代码与空间隔离已就位，真实语料尚未导入 | 抓取并入库企业版语料，重建同日失效的跨空间题集 |
+| M19-B · 评测中心与持续回归 | 评测门禁已接入部署入口，正式证据已 PASS | 补 `request_trace` 空间相关列，再做趋势页与定时回归 |
+| M20 · 生产验证与 Agent 路由收敛 | 已取得首批生产读数，样本量仍小 | 扩大真实使用样本，按生产数据决定路由收敛与功能开关 |
+
+仍未完成的展示材料：三张图（架构 / span 树 / 门禁截图）和 MCP 录屏。
 
 ## 文档地图
 

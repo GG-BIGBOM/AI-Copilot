@@ -9,6 +9,21 @@ set -e
 
 cd /app/backend
 
+# 在做迁移、下载模型或写任何数据之前给出可操作的配置错误。
+# `.env.example` 里的占位符也算“没填”，否则会等到远端返回 401 才暴露。
+case "${SILICONFLOW_API_KEY:-}" in
+  ""|*xxxxxxxx*|*CHANGE-ME*|*换成*)
+    echo "配置错误：SILICONFLOW_API_KEY 未填写，样例语料无法生成 embedding。" >&2
+    exit 2
+    ;;
+esac
+case "${LLM_API_KEY:-}" in
+  ""|*xxxxxxxx*|*CHANGE-ME*|*换成*)
+    echo "配置错误：LLM_API_KEY 未填写，问答服务无法生成答案。" >&2
+    exit 2
+    ;;
+esac
+
 echo "── 1/4 数据库迁移 ──"
 alembic upgrade head
 

@@ -8,6 +8,7 @@
 import uuid
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -104,7 +105,7 @@ async def other_space(maker) -> KnowledgeSpace:
         return await spaces.by_code(s, spaces.ENTERPRISE_DESKTOP)
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def _dispose_shared_engine():
     """每道测试跑完，把**模块级**那个引擎的连接池倒空。
 

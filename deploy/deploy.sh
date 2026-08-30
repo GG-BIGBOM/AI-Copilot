@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # 本机构建 → 推送 → 重启。在**本机**（不是服务器）的仓库根目录执行。
 #
-#   ./deploy/deploy.sh
+#   ./deploy/deploy.sh ai        # 检索 / Prompt / Agent / 路由改动
+#   ./deploy/deploy.sh other     # 文档或静态页面
+#   ./deploy/deploy.sh security  # 紧急安全补丁
 #
 # ⭐ 前端一定在本机构建。`next build` 峰值吃 1GB+，服务器只有 1.6GB，
 #    在上面 build 必被 OOM killer 干掉——这是这套部署方案的第一条生死线。
 set -euo pipefail
+
+# 部署类型必须显式声明。服务器不知道「上次部署的是哪个 commit」，靠自动 diff
+# 猜范围会把已经合并到 main 的 AI 改动误判成“无变化”。显式参数会进入审计行。
+DEPLOY_SCOPE=${1:-}
+case "$DEPLOY_SCOPE" in
+    ai|other|security) ;;
+    *) echo "用法：$0 {ai|other|security}"; exit 2 ;;
+esac
 
 # ⚠️ **服务器地址不写在仓库里**（这个仓库是公开的）。两种给法，环境变量优先：
 #     export COPILOT_HOST=root@1.2.3.4
@@ -75,6 +85,13 @@ PY=backend/.venv/bin/python
 [ -x "$PY" ] || PY=backend/.venv/Scripts/python.exe   # Git Bash on Windows
 [ -x "$PY" ] || { echo "找不到 backend/.venv，先 uv sync 一次"; exit 1; }
 echo "$CRLF_CHECK" | "$PY" - || exit 1
+
+# 先打印统一评测门禁，再决定是否允许继续。AI 改动在 FAIL / UNRELIABLE 时：
+#   交互终端要求输入当前完整 commit；非交互环境默认中止。
+# CI 若经人工审批，可把**当前完整 commit**放进 COPILOT_GATE_CONFIRM；换一个提交即失效。
+# security 是明确的紧急出口，不会被 30 天证据过期永久卡住，但仍打印审计记录。
+( cd backend && "../$PY" ../eval/deploy_gate.py "$DEPLOY_SCOPE" )
+
 # ⚠️ **`../tests ../eval` 不能省**（ADR-18）。这两个目录在仓库根、不在
 # `backend/` 下，`ruff check .` 一行扫不到它们——在此之前它们**从来没被 lint 过**，
 # 而 CI 和这里都绿着，看起来像在管。真代价不是风格：`tests/test_eval_scoring.py`

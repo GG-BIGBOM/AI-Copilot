@@ -18,7 +18,7 @@
 
 ## 一、前端
 
-Next.js 15 + AI SDK 6，`output: 'export'` **静态导出**。
+Next.js 16 + AI SDK 7，`output: 'export'` **静态导出**。
 
 ⚠️ **`next build` 峰值吃 1GB+，服务器上跑必 OOM。** 所以流程固定为
 「本机构建 → 传 `out/` 产物 → nginx 直接发」。副作用是用不了 Server Actions
