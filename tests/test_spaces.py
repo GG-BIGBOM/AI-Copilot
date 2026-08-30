@@ -244,7 +244,7 @@ async def test_ingested_chunks_inherit_the_document_space(maker, other_space):
 
     ⚠️ 这条断言**故意不用默认空间**：conftest 的填充器补的是 flagship，
     所以如果 `write_chunks` 根本没写这一列，块会变成 flagship，
-    和这里的 `enterprise_desktop` 对不上，测试就会红。
+    和这里的 `other_space` 对不上，测试就会红。
     """
     from copilot.ingest.pipeline import write_chunks
 

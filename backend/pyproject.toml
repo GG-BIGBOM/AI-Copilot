@@ -62,12 +62,6 @@ obs = [
     "opentelemetry-sdk>=1.29",
     "opentelemetry-exporter-otlp-proto-http>=1.29",
 ]
-# MCP server（W3.1）。**只在本机/开发机装**：它是给 Claude Desktop、Cursor
-# 这类桌面 AI 工具通过 stdio 连的，线上那台服务器上没有人会去连它，
-# 装了只是白占那 1.6GB 里的几十兆。
-mcp = [
-    "mcp>=1.2",
-]
 # 中文混合检索（W1.2）。jieba 是纯 Python、约 20MB、不碰 torch，
 # 所以它**可以**上服务器——但仍然做成 extra：`HYBRID_ENABLED` 关着的时候
 # 一行都不会执行到，装了只是白占内存。开之前先看 EVALUATION.md 那组 A/B

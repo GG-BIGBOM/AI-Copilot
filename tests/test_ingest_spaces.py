@@ -1,14 +1,15 @@
-"""入库的判重必须按知识版本分开（M18 / W3.3 的前置）。
+"""入库的判重必须按知识版本分开。
 
-⭐⭐ **plan.md 的 M18 步骤里点名说「这是本步最值得先写测试的地方」，
-写下来之后发现它猜对了一半、而漏掉的那一半更糟。**
+⭐⭐ 这是 M18（多知识版本）筹备期间写测试时发现的一个真实 bug——
+功能本身现在只服务旗舰版，但判重按空间分这条规则是 `ingest_documents`
+本身的正确性要求，和有几个空间无关，测试留着。
 
 `_ingest_one` 判"这篇是不是已经入过库"用的是
 
     source_url（没有就用 title） + owner_id
 
-**没有空间这一维。** 于是导入企业版语料时，一篇和旗舰版同名（或同 URL）的
-文档会撞上旗舰版那一行：
+**没有空间这一维。** 于是两个空间各导一份同名（或同 URL）的文档时，
+后一份会撞上前一份那一行：
 
     content_hash 一样  →  判成「已入库、跳过」，企业版**静静少掉这一篇**
     content_hash 不同  →  ⚠️⚠️ **改的是旗舰版那一行**：内容换成企业版的，
@@ -58,12 +59,12 @@ class FakeEmbedder:
 
 @pytest.fixture
 async def two_spaces(maker, flagship_id):
-    """旗舰版 + 一个企业版空间。用种子里那个 `enterprise_desktop`，
-    它本来就是为这件事预置的（`status='inactive'`，语料还没导入）。"""
+    """旗舰版 + `common`。这个判重 fix 只要求「两个不同的空间」，
+    `common` 是种子里现成的第二个，不用另建一个空间。"""
     from copilot import spaces
 
     async with maker() as s:
-        other = await spaces.by_code(s, spaces.ENTERPRISE_DESKTOP)
+        other = await spaces.by_code(s, spaces.COMMON)
         other_id = other.id
     return flagship_id, other_id
 

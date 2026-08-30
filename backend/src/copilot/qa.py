@@ -986,7 +986,6 @@ async def ask_stream(
     general: bool | None = None,
     facts: str = "",
     injection_guard: bool | None = None,
-    verify: str | None = None,
 ) -> StreamedAnswer:
     """检索并流式作答。
 
@@ -1001,9 +1000,6 @@ async def ask_stream(
             这个函数被评测直接调用，A/B 两边必须能在同一次运行里各传各的。
         injection_guard: 提示注入防线（W2.3）。留 None 读 `INJECTION_GUARD_ENABLED`；
             评测显式传入 A/B 版本。它同时管围栏和那段规则，见下面那行注释。
-        verify: 校验 Agent（W3.2）。`off` / `annotate` / `refuse`，
-            留 None 读 `VERIFIER_MODE`。⚠️ 和上面几个一样是**参数不是配置**：
-            A/B 的两臂必须能在同一次运行里各传各的。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
@@ -1135,60 +1131,12 @@ async def ask_stream(
         fenced=fenced,
     )
     return StreamedAnswer(
-        stream=_verified_stream(llm, messages, context.text, verify),
+        stream=llm.stream_parts(messages),
         citations=result.citations,
         images=context.images,
         context_text=context.text,
         private_hits=result.private_count,
     )
-
-
-def _verified_stream(llm, messages: list[dict], context_text: str, mode: str | None):
-    """套在正文流外面的校验 Agent（W3.2）。`off` 时**原样返回那个迭代器**。
-
-    ⚠️ **`off` 走的是同一个对象、不是一层包装。** 包一层空转的生成器看起来
-    无害，但它会把 `llm.stream_parts` 的惰性求值往后推一帧——而首字延迟
-    （TTFB）是这个项目在看的指标之一。默认关的功能不该让默认路径变慢一点点。
-
-    两种模式的代价完全不同，写在这里：
-
-        annotate  流式**照常**。校验在流结束之后跑，那段警告最后到。
-                  代价：多一次模型调用（只在答案里抽得出具体说法时）。
-        refuse    **没有流式**。答案要先整段攒完才能判断要不要换掉它——
-                  发出去的字收不回来。代价：首字延迟 = 整段生成 + 一次校验。
-
-    ⚠️ `refuse` 那一档的代价大到不该由一个开关默认承担，见 ADR-22。
-    """
-    from copilot import verifier as vf
-
-    want = (mode or get_settings().verifier_mode or "off").lower()
-    if want == "off":
-        return llm.stream_parts(messages)
-
-    def annotated():
-        buf: list[str] = []
-        for kind, piece in llm.stream_parts(messages):
-            if kind == "content":
-                buf.append(piece)
-            yield kind, piece
-        answer = "".join(buf)
-        verdict = vf.verify(llm, answer, context_text)
-        if verdict.unsupported:
-            yield "content", vf.annotate("", verdict)
-
-    def refusing():
-        buf = [p for kind, p in llm.stream_parts(messages) if kind == "content"]
-        answer = "".join(buf)
-        verdict = vf.verify(llm, answer, context_text)
-        if verdict.unsupported:
-            # ⚠️ 整段降级成拒答。**不是删掉那几句**——一段操作步骤少了第 3 步
-            # 和一段完整的步骤长得一模一样，而用户会照着做到第 4 步才发现
-            logger.info("校验降级：%d 条说法核对不到", len(verdict.unsupported))
-            yield "content", NO_ANSWER
-            return
-        yield "content", answer
-
-    return annotated() if want == "annotate" else refusing()
 
 
 async def ask(

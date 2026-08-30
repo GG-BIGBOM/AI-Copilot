@@ -131,9 +131,6 @@ span 树本机能看，线上没开采样。拿到线上 p95 的分段构成之�
    后台自动解析入库，之后提问就能引用到它。**隔离是这个项目唯一
    错了就不可挽回的规则**（`owner_id`，见 ARCHITECTURE.md）。
 4. **生成实施配置方案**——多轮追问清楚需求，最后给一份可下载的 Excel。
-5. **接进你已经在用的 AI 工具**——`copilot mcp` 起一个 MCP server，
-   Claude Desktop / Cursor 直接连知识库（[ADR-23](DECISIONS.md)）。
-   ⚠️ 那份 ADR 里最要紧的一句是：`user_id` **不是工具入参**。
 
 **知识库里没有的行业术语、通用概念，它会按通用理解说一说并声明没有出处；
 但具体的界面路径、字段名、参数上限绝不会凭记忆编。**
@@ -259,30 +256,6 @@ uv run python ../eval/run.py --dataset ../eval/keyword.yaml --check   # 关键�
 指标口径、A/B 规则、判分器失效怎么处理，全在 [EVALUATION.md](EVALUATION.md)。
 **最要紧的一条：`INVALID`（判分器自己挂了）不计入准确率。**
 
-## 接进 Claude Desktop / Cursor（MCP）
-
-```bash
-cd backend && uv sync --extra mcp
-uv run copilot mcp --as-user you@example.com
-```
-
-Claude Desktop 的 `claude_desktop_config.json`：
-
-```json
-{"mcpServers": {"wdt-copilot": {
-  "command": "/path/to/backend/.venv/bin/copilot",
-  "args": ["mcp", "--as-user", "you@example.com"]}}}
-```
-
-三个工具：`answer_kb(question)` / `search_kb(query)` / `my_documents()`。
-
-⚠️⚠️ **`user_id` 和 `space` 都不是工具入参**——它们在进程启动时解析一次，
-模型看不见、也就改不了。凡是能出现在工具签名里的东西，
-一句 prompt injection 就能让模型去填。理由和回归测试见 [ADR-23](DECISIONS.md)。
-
-⚠️ 这个进程是**本机**的，不是网络服务：它信任的是"谁能在这台机器上跑这条命令"。
-**别把它挂到公网上**——那需要真正的令牌体系，这里没有。
-
 ## 部署
 
 ```bash
@@ -310,13 +283,16 @@ bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
 
 | 里程碑 | 当前状态 | 下一步 |
 |---|---|---|
-| M18 · 企业版语料 | 代码与空间隔离已就位，真实语料尚未导入 | 抓取并入库企业版语料，重建同日失效的跨空间题集 |
 | M19-B · 评测中心与持续回归 | 评测门禁已接入部署入口，正式证据已 PASS | 补 `request_trace` 空间相关列，再做趋势页与定时回归 |
 | M20 · 生产验证与 Agent 路由收敛 | 已取得首批生产读数，样本量仍小 | 扩大真实使用样本，按生产数据决定路由收敛与功能开关 |
 
-仍未完成的展示材料：架构图 ✅，门禁证据以真实终端输出的代码块形式贴在上面
-（本环境导不出真机截图，需要图片可自己跑一遍命令截屏），span 树截图和
-MCP 录屏还欠。
+2026-08-30：多知识版本（原 M18）、校验 Agent（W3.2）、MCP server（W3.1）
+主动移除——项目转向旗舰版单独完善并上线，这三样当时是为多产品版本、
+面试叙事准备的，现在不需要。决策记录仍在 [DECISIONS.md](DECISIONS.md)
+的 ADR-22 / ADR-23。检索隔离机制（`knowledge_space_id`）本身没有动，
+旗舰版的隔离仍然靠它。
+
+还欠一张图：一次真实请求的 span 树截图（需要打开追踪、跑一轮真实问答）。
 
 ## 文档地图
 

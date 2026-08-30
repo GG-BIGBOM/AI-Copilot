@@ -1,4 +1,4 @@
-"""门禁与跨空间评测的判定口径（M19-A）。
+"""门禁的判定口径（M19-A）。
 
 门禁是**唯一一个"能不能上线"由代码说了算**的地方。它读 `eval/results/` 里
 已有的结果，对照 `eval/gate.yaml` 的契约给出 PASS / FAIL / UNRELIABLE。
@@ -20,7 +20,7 @@ EVAL_DIR = Path(__file__).resolve().parents[1] / "eval"
 def _load(name: str, filename: str):
     if name in sys.modules:
         return sys.modules[name]
-    # gate / cross_space 都 `import run as base`，所以 eval/ 要在 path 上
+    # gate 自己 `import run as base`，所以 eval/ 要在 path 上
     if str(EVAL_DIR) not in sys.path:
         sys.path.insert(0, str(EVAL_DIR))
     spec = importlib.util.spec_from_file_location(name, EVAL_DIR / filename)
@@ -32,7 +32,6 @@ def _load(name: str, filename: str):
 
 
 gate = _load("eval_gate", "gate.py")
-xspace = _load("eval_cross_space", "cross_space.py")
 
 
 def run(**kw) -> dict:
@@ -198,100 +197,6 @@ def test_a_missing_metric_never_passes():
     """
     assert not gate.check_threshold(None, "==0")
     assert not gate.check_threshold(None, ">=0")
-
-
-# ─────────────────────────────────────────────────────────
-# 跨空间评测的判定
-# ─────────────────────────────────────────────────────────
-
-
-def xcase(cid: str, expect: str, **extra) -> dict:
-    return {"id": cid, "expect": expect, "ask_in": "enterprise_desktop", "q": "问题", **extra}
-
-
-def xresult(cid: str, expect: str, **kw):
-    return xspace.SpaceResult(id=cid, kind="fact", q="问题", expect=expect, **kw)
-
-
-def test_a_foreign_chunk_is_contamination_even_if_the_answer_is_clean():
-    """⭐ 召回里混进别的空间的块**本身**就是漏洞——不看模型引没引用它。
-
-    模型这一轮没用上，不代表下一轮不会用；而"下一轮"是在用户面前。
-    """
-    cases = [xcase("p", "no_answer")]
-    results = [xresult("p", "no_answer", answer="知识库暂无此内容", said_no_answer=True,
-                       foreign_space_hits=3)]
-    m = xspace.score(results, cases)
-    assert m["cross_space_contamination_rate"] == 100.0
-    assert m["foreign_chunks"] == 3
-    assert results[0].status == "incorrect"
-
-
-def test_a_refusal_that_leaks_the_other_spaces_fact_still_fails():
-    """以「暂无此内容」开头、后面把另一个版本的编码报出来——那正是污染本身。
-
-    判定顺序把 banned 排在拒答前面，就是为了这一种。
-    """
-    cases = [xcase("p", "no_answer", banned=["JTSD"])]
-    results = [
-        xresult(
-            "p",
-            "no_answer",
-            answer="知识库暂无此内容。不过极兔的编码是 JTSD。",
-            said_no_answer=True,
-        )
-    ]
-    m = xspace.score(results, cases)
-    assert m["banned_leak_rate"] == 100.0
-    assert results[0].status == "incorrect"
-
-
-def test_a_probe_that_answers_is_a_refusal_failure():
-    cases = [xcase("p", "no_answer")]
-    results = [xresult("p", "no_answer", answer="在【设置】里配置即可。", said_no_answer=False)]
-    m = xspace.score(results, cases)
-    assert m["refusal_failure_rate"] == 100.0
-
-
-def test_a_control_that_refuses_invalidates_the_run():
-    """⚠️ 对照题拒答 = 这一轮的「干净」可能只是检索没工作。
-
-    没有这一条，一个连不上 embedding 的环境会让全套探针题绿得漂亮。
-    """
-    cases = [
-        xcase("p", "no_answer"),
-        xcase("c", "answer", ask_in="flagship", source="电子面单", must_include=["JTSD"]),
-    ]
-    results = [
-        xresult("p", "no_answer", answer="知识库暂无此内容", said_no_answer=True),
-        xresult("c", "answer", answer="知识库暂无此内容", said_no_answer=True, source_hit=True),
-    ]
-    m = xspace.score(results, cases)
-    assert m["refusal_failure_rate"] == 0.0  # 探针本身是干净的
-    assert m["control_answer_rate"] == 0.0  # 但这一轮什么都没证明
-    assert "检索没工作" in results[1].fail_why
-
-
-def test_a_healthy_run_is_all_zeros_and_a_full_control():
-    cases = [
-        xcase("p", "no_answer", banned=["JTSD"]),
-        xcase("c", "answer", ask_in="flagship", source="电子面单", must_include=["JTSD"]),
-    ]
-    results = [
-        xresult("p", "no_answer", answer="知识库暂无此内容", said_no_answer=True),
-        xresult(
-            "c",
-            "answer",
-            answer="极兔对应 JTSD[1]",
-            said_no_answer=False,
-            source_hit=True,
-        ),
-    ]
-    m = xspace.score(results, cases)
-    assert m["cross_space_contamination_rate"] == 0.0
-    assert m["banned_leak_rate"] == 0.0
-    assert m["refusal_failure_rate"] == 0.0
-    assert m["control_answer_rate"] == 100.0
 
 
 def test_a_corpus_independent_suite_is_not_asked_for_a_fingerprint():

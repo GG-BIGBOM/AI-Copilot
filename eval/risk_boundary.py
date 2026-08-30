@@ -719,38 +719,6 @@ def check(cases: list[dict], cfg: base.Config) -> None:
     print(f"期望来源未命中 {miss} 题。no_answer 题若最高分明显偏高，就要人工确认一下。")
 
 
-def _run_verifier(results: list[RiskResult], mode: str, workers: int) -> None:
-    """把校验 Agent 跑在每一条答案上。**和线上同一个实现**（`copilot.verifier`）。
-
-    ⚠️ 抽不出具体说法的答案（拒答、常识解释）连一次调用都不花——
-    判据在 `extract_claims` 里，和线上是同一个函数。所以这一轮的成本
-    大致等于「答案里带界面路径或参数值的那几道题」的数量。
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    from copilot.providers.llm import ChatLLM
-    from copilot.qa import NO_ANSWER
-    from copilot.verifier import annotate, extract_claims, verify
-
-    llm = ChatLLM()
-    todo = [cr for cr in results if extract_claims(cr.answer)]
-    print(f"── 校验（{mode}）：{len(todo)}/{len(results)} 条答案里抽得出具体说法 ──")
-    changed = 0
-
-    def one(cr: RiskResult) -> tuple[RiskResult, object]:
-        return cr, verify(llm, cr.answer, cr.context)
-
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for cr, verdict in pool.map(one, todo):
-            if not verdict.unsupported:
-                continue
-            changed += 1
-            cr.answer = (
-                annotate(cr.answer, verdict) if mode == "annotate" else NO_ANSWER
-            )
-    print(f"   有 {changed} 条被校验判出「核对不到的说法」，已按 {mode} 处理")
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description="风险边界评测（M13 P1）")
     ap.add_argument("--tag", default="", help="这轮的名字，结果存 results/<tag>.json")
@@ -774,12 +742,6 @@ def main() -> None:
         choices=("on", "off"),
         default="",
         help="提示注入防线（围栏 + 规则）开/关。不传则读 .env 的 INJECTION_GUARD_ENABLED",
-    )
-    ap.add_argument(
-        "--verify",
-        default=None,
-        choices=["off", "annotate", "refuse"],
-        help="校验 Agent（W3.2）。留空读 VERIFIER_MODE。A/B 用：--verify off / annotate",
     )
     ap.add_argument("--mode", default="fast", choices=["fast", "deep"])
     ap.add_argument("--workers", type=int, default=5)
@@ -867,18 +829,6 @@ def main() -> None:
         general=cfg.general,
         fenced=guard_on,
     )
-    # ⭐ 校验 Agent（W3.2）。**排在生成之后、判分之前**——它模拟的正是线上
-    # 那个位置：答案已经出稿，再过一遍核对。
-    #
-    # ⚠️⚠️ 这里改的是 `cr.answer` 本身，也就是**判分器看到的是校验之后的答案**。
-    # 这一点必须是这样：`annotate` 那一档追加的警告会不会把一道对的题
-    # 变成"看起来不确定"，正是这一轮要量的东西之一。
-    # 只在报告里附一句"校验发现 N 条"、而判分仍然看原文的话，
-    # 这个 A/B 就只量到了校验器的自我评价。
-    verify_mode = (args.verify or get_settings().verifier_mode or "off").lower()
-    if verify_mode != "off":
-        _run_verifier(results, verify_mode, args.workers)
-
     print("── 判分 ──")
     judge = judge_all(
         results, cases, workers=args.workers, quiet=False, skip=args.no_judge

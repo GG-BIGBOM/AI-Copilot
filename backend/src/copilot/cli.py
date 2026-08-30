@@ -48,26 +48,14 @@ def ingest(
     owner: str = typer.Option(
         "", "--owner", help="写进这个用户的私有库（邮箱）。不给则写公共库"
     ),
-    space: str = typer.Option(
-        "flagship", "--space", help="灌进哪个知识版本。不给路径时也决定从哪个目录读"
-    ),
 ) -> None:
-    """把本地 Markdown 切分、向量化、写入公共库（或某个用户的私有库）。
-
-    ⚠️ `--space` 同时决定**从哪读**和**写进哪个版本**。给了 `path` 就只决定后者。
-
-        copilot ingest                                          → 旗舰版
-        copilot ingest --space enterprise_desktop               → 企业版（客户端）
-        copilot ingest ../data/raw/spaces/x --space enterprise_web
-    """
+    """把本地 Markdown 切分、向量化、写入公共库（或某个用户的私有库）。"""
     import asyncio
 
-    asyncio.run(_ingest(path, force, limit, owner, space))
+    asyncio.run(_ingest(path, force, limit, owner))
 
 
-async def _ingest(
-    path: str, force: bool, limit: int, owner: str = "", space: str = "flagship"
-) -> None:
+async def _ingest(path: str, force: bool, limit: int, owner: str = "") -> None:
     from pathlib import Path
 
     from copilot import spaces as spaces_mod
@@ -76,14 +64,7 @@ async def _ingest(
     from copilot.ingest.pipeline import ingest_documents, load_yuque_dir
     from copilot.providers.siliconflow import SiliconFlowEmbedder
 
-    # ⚠️ 拼错当场退出，理由同 `sync-yuque`
-    try:
-        default_root = spaces_mod.root_for(space)
-    except spaces_mod.SpaceNotFound as e:
-        typer.secho(str(e), fg=typer.colors.RED)
-        raise typer.Exit(1) from e
-
-    root = Path(path) if path else default_root
+    root = Path(path) if path else spaces_mod.root_for(spaces_mod.FLAGSHIP)
     if not root.exists():
         typer.secho(f"目录不存在：{root}", fg=typer.colors.RED)
         raise typer.Exit(1)
@@ -113,13 +94,9 @@ async def _ingest(
         typer.secho(f"网页勘误 {len(from_db)} 条", fg=typer.colors.CYAN)
     corrections = merge_corrections(corrections, from_db)
 
-    # 勘误层只覆盖**旗舰版**的语雀公共库。两种情况都跳过：
-    #
-    #   灌私有库    那是别人自己的文档，拿一条针对语雀文档的勘误去盖它毫无道理
-    #   非旗舰版    ⚠️ **M18 补的**。现有勘误的 `target_url` 全指向旗舰版语雀
-    #               文档，拿去盖企业版一条都对不上——而"对不上"会打出一大片
-    #               「⚠️ 没有对上任何一篇」的警告，把真正需要看的那几条淹掉
-    if owner or space != spaces_mod.FLAGSHIP:
+    # 勘误层只覆盖公共语雀库；灌私有库的话，拿一条针对语雀文档的勘误去盖
+    # 别人自己传的文档毫无道理
+    if owner:
         corrections = {}
     docs, applied, missed = apply_corrections(docs, corrections)
     retired = [c for c in applied if c.retired]
@@ -166,7 +143,7 @@ async def _ingest(
         if retired:
             n = await _retire(session, [c.target_url for c in retired])
             typer.secho(f"已从索引移除作废文档 {n} 篇", fg=typer.colors.CYAN)
-        space_id = (await spaces_mod.by_code(session, space)).id
+        space_id = (await spaces_mod.by_code(session, spaces_mod.FLAGSHIP)).id
         stats = await ingest_documents(
             session,
             docs,
@@ -174,9 +151,6 @@ async def _ingest(
             owner_id=owner_id,
             force=force,
             report=lambda m: typer.echo(m),
-            # ⚠️ 判重现在按空间分（`_ingest_one`）。不传这个的话，
-            # 企业版那批会撞上旗舰版同名文档——同内容被判成重复静静丢掉，
-            # 不同内容则**改写旗舰版那一行**。两种都没有症状
             space_id=space_id,
         )
 
@@ -278,31 +252,12 @@ def sync_yuque_cmd(
     books: str = typer.Option("", "--books", help="只抓指定知识库，逗号分隔的 slug"),
     limit: int = typer.Option(0, "--limit", help="每个库最多抓几篇，0 表示不限；用于小批量试跑"),
     force: bool = typer.Option(False, "--force", help="忽略增量判定，全量重抓"),
-    space: str = typer.Option(
-        "flagship",
-        "--space",
-        help="抓到哪个知识版本的目录下（flagship / enterprise_desktop / enterprise_web）",
-    ),
 ) -> None:
-    """抓取语雀公开知识库到本地。
-
-    ⚠️ 一个团队空间 = 一个 ERP 版本。三套语料混在同一棵树里的话，
-    `_manifest.json` 会共用一份，增量判定就串了——下次抓取会把整批
-    判成"没变、跳过"。目录映射在 `spaces.SPACE_ROOTS`。
-
-        copilot sync-yuque <login>                             → data/raw/yuque/
-        copilot sync-yuque <login> --space enterprise_desktop  → data/raw/spaces/…
-    """
+    """抓取语雀公开知识库到本地（默认落 `data/raw/yuque`）。"""
     from copilot import spaces
     from copilot.sources.sync import sync_yuque
 
-    # ⚠️ **拼错当场退出，绝不默默落回默认目录**——那正是没有任何症状的错误：
-    # 企业版语料写进旗舰版那棵树，然后被下一次 ingest 当成旗舰版语料灌进去
-    try:
-        root = spaces.root_for(space)
-    except spaces.SpaceNotFound as e:
-        typer.secho(str(e), fg=typer.colors.RED)
-        raise typer.Exit(1) from e
+    root = spaces.root_for(spaces.FLAGSHIP)
     typer.secho(f"抓到 {root}", fg=typer.colors.CYAN)
 
     only = [s.strip() for s in books.split(",") if s.strip()] or None
@@ -1389,167 +1344,6 @@ async def _quality_report(
         typer.echo("")
         typer.echo(f"  台账共 {all_rows} 行，最早 {oldest:%Y-%m-%d}　"
                    f"（保留策略见 copilot prune-traces）")
-
-
-# ─────────────────────────────────────────────────────────
-# 知识版本（M18）
-# ─────────────────────────────────────────────────────────
-spaces_app = typer.Typer(help="知识版本：看状态、启用、回滚", no_args_is_help=True)
-app.add_typer(spaces_app, name="spaces")
-
-
-@spaces_app.command("list")
-def spaces_list() -> None:
-    """四个空间 + 状态 + 文档/块/图片数。
-
-    ⭐ **导入语料之后第一件事就是跑它。** `spaces activate` 之前要先看见
-    那几个数字不为 0——激活一个空空间，用户问什么都得到「知识库暂无此内容」，
-    **他会以为是系统坏了**。
-    """
-    import asyncio
-
-    asyncio.run(_spaces_list())
-
-
-async def _spaces_list() -> None:
-    from sqlalchemy import func, select
-
-    from copilot.db.models import Chunk, Document, ImageAsset, KnowledgeSpace
-    from copilot.db.session import SessionLocal
-
-    async with SessionLocal() as s:
-        rows = list(
-            (await s.execute(select(KnowledgeSpace).order_by(KnowledgeSpace.created_at))).scalars()
-        )
-        typer.echo(f"{'code':<20}{'名称':<12}{'状态':<10}{'文档':>6}{'块':>8}{'图':>7}")
-        typer.echo("─" * 64)
-        for sp in rows:
-            docs = await s.scalar(
-                select(func.count(Document.id)).where(Document.knowledge_space_id == sp.id)
-            )
-            chunks = await s.scalar(
-                select(func.count(Chunk.id)).where(Chunk.knowledge_space_id == sp.id)
-            )
-            imgs = await s.scalar(
-                select(func.count(ImageAsset.id)).where(ImageAsset.knowledge_space_id == sp.id)
-            )
-            colour = typer.colors.GREEN if sp.status == "active" else typer.colors.BRIGHT_BLACK
-            typer.secho(
-                f"{sp.code:<20}{sp.name:<12}{sp.status:<10}"
-                f"{docs or 0:>6}{chunks or 0:>8}{imgs or 0:>7}",
-                fg=colour,
-            )
-
-
-@spaces_app.command("activate")
-def spaces_activate(
-    code: str = typer.Argument(..., help="要启用的空间 code"),
-    force: bool = typer.Option(False, "--force", help="文档数为 0 也强行启用"),
-) -> None:
-    """把一个空间从 inactive 改成 active，用户就能在聊天页选到它。
-
-    ⚠️⚠️ **块数为 0 时拒绝启用**（除非 `--force`）。
-    激活一个空空间的表现是：用户选了「客户端企业版」，问什么都得到
-    「知识库暂无此内容」——**他不会以为是没导语料，他会以为是系统坏了**。
-    而这种"坏"没有任何报错，也不会有人来报。
-
-    ⚠️ 判据是**块**不是文档，这一条是实测改的：开发库里
-    `enterprise_desktop` 有 161 篇文档、**0 块**（测试留下的孤儿行）。
-    按文档数判的话这道闸门当场放行，而检索一条都召不回——
-    **一个看起来在守、其实守不住的闸门，比没有闸门更糟。**
-    能被检索到的是块，闸门就该数块。
-    """
-    import asyncio
-
-    asyncio.run(_spaces_set_status(code, "active", force))
-
-
-@spaces_app.command("deactivate")
-def spaces_deactivate(
-    code: str = typer.Argument(..., help="要停用的空间 code"),
-) -> None:
-    """回滚用：导错了先让用户看不见，数据留库里慢慢查。
-
-    ⭐ 比删语料快，也不会连带删掉图片。这是 M18 的回滚手段。
-    """
-    import asyncio
-
-    asyncio.run(_spaces_set_status(code, "inactive", force=True))
-
-
-async def _spaces_set_status(code: str, status: str, force: bool) -> None:
-    from sqlalchemy import func, select
-
-    from copilot import spaces
-    from copilot.db.models import Chunk, Document
-    from copilot.db.session import SessionLocal
-
-    async with SessionLocal() as s:
-        try:
-            sp = await spaces.by_code(s, code)
-        except spaces.SpaceNotFound as e:
-            typer.secho(str(e), fg=typer.colors.RED)
-            raise typer.Exit(1) from e
-
-        if status == "active" and not force:
-            # ⚠️ 数**块**不数文档：能被检索到的是块。理由见 docstring
-            chunks = await s.scalar(
-                select(func.count(Chunk.id)).where(Chunk.knowledge_space_id == sp.id)
-            )
-            if not chunks:
-                docs = await s.scalar(
-                    select(func.count(Document.id)).where(Document.knowledge_space_id == sp.id)
-                )
-                typer.secho(
-                    f"{code} 里一个块都没有（文档 {docs or 0} 篇），拒绝启用。\n"
-                    "  激活一个空空间，用户问什么都得到「知识库暂无此内容」，"
-                    "而他会以为是系统坏了。\n"
-                    f"  先 `copilot ingest --space {code}`，或者确认无误后加 --force。",
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(1)
-
-        if sp.status == status:
-            typer.secho(f"{code} 已经是 {status}，没动。", fg=typer.colors.BRIGHT_BLACK)
-            return
-        was, sp.status = sp.status, status
-        await s.commit()
-    typer.secho(f"{code}：{was} → {status}", fg=typer.colors.GREEN)
-
-
-@app.command()
-def mcp(
-    as_user: str = typer.Option(
-        "", "--as-user", help="以哪个账号的身份连接（决定能不能搜到私有文档）"
-    ),
-    space: str = typer.Option("flagship", "--space", help="哪一版 ERP 的知识库"),
-) -> None:
-    """起一个 MCP server（stdio），让 Claude Desktop / Cursor 直接连知识库。
-
-        copilot mcp --as-user you@example.com
-
-    Claude Desktop 的 `claude_desktop_config.json`：
-
-        {"mcpServers": {"wdt-copilot": {
-           "command": "/opt/copilot/.venv/bin/copilot",
-           "args": ["mcp", "--as-user", "you@example.com"]}}}
-
-    ⚠️⚠️ **`--as-user` 只在这里出现一次，它不是任何工具的入参。**
-    模型看不见它，也就改不了它——理由见 `copilot/mcp_server.py` 文件头。
-    ⚠️ 这个进程是**本机**的，不是网络服务：它信任的是"谁能在这台机器上跑
-    这条命令"。别把它挂到公网上。
-    """
-    import asyncio
-    import logging
-    import sys
-
-    from copilot.mcp_server import serve
-
-    # ⚠️ 日志必须走 stderr。stdio 传输把 **stdout 当成协议通道**，
-    # 往里打一行人话就会让客户端解析失败，而报错是一句
-    # 「Unexpected token」——看不出和日志有任何关系
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-    asyncio.run(serve(as_user, space))
 
 
 # ⚠️ **这一段必须留在文件最末尾。**

@@ -12,7 +12,6 @@
 | 私有库 | 同上（scope=private） | 19 | 隔离 + 主体纠偏（要 `--as-user`） |
 | 风险边界 | `eval/risk_boundary.yaml` | 48 | **该不该由模型来答** |
 | 路由 | `eval/routing.yaml` | 63 | 走哪条路、有没有越过工具 |
-| 跨空间 | `eval/cross_space.yaml` | 8 | **换个知识版本问，材料会不会串**（M18 门禁） |
 | 多轮人工 | `eval/manual_conversations.md` | 20 组 | 追问、改口、丢上下文（**手动**） |
 
 ```bash
@@ -22,10 +21,12 @@ uv run python ../eval/run.py --tag baseline               # 公共库
 uv run python ../eval/run.py --tag priv --as-user a@b.c   # 私有库
 uv run python ../eval/risk_boundary.py --tag risk
 uv run python ../eval/routing.py
-uv run python ../eval/cross_space.py --tag xspace           # 跨空间（不用判分器）
 uv run python ../eval/run.py --compare baseline other
 uv run python ../eval/gate.py                               # 门禁：证据够不够放行
 ```
+
+> `eval/cross_space.py` / `cross_space.yaml`（跨知识版本污染，M18 门禁）
+> 随多知识版本管理层 2026-08-30 一起移除，见 [plan.md](plan.md) NOW 区。
 
 ---
 
@@ -559,24 +560,13 @@ uv run python ../eval/run.py --tag t --space enterprise_web  # M18 之后才有�
 指纹会继续按老规则算，门禁于是拿着一份**它以为对应、其实不对应**的
 语料快照放行。
 
-### 跨空间题集（`eval/cross_space.yaml`）
+### ~~跨空间题集~~（`eval/cross_space.yaml`，2026-08-30 随多空间管理层移除）
 
-两组题，缺一不可：
-
-    probe    在**还没导入语料**的企业版空间里，问旗舰版一定答得出的问题。
-             必须：一块都不召回、必须拒答、答案里不许出现旗舰版那个答案。
-    control  同样的问题在旗舰版问一遍，必须答得出来。
-
-⚠️ **没有 control，probe 的"干净"证明不了任何事。** 检索整个坏掉
-（连不上 embedding、阈值配错、库是空的）时，probe 同样全绿。对照组是用来
-区分「隔离成立」和「检索没工作」的唯一办法——它掉了，这一轮直接判"没量到"。
-
-四条硬指标：`cross_space_contamination_rate` / `banned_leak_rate` /
-`refusal_failure_rate` 全 0%，`control_answer_rate` 100%。
-
-⭐ **这一套一道题都不用判分器**（拒答与否、召回了几块、块属于哪个空间、
-有没有出现别的空间才有的那个数字，全是规则判定），所以它**永远不会
-UNRELIABLE**。判分器欠费的那天，别的评测只能记 UNRELIABLE，它照跑不误。
+> 原本验的是「换个知识版本问，材料会不会串」：probe 组在空的企业版空间里
+> 问旗舰版专属问题，必须一块都不召回；control 组同一问题在旗舰版问一遍，
+> 必须答得出来，用来排除"检索本身坏了导致 probe 看起来很干净"这种假阳性。
+> 这套判据全是规则判定、不用判分器，设计上仍然合理，只是没有第二个
+> 空间可验了。想法留档，代码见 git 历史。
 
 ### 配图的两条负例
 

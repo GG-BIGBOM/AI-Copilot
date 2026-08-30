@@ -45,26 +45,45 @@ from copilot.db.models import (
 # ─────────────────────────────────────────────────────────
 _FLAGSHIP_ID: uuid.UUID | None = None
 
+# 只给测试用的第三个空间——`spaces.SEED` 只有 flagship / common 两个产品
+# 空间，但隔离测试要验的是"任意两个空间互不可见"，不是某个具体产品版本。
+# 幂等建一次、永不删：删的话要么撞上 RESTRICT（测试写过的块还指着它），
+# 要么每次跑测试都新开一行，把这套刚清干净的开发库弄脏第二次。
+TEST_OTHER_SPACE_CODE = "test-other-space"
+_OTHER_SPACE_ID: uuid.UUID | None = None
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _seed_spaces() -> None:
-    """建库时把四个知识版本补齐，并记住 flagship 的 id 给填充器用。"""
+    """建库时把知识版本补齐，并记住 flagship / 测试用第二空间的 id 给填充器用。"""
     import asyncio
+
+    from sqlalchemy import text
 
     from copilot import spaces
 
-    async def go() -> uuid.UUID:
+    async def go() -> tuple[uuid.UUID, uuid.UUID]:
         eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
         maker = async_sessionmaker(eng, expire_on_commit=False)
         try:
             async with maker() as s:
                 await spaces.ensure_seeded(s)
-                return await spaces.default_id(s)
+                await s.execute(
+                    text(
+                        "INSERT INTO knowledge_spaces (id, code, name, description, status) "
+                        "VALUES (gen_random_uuid(), :code, :name, '', 'active') "
+                        "ON CONFLICT (code) DO NOTHING"
+                    ),
+                    {"code": TEST_OTHER_SPACE_CODE, "name": "测试用第二空间"},
+                )
+                await s.commit()
+                other = await spaces.by_code(s, TEST_OTHER_SPACE_CODE)
+                return await spaces.default_id(s), other.id
         finally:
             await eng.dispose()
 
-    global _FLAGSHIP_ID
-    _FLAGSHIP_ID = asyncio.run(go())
+    global _FLAGSHIP_ID, _OTHER_SPACE_ID
+    _FLAGSHIP_ID, _OTHER_SPACE_ID = asyncio.run(go())
 
 
 @event.listens_for(Document, "before_insert", propagate=True)
@@ -95,14 +114,15 @@ def flagship_id() -> uuid.UUID:
 async def other_space(maker) -> KnowledgeSpace:
     """另一个**活着的**知识版本，用来验跨空间隔离。
 
-    用 `enterprise_desktop`：种子里它是 inactive（语料还没导入），
-    这里只把它取出来，不改状态——隔离测试要的是「另一个空间」，
-    和它能不能被用户选中无关。
+    用 `TEST_OTHER_SPACE_CODE`：一个只在测试库里存在的空间，不是任何
+    产品版本——隔离测试要的是「另一个空间」，和它是不是真实产品无关。
     """
-    from copilot import spaces
-
     async with maker() as s:
-        return await spaces.by_code(s, spaces.ENTERPRISE_DESKTOP)
+        return (
+            await s.execute(
+                select(KnowledgeSpace).where(KnowledgeSpace.code == TEST_OTHER_SPACE_CODE)
+            )
+        ).scalar_one()
 
 
 @pytest_asyncio.fixture(autouse=True)

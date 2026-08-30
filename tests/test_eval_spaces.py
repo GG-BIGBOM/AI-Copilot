@@ -129,27 +129,15 @@ def test_the_eval_default_space_is_the_app_default():
 
 
 async def test_a_typo_in_the_space_stops_the_run(maker):
-    """`--space enterprise_desktp` 要当场退出，**不能回落到旗舰版**。
+    """`--space flagshp` 要当场退出，**不能回落到默认空间**。
 
-    回落的后果没有任何症状：评测又量了一遍旗舰版，而报告抬头写着企业版，
-    门禁于是拿着一份"看起来通过了"的证据放行 M18 的导入。
+    回落的后果没有任何症状：评测又量了一遍默认空间，而报告抬头写着别的
+    名字，门禁于是拿着一份"看起来通过了"的证据放行。
     """
     async with maker() as s:
         with pytest.raises(SystemExit) as e:
-            await run.resolve_space(s, "enterprise_desktp")
-    assert "enterprise_desktop" in str(e.value)  # 报错里要给出可选值
-
-
-async def test_an_inactive_space_can_still_be_evaluated(maker):
-    """企业版现在是 `inactive`（语料还没导入），但评测必须能问它。
-
-    M18 的门禁恰恰是「在**空的**企业版空间里问旗舰版的问题，一条都不该召回」——
-    要是 inactive 的空间连跑都跑不了，这条门禁就无从跑起。
-    """
-    async with maker() as s:
-        space = await run.resolve_space(s, spaces.ENTERPRISE_DESKTOP)
-    assert space.code == spaces.ENTERPRISE_DESKTOP
-    assert space.status == "inactive"
+            await run.resolve_space(s, "flagshp")
+    assert "flagship" in str(e.value)  # 报错里要给出可选值
 
 
 # ─────────────────────────────────────────────────────────

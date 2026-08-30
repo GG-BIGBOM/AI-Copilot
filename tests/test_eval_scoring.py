@@ -332,7 +332,7 @@ def test_case_b_cross_space_contamination_is_counted():
     """Case B：本轮问的是这个空间，召回里却混进了别的空间的块。
 
     ⭐ 它**不看判分器**：`foreign_space_hits` 是逐块核对 `knowledge_space_id`
-    得来的，判分器挂着也算得出来。这正是它能当 M18 门禁的原因。
+    得来的，判分器挂着也算得出来。
     """
     cases = [case("x"), case("y")]
     results = [

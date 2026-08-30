@@ -376,9 +376,6 @@ eval = [
 hybrid = [
     { name = "jieba" },
 ]
-mcp = [
-    { name = "mcp" },
-]
 obs = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
@@ -413,7 +410,6 @@ requires-dist = [
     { name = "jieba", marker = "extra == 'hybrid'", specifier = ">=0.42" },
     { name = "markdown-it-py", marker = "extra == 'parse'", specifier = ">=3.0" },
     { name = "markdownify", specifier = ">=0.14" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2" },
     { name = "openpyxl", marker = "extra == 'agent'", specifier = ">=3.1" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'obs'", specifier = ">=1.29" },
     { name = "opentelemetry-sdk", marker = "extra == 'obs'", specifier = ">=1.29" },
@@ -431,7 +427,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
-provides-extras = ["parse", "parse-full", "agent", "eval", "obs", "mcp", "hybrid"]
+provides-extras = ["parse", "parse-full", "agent", "eval", "obs", "hybrid"]
 
 [package.metadata.requires-dev]
 dev = [
