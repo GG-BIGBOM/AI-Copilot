@@ -253,7 +253,10 @@ TTFB p50 2.7s / p95 9.8s、越过工具直答 0；差评率同时保留了只有
 
 ```bash
 # 服务器上
-sudo -u postgres psql copilot -c "select version_num from alembic_version;"
+sudo -u postgres psql -d kb -c "select version_num from alembic_version;"
+# ⚠️ 数据库名是 `kb`，不是 `copilot`——`.env` 里的 DATABASE_URL 写的是
+# `.../kb`。按应用名猜库名会拿到「database "copilot" does not exist」，
+# 看起来像库没建，实际上只是名字猜错了（2026-08-30 核实）。
 # ⚠️ 单元名是 `copilot-api`，不是 `copilot`。写错的表现是
 # 「Unit copilot.service could not be found」——看起来像服务没装，
 # 实际上它跑得好好的（2026-08-29 差点据此得出"线上挂了"的结论）
@@ -262,6 +265,12 @@ systemctl status copilot-api copilot-worker
 
 - 停在 `a2c8f47b91d6` → 三笔改动**没上线**，走 0.2。
 - 停在 `b7e91c4d2a08` → 已上线，跳过 0.2。
+
+✅ **2026-08-30 核实：生产停在 `b7e91c4d2a08`，已上线，0.2 可跳过。**
+四个服务（`copilot-api` / `copilot-worker` / `nginx` / `postgresql`）均
+`active`；内存 1.6Gi 总量、已用 723Mi、可用 889Mi，比文档写的"余量约
+300MB"更宽松；`enterprise_desktop` / `enterprise_web` 均 `inactive`、
+0 篇文档——M18 语料确实还没碰过生产库，本地的抓取/导入不会和线上打架。
 
 ### 0.2 部署攒下的三笔改动（如果还没）
 
