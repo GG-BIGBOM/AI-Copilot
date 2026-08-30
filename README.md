@@ -305,8 +305,5 @@ bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
 | [DECISIONS.md](DECISIONS.md) | 为什么不用 Docker / Redis / Graph RAG…（ADR） |
 | [samples/](samples/) | 20 篇脱敏样本语料，`docker compose up` 会自动灌进去 |
 | [ISSUES.md](ISSUES.md) | **知道了但这一轮没修**的东西。每条都写"什么条件下必须修" |
-| [docs/case-把笔从模型手里拿走.md](docs/case-把笔从模型手里拿走.md) | 案例文：幻觉率 12.5% → 0% 那次架构决定，含代价 |
-| [docs/demo-5分钟脚本.md](docs/demo-5分钟脚本.md) | 面试演示照着走的路径，每步写了"会出什么岔子" |
-| [docs/一页纸-三个岗位版本.md](docs/一页纸-三个岗位版本.md) | 同一个项目三种讲法（Agent 开发 / FDE / 产品经理） |
 | [plan.md](plan.md) | 实施计划。**只留还没做的事**，看当前状态请看最上面的 NOW |
 | [ARCHIVE.md](ARCHIVE.md) | 历史台账：M0–M20 的逐项任务、排查过程和证据 |
