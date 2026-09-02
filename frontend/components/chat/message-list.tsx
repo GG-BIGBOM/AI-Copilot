@@ -21,6 +21,7 @@ import { Citations } from "@/components/chat/citations";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { MessageActions } from "@/components/chat/message-actions";
 import { ReasoningPanel } from "@/components/chat/reasoning-panel";
+import { isWaitingForFirstOutput } from "@/lib/waiting";
 import {
   messageCitations,
   messageDownload,
@@ -68,6 +69,9 @@ export function MessageList({
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, status]);
 
+  // 页面上还有没有东西在动。判据和测试在 `lib/waiting.ts`
+  const waiting = isWaitingForFirstOutput(messages, status);
+
   return (
     // 外层只负责给「回到底部」当定位锚：它要贴在可视区底部，
     // 而不是跟着内容一起滚走
@@ -92,8 +96,13 @@ export function MessageList({
             );
           })}
 
-          {/* 已经发出去、模型还没吐第一个字。Agent 这一段可能十几秒没输出 */}
-          {status === "submitted" && (
+          {/* 已经发出去、页面上还没有任何东西在动。
+              ⚠️ **判据不是 `status === "submitted"`**：useChat 收到流里第一个
+              part（可能只是 `start`，可能是一步工具调用）就把 status 翻成
+              `streaming`，而正文还没开始。老判据在那一刻就把思考态摘掉了，
+              于是「转了一下，然后没了」——比一直转着更像卡死。
+              Agent 全量之后每一轮都要检索，这段空窗是常态而不是偶发。 */}
+          {waiting && (
             <div className="content-grid">
               <div className="flex items-center gap-1.5 text-[13px] text-foreground">
                 <BrandMark className="size-4 text-bronze" thinking />
