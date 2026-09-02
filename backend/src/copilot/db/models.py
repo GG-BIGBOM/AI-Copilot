@@ -26,6 +26,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -76,7 +77,16 @@ class KnowledgeSpace(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     # ⚠️ 唯一。回填和 `common` 的判定都靠它，重复一个就意味着两套"通用知识"
+    # ⚠️ 库里同时有唯一**索引** `ix_knowledge_spaces_code`（这一行生成的）和
+    # 唯一**约束** `knowledge_spaces_code_key`（建表时 `unique=True` 留下的）。
+    # 两条都在、且都不该动；模型只声明索引的话，autogenerate 会去 drop 那条约束
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+
+    # ⚠️ 库里除了上面那行生成的唯一**索引** `ix_knowledge_spaces_code`，
+    # 还有一条建表时留下的唯一**约束** `knowledge_spaces_code_key`。
+    # 两条都在、都不该动；不在这里显式声明的话，autogenerate 会去 drop
+    # 那条约束（ISSUES.md I-14）。光写注释拦不住它，得真的声明出来
+    __table_args__ = (UniqueConstraint("code", name="knowledge_spaces_code_key"),)
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active")
@@ -142,7 +152,13 @@ class Document(Base):
     knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
-        nullable=True,
+        # ⚠️⚠️ **库里是 NOT NULL，这里必须跟着写死。**
+        # 历史：`b2f5a91c3d47` 先把列加成可空，后面的迁移回填完再收紧成
+        # NOT NULL——而**模型一直停在第一步**。后果不是跑不起来，是
+        # `autogenerate` 认为「库比模型严」，替你生成一句
+        # `alter_column(..., nullable=True)` **把隔离的地基放松回去**
+        # （ISSUES.md I-14）。那句 DDL 部署时安静跑过、退出码 0。
+        nullable=False,
         index=True,
     )
     source_type: Mapped[str] = mapped_column(String(16))  # yuque | upload
@@ -196,8 +212,17 @@ class Chunk(Base):
     knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
-        nullable=True,
-        index=True,
+        # ⚠️⚠️ **库里是 NOT NULL，这里必须跟着写死。**
+        # 历史：`b2f5a91c3d47` 先把列加成可空，后面的迁移回填完再收紧成
+        # NOT NULL——而**模型一直停在第一步**。后果不是跑不起来，是
+        # `autogenerate` 认为「库比模型严」，替你生成一句
+        # `alter_column(..., nullable=True)` **把隔离的地基放松回去**
+        # （ISSUES.md I-14）。那句 DDL 部署时安静跑过、退出码 0。
+        nullable=False,
+        # ⚠️ **这里没有 `index=True`，不是漏了。** 库里真正存在的是下面
+        # `__table_args__` 里的复合索引 `ix_chunks_space_owner`，前导列就是
+        # 这一列，单列索引是多余的。写了的话 autogenerate 会去建一个
+        # 库里根本没有的 `ix_chunks_knowledge_space_id`
     )
 
     ordinal: Mapped[int] = mapped_column(Integer)  # 在文档内的序号
@@ -230,6 +255,19 @@ class Chunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     document: Mapped[Document] = relationship(back_populates="chunks")
+
+    # ⚠️⚠️ **这两个索引是迁移建的，而模型里一直没声明。**
+    # 后果不是"少个索引"——是 autogenerate 认为它们「库里有、模型里没有」，
+    # 于是替你生成两句 `drop_index`（ISSUES.md I-14）。其中 GIN 那个一删，
+    # 混合检索当场退化成顺序扫描，而**表现只是"变慢了"**：
+    # 没有报错、没有任何测试会红、部署照样退出码 0。
+    __table_args__ = (
+        # W1.2 混合检索的词法索引（迁移 `c8d3f1a704be`）
+        Index("ix_chunks_content_tsv", "content_tsv", postgresql_using="gin"),
+        # 隔离查询的主力索引（迁移 `d4b1e63a920c`）：`_space_filter` 每次都是
+        # 「先按空间、再按 owner」，所以前导列必须是 knowledge_space_id
+        Index("ix_chunks_space_owner", "knowledge_space_id", "owner_id"),
+    )
 
 
 class ImageAsset(Base):
@@ -557,7 +595,13 @@ class Conversation(Base):
     knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
-        nullable=True,
+        # ⚠️⚠️ **库里是 NOT NULL，这里必须跟着写死。**
+        # 历史：`b2f5a91c3d47` 先把列加成可空，后面的迁移回填完再收紧成
+        # NOT NULL——而**模型一直停在第一步**。后果不是跑不起来，是
+        # `autogenerate` 认为「库比模型严」，替你生成一句
+        # `alter_column(..., nullable=True)` **把隔离的地基放松回去**
+        # （ISSUES.md I-14）。那句 DDL 部署时安静跑过、退出码 0。
+        nullable=False,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -692,8 +736,11 @@ class VerifiedAnswer(Base):
     knowledge_space_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_spaces.id", ondelete="RESTRICT"),
+        # ⚠️ 这一列库里**确实是可空的**（和 documents/chunks 不同，别顺手收紧）
         nullable=True,
-        index=True,
+        # ⚠️ 不写 `index=True`：库里那个索引叫 `ix_verified_answers_space`，
+        # 在下面的 `__table_args__` 里声明。名字对不上时 autogenerate 会
+        # 一边 drop 一边 add——看起来像「重建索引」，实际是白改一次生产
     )
     # active | retired。
     # ⚠️ **只有 active 的才有块在索引里**（见 `routes/verified.py` 的 `_sync_index`）。
@@ -724,6 +771,8 @@ class VerifiedAnswer(Base):
         # 同一个空间里同一个问题只能有一条标准答案。有两条的话，检索会随机
         # 命中其中一条，而这种错的样子是「答案时好时坏」，最难查
         Index("ux_verified_question_space", "question", "knowledge_space_id", unique=True),
+        # 库里真实存在的那个（迁移建的，名字不是 SQLAlchemy 的默认拼法）
+        Index("ix_verified_answers_space", "knowledge_space_id"),
     )
 
 
@@ -742,8 +791,10 @@ class VerifiedAnswerRevision(Base):
     __tablename__ = "verified_answer_revisions"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
+    # ⚠️ 不写 `index=True`：库里那个索引叫 `ix_verified_answer_revisions_answer`，
+    # 在类末尾的 `__table_args__` 里声明（同 VerifiedAnswer 的理由）
     verified_answer_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("verified_answers.id", ondelete="CASCADE"), index=True
+        UUID(as_uuid=True), ForeignKey("verified_answers.id", ondelete="CASCADE")
     )
     version: Mapped[int] = mapped_column(Integer)
     question: Mapped[str] = mapped_column(String(1024))
@@ -756,6 +807,8 @@ class VerifiedAnswerRevision(Base):
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_verified_answer_revisions_answer", "verified_answer_id"),)
 
 
 class AnswerCorrection(Base):

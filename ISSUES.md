@@ -219,7 +219,7 @@ lc-vague-reference-out-of-window    修好
 引用的是**同一个正则对象**——各存一份的失败形态是无症状的：改了一处、
 另一处没改，而两条路的用户互不相见。
 
-### I-14　`alembic revision --autogenerate` 会生成**破坏性** DDL
+### I-14　`alembic revision --autogenerate` 会生成**破坏性** DDL　✅ 2026-09-03 根治
 
 **症状**（2026-09-02，做 M19-B 第 1 项时撞到）　给 `request_trace` 加四列，
 按常规跑 `alembic revision --autogenerate`，生成出来的迁移里**除了那四列，
@@ -258,11 +258,51 @@ autogenerate 认为"库里多了这些、模型里没有"，就要把它们删�
 判据很简单：这次改动**只**打算加列的话，迁移里出现任何
 `drop_` / `alter_column` / `drop_constraint` 都是夹带。
 
-**什么条件下必须根治**　下一个人不知道这条、直接 commit 了 autogenerate 的
-产物时——而那一天不会有任何报警。可行的形态：给 `tests/` 加一道闸门，
-跑一次 autogenerate 到临时库、断言产出为空；或者退一步，扫
-`alembic/versions/` 里有没有未经标注的 `drop_index` / `alter_column`。
-前者能根治漂移，后者只拦"夹带"，成本差一个量级。
+**根治了（2026-09-03）——漂移 16 项 → 0，并加了一道钉在 0 上的闸门。**
+
+⚠️⚠️ **查清之后发现方向分成相反的两类，一刀切会出事：**
+
+```
+库更严、模型更松   11 项   改模型声明，零 DDL
+库更松、模型更严    5 项   走迁移 7c1f9a4e3b52
+```
+
+而这两类**混在同一批 `modify_nullable` 里**：
+
+```
+chunks.knowledge_space_id           库 NOT NULL  模型可空   → 改模型
+answer_corrections.created_at       库可空       模型 NOT NULL → 改库
+```
+
+按同一个方向批量处理的话，第一行会被放松成可空——**那正是 autogenerate
+原本要干的事**，也正是这条 issue 最危险的那一项。
+
+⚠️ 路上还差点误伤一次：本以为 `verified_answers.knowledge_space_id` 也该
+收紧，一查它**在库里本来就是可空的**（根本没出现在漂移列表里）。
+按 class 逐个定位才避开——**通配替换在这种事上是不能用的**。
+
+**改模型那 11 项**（零 DDL）　3 处 `nullable=False`；`Chunk` 补
+`__table_args__` 把 `ix_chunks_content_tsv`（GIN）和 `ix_chunks_space_owner`
+声明出来；`verified_answers` / `verified_answer_revisions` 的索引名对齐
+（迁移建的名字不是 SQLAlchemy 的默认拼法）；`knowledge_spaces` 显式声明
+那条唯一约束——**光写注释拦不住 autogenerate，得真的声明出来**。
+
+**迁移 `7c1f9a4e3b52`**　4 列 `SET NOT NULL`（迁移前实测 0 NULL，且先跑一句
+幂等的 `UPDATE ... WHERE IS NULL` 兜底，免得部署跑到第 7 步才炸），
+补建 `ix_image_assets_knowledge_space_id`。downgrade 只放松约束、
+**一行数据都不动**。
+
+**闸门**　`tests/test_schema_drift.py` 三条：`compare_metadata` 必须返回 0；
+三列隔离列必须 NOT NULL；GIN 索引和复合索引必须在模型里声明。
+
+⭐ **实测它拦得住**：故意删掉 GIN 索引的声明，两条测试当场变红，
+报错直接写着「remove_index: ix_chunks_content_tsv（库里有、模型里没有）」。
+
+⚠️⚠️ **闸门钉在 0，不是钉一份「已知漂移清单」。** 允许清单存在的话，
+下一次夹带会被顺手加进清单里——而**清单变长的那一刻不会有人拦**。
+
+⚠️ 红了之后**永远不要照着 `--autogenerate` 的产物修**：它的方向永远是
+「让库去迁就模型」，而上面第一类要的恰恰是反过来。
 
 ### I-11　测试之间共享的第三样东西：**模块级引擎的连接池**
 
