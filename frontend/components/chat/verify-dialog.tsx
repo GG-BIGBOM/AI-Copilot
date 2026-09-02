@@ -30,6 +30,8 @@ import { useRef, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Check, ImagePlus, Loader2, X } from "lucide-react";
 
+import { insertShot } from "@/lib/insert-shot";
+
 import { Button } from "@/components/ui/button";
 import { api, API_BASE, ApiError } from "@/lib/api";
 
@@ -75,21 +77,28 @@ export function VerifyDialog({
   const [done, setDone] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 用户有没有点进过正文。**决定贴图插在哪儿**（见 insertAtCursor）。
+  //
+  // ⚠️ **不能用 `selectionStart === 0` 反推。** 从未聚焦过的 textarea 和
+  // 「用户特意把光标点到开头」是同一个值 0，反推会把后者判错。
+  // 只有 onFocus 这一手是准的。
+  //
+  // ⚠️ 是 state 不是 ref：它要跟着「弹窗重开」一起重置，而那个重置发生在
+  // 渲染期（见下面 wasOpen 那段），渲染期写 ref 是 React 明令禁止的
+  // （`react-hooks/refs`，lint 会当场变红）。setState 在那儿反而是对的。
+  const [touched, setTouched] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const shots = shotsIn(draft);
 
-  /** 把一段 Markdown 插到光标处（没有光标就接在末尾）。 */
+  /** 把一段 Markdown 插到光标处；**用户从没点进正文时接在末尾**。
+   *
+   * 位置计算在 `lib/insert-shot.ts`，那里有测试（前端只跑 `lib/*.test.ts`，
+   * 组件里的分支盖不到——这个「没点正文」的分支正是这么错掉的）。
+   */
   function insertAtCursor(snippet: string) {
     const el = textareaRef.current;
-    setDraft((current) => {
-      const at = el ? el.selectionStart : current.length;
-      const before = current.slice(0, at);
-      const after = current.slice(at);
-      // 前面补一个空行：图片语法贴在一段文字中间时不会单独成行，
-      // 渲染出来是一张挤在句子里的小图
-      const gap = before && !before.endsWith("\n\n") ? "\n\n" : "";
-      return `${before}${gap}${snippet}\n\n${after}`;
-    });
+    const cursor = el && touched ? el.selectionStart : null;
+    setDraft((current) => insertShot(current, snippet, cursor));
   }
 
   async function attach(file: File | null | undefined) {
@@ -124,6 +133,9 @@ export function VerifyDialog({
       setReason("");
       setError(null);
       setDone(null);
+      // ⚠️ 这一项必须跟着重置：草稿换成了新答案，上一次的光标位置
+      // 在新正文里指向的是另一段话，照着插会插到莫名其妙的地方。
+      setTouched(false);
     }
   }
 
@@ -180,6 +192,7 @@ export function VerifyDialog({
                 ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onFocus={() => setTouched(true)}
                 onPaste={(e) => {
                   // 截图基本都是粘贴进来的（QQ / 微信 / Win+Shift+S），
                   // 让人先存成文件再"选择文件"是多余的两步
