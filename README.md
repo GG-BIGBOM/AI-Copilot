@@ -26,7 +26,7 @@ M10 把答案生成**收进一个终结工具**——模型再也看不到原始
 ⭐ 这是整个项目最值得深挖的一段，写在 [ARCHIVE.md 的 M10 一节](ARCHIVE.md)。
 代价也写了：**模型看不到答案，调试变难。**
 
-### 二、七条硬指标进门禁，不达标退出码非 0
+### 二、六条硬指标进门禁，不达标退出码非 0
 
 `eval/gate.py` 读的是**证据**不是重新制造证据（跑一次全量是两百多次付费调用），
 所以每条证据都带 `max_age_days` 和语料指纹。三种结局分得开：
@@ -59,7 +59,6 @@ $ uv run python eval/gate.py
   ✓ PASS        私有库 · Agent            m19a-private-agent-0824-rerun 2026-08-25
   ✓ PASS        风险边界                   gate-risk                  2026-08-29
   ✓ PASS        路由                     m19a-routing-0824          2026-08-24
-  ✓ PASS        跨空间（M18 门禁本体）          m19a-xspace-0824           2026-08-24
 
   ✓ 门禁通过。
 $ echo $?
@@ -242,7 +241,7 @@ npm run verify     # = 单测 + lint + 类型 + 构建
 cd backend
 uv run python ../eval/run.py --check                    # 只验检索，不花钱
 uv run python ../eval/run.py --tag baseline             # 公共库 75 题
-uv run python ../eval/risk_boundary.py --tag risk       # 风险边界 48 题
+uv run python ../eval/risk_boundary.py --tag risk       # 风险边界 56 题
 uv run python ../eval/routing.py                        # 路由 63 题
 uv run python ../eval/run.py --dataset ../eval/keyword.yaml --check   # 关键词 45 题
 ```
@@ -298,6 +297,7 @@ bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
 
 | 文件 | 写什么 |
 |---|---|
+| [FEATURES.md](FEATURES.md) | **功能清单**：有哪些能力、每一项什么状态、接口/CLI/开关全表 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 每一层怎么工作，隔离和流式在哪里收口 |
 | [EVALUATION.md](EVALUATION.md) | 四套评测集、指标定义、baseline、A/B 规则 |
 | [OPERATIONS.md](OPERATIONS.md) | 部署、备份恢复、systemd、日志、**安全基线**、事故检查表 |
