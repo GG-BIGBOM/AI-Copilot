@@ -807,6 +807,61 @@ def history_digest(dropped: list[tuple[str, str]]) -> str:
     return _DIGEST_HEAD + body + _DIGEST_TAIL
 
 
+# ═══════════ 窗口外指代的边界闸门（ISSUES.md I-9）═══════════
+#
+# ⚠️⚠️ **这两条正则和下面那个函数原来只长在 `agent/runner.py` 里**，
+# `ask_stream` 一行都没有。于是同一句「那个功能在哪配置来着？」：
+#
+#     Agent 路   「当前上下文只保留最近几轮，我无法确认"那个功能"指什么」
+#     直路       随机挑最近一个话题当成"那个功能"，答得斩钉截铁
+#
+# 而 2026-09-02 之前线上灰度只有 1 个账号走 Agent，**其余全走直路**——
+# 也就是说这道闸门守着的那一侧，几乎没有人经过。
+# （`lc-vague-reference-out-of-window` 在三轮付费评测的**每一臂**都失分，
+#  包括基线；根因就是这里，不是 W2.1 引入的。）
+#
+# 搬到 qa 是为了让两条路读同一份判据。runner 仍然从这里 import，
+# 行为逐字节不变。
+_EARLIEST_HISTORY_RE = re.compile(r"(第一个|最开始|一开始).{0,8}(问题|问的|说的)")
+_TRUNCATED_REFERENCE_RE = re.compile(
+    r"(那个功能|这个功能|该功能|那项功能|刚才那个|它(?:在哪|怎么|如何))"
+)
+
+
+def boundary_reply(
+    question: str,
+    *,
+    history_truncated: bool,
+    digest: str,
+    facts_answerable: bool,
+) -> str | None:
+    """这一问该不该被边界话术短路；不该就返回 `None`。
+
+    三个条件缺一不可，任何一个不成立都**放行**（让模型自己去读材料）：
+
+        history_truncated   窗口真的裁掉过东西
+        not digest          裁掉的那部分也没被压成摘要（W2.1）
+        not facts_answerable 事实表也答不出（W2.2）
+
+    ⚠️ **放行是安全的那一侧。** 放行之后模型看着材料仍然可以说"这里面没有"，
+    那是读完之后的结论；而短路是一句读都没读的拒答。反过来，
+    不该短路却短路了，用户会看到「我无法确认」而系统其实手里有答案。
+
+    ⚠️ 判据是「摘要**非空**」，不是"摘要里含不含答案"——后者要语义匹配，
+    而这道闸门的作用是放行，不是替模型回答。
+    """
+    if not history_truncated or digest or facts_answerable:
+        return None
+    if _EARLIEST_HISTORY_RE.search(question):
+        return "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"
+    if _TRUNCATED_REFERENCE_RE.search(question):
+        return (
+            "当前上下文只保留最近几轮，我无法确认“那个功能”具体指什么。"
+            "请直接说出功能名称，我再帮你查配置位置。"
+        )
+    return None
+
+
 def assemble_messages(
     system: str,
     history: list[tuple[str, str]] | None,
@@ -986,6 +1041,7 @@ async def ask_stream(
     general: bool | None = None,
     facts: str = "",
     injection_guard: bool | None = None,
+    boundary_gate: bool | None = None,
 ) -> StreamedAnswer:
     """检索并流式作答。
 
@@ -1000,6 +1056,9 @@ async def ask_stream(
             这个函数被评测直接调用，A/B 两边必须能在同一次运行里各传各的。
         injection_guard: 提示注入防线（W2.3）。留 None 读 `INJECTION_GUARD_ENABLED`；
             评测显式传入 A/B 版本。它同时管围栏和那段规则，见下面那行注释。
+        boundary_gate: 窗口外指代的边界闸门（ISSUES.md I-9）。留 None 读
+            `DIRECT_BOUNDARY_ENABLED`；评测显式传入 A/B 版本。
+            ⚠️ Agent 那条路**一直**有这道闸门且不受这个开关管——它守的是直路。
 
     ⚠️ **调用方的义务**：流消费完后，若 `is_no_answer(全文)` 为真，
     必须把这批引用丢掉不展示。否则会出现「知识库暂无此内容」下面挂着
@@ -1011,6 +1070,9 @@ async def ask_stream(
     # ⭐ 寒暄短路和标准答案命中都在 `route` 这个 span 里（W1.1）。
     # 它们是**一次模型调用都不花**的两支，而看板上最先要能一眼看出来的
     # 就是这个：这一轮到底走没走完整条链路
+    boundary_enabled = (
+        get_settings().direct_boundary_enabled if boundary_gate is None else boundary_gate
+    )
     with obs.span("route") as sp_route:
         if (canned := small_talk_reply(question)) is not None:
             sp_route.set(decision="canned")
@@ -1040,6 +1102,26 @@ async def ask_stream(
             return StreamedAnswer(
                 stream=iter([("content", hit.answer)]), citations=[], verified_id=hit.id
             )
+        # ⚠️ 窗口外指代的边界闸门（ISSUES.md I-9）。**它原来只长在 Agent 路上。**
+        #
+        # 放在改写之前：改写要花一次模型调用，而「那个功能」改写出来的
+        # 检索词只会随机命中一个功能——那正是这道闸门要拦的那件事。
+        #
+        # ⚠️ 直路手里只有渲染好的 `facts` 文本，没有 `SessionFacts` 对象，
+        # 判不了"事实表答不答得出这一问"。所以退一步：**只要有事实文本就放行**，
+        # 让模型自己去读。放行是安全的那一侧（见 `boundary_reply`）。
+        if boundary_enabled:
+            dropped = split_history(history)[1]
+            if (
+                reply := boundary_reply(
+                    question,
+                    history_truncated=bool(dropped),
+                    digest=history_digest(dropped),
+                    facts_answerable=bool(facts),
+                )
+            ) is not None:
+                sp_route.set(decision="boundary")
+                return StreamedAnswer(stream=iter([("content", reply)]), citations=[])
         sp_route.set(decision="retrieve")
 
     # 只有检索词用改写后的版本；给模型看的问题仍是用户原话

@@ -125,6 +125,61 @@ async def other_space(maker) -> KnowledgeSpace:
         ).scalar_one()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _sweep_leaked_invite_codes():
+    """整份套件跑完，删掉**这次新建、且没被用掉**的邀请码（ISSUES.md I-3）。
+
+    ⭐ **测试自己在污染自己要跑的那个库。** 十来个夹具会
+    `create_invite_codes(s, 1)`，一部分在 teardown 里删、一部分不删，
+    跑一次全量就多留下几个。2026-09-02 实测已攒到 265 个码、246 个没用掉。
+
+    ⚠️ 病灶不是"库变大"，是**断言开始说谎**：
+    `test_consumed_code_not_offered_as_available` 原先写死
+    `list_unused_codes(s, limit=200)`，而它按 `created_at` 升序取前 N——
+    夹具刚发的那个码排在最后，库里攒够 200 个没用掉的码之后它就永远
+    进不了那一页。于是这道题天天红，**而红的原因和它要验的事无关**。
+    （那次只把断言改成由 `count_unused_codes()` 推出上限，泄漏本身留到了这里。）
+
+    ⚠️⚠️ **判据是「开跑前有哪些码」的主键集合，不是时间戳。**
+    ISSUES.md 里担心的那个竞态——"一个跑到一半被 Ctrl-C 的测试会让下一次
+    运行删掉不属于它的东西"——只在按时间扫的做法下成立。按集合做差，
+    被打断最坏的结果是这次没扫干净，**不会误删任何开跑前就存在的码**。
+
+    ⚠️ **只删没用掉的。** 用掉的留着：`used_at` 是「这个码作废了」的唯一
+    凭据（见 `db/models.py::InviteCode`），而 `count_unused_codes` /
+    `list_unused_codes` 只看没用掉的那一半——I-3 的病灶全在那一半里。
+
+    ⚠️ 这个夹具**真的会删开发库里的行**。有人正好在套件运行期间手工发码的话
+    会被一起扫掉；共享开发库上这是可接受的代价。CI 每次用新建的临时库，
+    开跑集合为空，于是"这次新建的"就是全部——同样是对的。
+    """
+    import asyncio
+
+    async def codes_now() -> set[str]:
+        eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng, expire_on_commit=False)() as s:
+                return set((await s.execute(select(InviteCode.code))).scalars())
+        finally:
+            await eng.dispose()
+
+    async def sweep(before: set[str]) -> None:
+        eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng, expire_on_commit=False)() as s:
+                stmt = delete(InviteCode).where(InviteCode.used_at.is_(None))
+                if before:
+                    stmt = stmt.where(InviteCode.code.not_in(before))
+                await s.execute(stmt)
+                await s.commit()
+        finally:
+            await eng.dispose()
+
+    before = asyncio.run(codes_now())
+    yield
+    asyncio.run(sweep(before))
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_shared_engine():
     """每道测试跑完，把**模块级**那个引擎的连接池倒空。

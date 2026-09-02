@@ -64,7 +64,14 @@ from copilot.agent.deps import AgentDeps
 from copilot.agent.guard import looks_like_kb_answer
 from copilot.api import stream
 from copilot.config import get_settings
-from copilot.qa import NO_ANSWER, asks_about_subject, history_digest, split_history
+from copilot.qa import (
+    _EARLIEST_HISTORY_RE,
+    _TRUNCATED_REFERENCE_RE,
+    NO_ANSWER,
+    asks_about_subject,
+    history_digest,
+    split_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +97,10 @@ _CHANNEL_SIZE = 256
 HISTORY_ANSWER_LIMIT = 400
 # 历史里要抹掉的引用与配图标记
 _MARK_RE = re.compile(r"\[(?:\d{1,2}|图\d+)\]")
-_EARLIEST_HISTORY_RE = re.compile(r"(第一个|最开始|一开始).{0,8}(问题|问的|说的)")
-_TRUNCATED_REFERENCE_RE = re.compile(
-    r"(那个功能|这个功能|该功能|那项功能|刚才那个|它(?:在哪|怎么|如何))"
-)
+# ⚠️ `_EARLIEST_HISTORY_RE` / `_TRUNCATED_REFERENCE_RE` 搬到了 `qa.py`：
+#    这道闸门原来**只长在 Agent 这条路上**，直路一行都没有，于是同一句
+#    「那个功能在哪配置来着」在两条路上行为完全相反（ISSUES.md I-9）。
+#    现在两条路读同一份判据，见 `qa.boundary_reply`。
 _EXPORT_RE = re.compile(r"(?:导出|下载|excel|xlsx)", re.IGNORECASE)
 
 

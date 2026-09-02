@@ -7,45 +7,17 @@ import { Check, Copy } from "lucide-react";
 
 import { CitationChip } from "@/components/chat/citations";
 import { API_BASE } from "@/lib/api";
+import { CITE_HREF, inlineCitations } from "@/lib/citation-rendering";
 import { fallbackImages, inlineImages } from "@/lib/image-rendering";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/api";
 import type { AnswerImage } from "@/lib/chat-types";
 
-// 正文里的引用角标 [1] [2]。转成一个假锚点交给 a 渲染器，
-// 那边再换成可悬停、可聚焦的角标组件
-const CITE_REF_RE = /\[(\d{1,2})\]/g;
-const CITE_HREF = "#copilot-cite-";
-
-/**
- * 只替换代码围栏**外面**的文本。
- *
- * 答案里出现 ```json 代码块时，块内的 [1] 是数据的一部分，
- * 换成引用角标就把代码改错了。
- */
-function replaceOutsideCode(text: string, run: (segment: string) => string): string {
-  return text
-    .split(/(```[\s\S]*?```|```[\s\S]*$)/g)
-    .map((segment) => (segment.startsWith("```") ? segment : run(segment)))
-    .join("");
-}
-
-/**
- * 把 `[1]` 换成指向假锚点的链接。
- *
- * 引用数据是在正文流完之后才到的（data-citations 片段），所以流式过程中
- * 这些角标就先以纯文本待着——**编号对不上的不动**，宁可留一个方括号，
- * 也不做一个点开是空的角标。
- */
-function inlineCitations(content: string, citations: Citation[]): string {
-  if (citations.length === 0) return content;
-  const known = new Set(citations.map((c) => c.n));
-  return replaceOutsideCode(content, (segment) =>
-    segment.replace(CITE_REF_RE, (raw, n: string) =>
-      known.has(Number(n)) ? `[${n}](${CITE_HREF}${n})` : raw,
-    ),
-  );
-}
+// ⚠️ 角标的正则、代码围栏切分、以及"认不出的怎么办"都搬到了
+//    `lib/citation-rendering.ts`——那里有测试。搬走的直接原因是
+//    ISSUES.md I-6「引用角标偶发裸露」：老实现流完之后仍然把认不出的
+//    角标原样留在正文里，而前端测试只跑 `lib/*.test.ts`，组件里的
+//    这条分支没有任何东西盖得到。
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -193,7 +165,11 @@ export const MarkdownContent = memo(function MarkdownContent({
           },
         }}
       >
-        {inlineCitations(inlineImages(content, images), citations)}
+        {inlineCitations(inlineImages(content, images), citations, {
+          // ⚠️ 还在流的时候认不出的角标要留着：来源清单是正文流完之后
+          // 才到的，那几秒里所有角标都还对不上，删了会看见它们闪回来
+          streaming: isStreaming,
+        })}
       </ReactMarkdown>
       {fallback.length > 0 && (
         <details className="content-wide overflow-hidden rounded-lg border border-border-subtle bg-surface">
