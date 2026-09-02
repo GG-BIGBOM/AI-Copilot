@@ -197,3 +197,50 @@ def test_committed_eval_results_are_lf_on_disk():
         if b"\r\n" in p.read_bytes()
     ]
     assert not bad, f"这些结果文件在磁盘上是 CRLF（共 {len(bad)} 个）：{bad[:5]}"
+
+
+# ═══════════════ 五、内嵌在 shell 里的 Python 必须能编译 ═══════════════
+
+
+def test_embedded_python_in_deploy_actually_compiles():
+    """⚠️⚠️ **CRLF 闸门自己被写坏过，代价是整条部署路静悄悄地死了 4 天。**
+
+    2026-08-29 的 `26c6e9f`——标题正是「写文件一律 LF」——把闸门里一句注释
+    写断成了两行。后半句 `就是 bad interpreter；……` 前面没有 `#`，
+    于是那段内嵌 Python 从那一刻起是语法错的：
+
+        File "<stdin>", line 6
+        SyntaxError: invalid character '；' (U+FF1B)
+
+    **它没有写坏生产**，因为它跑在 `[1/7] 本机自检`，在推任何东西之前。
+    真正的代价是反过来的：从那天起 `deploy.sh` 一次都跑不完，
+    main 上的两个迁移（`c8d3f1a704be` / `d9c4f2e81b36`）在生产外面躺了 4 天，
+    而**没有人收到过一行告警**——脚本每次都"报个错就退出"，
+    在 GBK 控制台上还是一屏乱码，看起来像是本机环境的问题。
+    2026-09-02 真要部署时才撞上。
+
+    ⚠️ **这段代码住在 shell 的 heredoc 里，谁都够不着它**：Python 的语法
+    检查、ruff、编辑器高亮、CI——一个都不会去解析 `.sh` 文件里的字符串。
+    它唯一被验证的时机就是部署那一刻，而那恰好是最不该发现语法错的时刻。
+
+    ⚠️ 判据是 `compile()`，不是"检查每行有没有 `#`"。注释断行只是这一次的
+    形态，下次可能是缩进、可能是引号。**能不能编译**才是那段脚本真正
+    需要成立的性质，也是唯一不会随写法变化的判据。
+    """
+    import re
+
+    blocks = re.findall(
+        r"<<'PYEOF'\n(.*?)\n^PYEOF$", DEPLOY.read_text(encoding="utf-8"), re.S | re.M
+    )
+    assert blocks, "deploy.sh 里一个内嵌 Python 块都找不到——它被挪走了，还是分隔符改了？"
+
+    for i, src in enumerate(blocks, 1):
+        try:
+            compile(src, f"deploy.sh 第 {i} 个 PYEOF 块", "exec")
+        except SyntaxError as exc:
+            broken = src.split("\n")[(exc.lineno or 1) - 1]
+            raise AssertionError(
+                f"deploy.sh 第 {i} 个内嵌 Python 块编译不过，部署会卡在 [1/7]：\n"
+                f"  第 {exc.lineno} 行: {broken!r}\n"
+                f"  {type(exc).__name__}: {exc.msg}"
+            ) from exc

@@ -58,9 +58,12 @@ import pathlib, sys
 bad = sorted(
     str(f)
     # ⚠️ **rglob 不是 glob。** `deploy/docker/init.sh` 跑在容器里的 Linux
-    # shell 下，一个 
- 就是 `bad interpreter`；而它在 deploy/ 的子目录里，
-    # 非递归的 glob 根本看不见它（W1.3 加进来的时候差点漏掉）
+    # shell 下，行尾一个 CR 就是 `bad interpreter`；而它在 deploy/ 的
+    # 子目录里，非递归的 glob 根本看不见它（W1.3 加进来的时候差点漏掉）
+    # ⚠️ 这一句别写成字面的回车符。26c6e9f 就是那么断成两行的，后半句
+    #    丢了 `#` 变成裸代码，整段 Python 语法错——而它跑在推送之前，
+    #    所以生产没坏，坏的是**部署本身从此一次都跑不完，四天没人知道**。
+    #    `tests/test_ci_contract.py` 现在会 compile() 这一段，拦住重演。
     for pattern in ("*.sh", "*.service", "*.timer", "*.conf")
     for f in pathlib.Path("deploy").rglob(pattern)
     if b"\r\n" in f.read_bytes()
