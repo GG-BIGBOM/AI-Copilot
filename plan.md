@@ -46,18 +46,29 @@
 
 ### 还开着的事
 
-1. **验证这一轮删代码没删坏东西**：全量 `pytest` + `ruff` + 前端
-   `npm run verify` 正在跑，跑完再 commit。
-2. **[ISSUES.md](ISSUES.md) I-13**：50 篇统计类文档读不出来，要不要写
-   一个 lakesheet 解析器还没定。
-3. **隔离数据库全量 pytest**：本机跑的是共享开发库；开 PR 到 main 才会
+✅ **验证这一轮删代码没删坏东西**（2026-08-30 补跑）：后端 846 个测试全绿、
+`ruff check . ../tests ../eval` 干净；前端 `npm run verify`（单测 + lint +
+类型 + 构建）全绿。删代码这一轮没有回归。
+
+✅ **[ISSUES.md](ISSUES.md) I-13 已决定**（2026-08-30）：不写 lakesheet
+解析器。查过频率后发现这 50 篇 100% 集中在 `tongji`（统计）一个库、
+且无一例外是纯表格——量封顶、格式又和"带引用问答"的核心场景不匹配，
+两条理由缺一都不够。顺带确认了这 50 篇的 `source_url` 全部真实，
+不会被孤儿判据误删。详见 ISSUES.md 里的决定记录。
+
+以下几项需要你本人操作，我做不了：
+
+1. **隔离数据库全量 pytest**：本机跑的是共享开发库；开 PR 到 main 才会
    触发 CI 用临时 PostgreSQL 跑全套（`ci.yml` 只在 `push: [main]` 和
-   `pull_request` 上触发，push 功能分支不会跑）。
-4. **Docker 真机验收**：本机没有 Docker。
-5. **span 树截图**：需要打开追踪、跑一轮真实问答后截图，还没做。
-6. **阿里云安全组只留 22/80/443**（⚠️ 只有你能做）。
-7. **Langfuse 接上**（可选，需要注册账号）：`TRACING_ENABLED=false`，
-   线上没开追踪；本机看树不需要账号，`TRACING_CONSOLE=true`。
+   `pull_request` 上触发，push 功能分支不会跑）——要不要现在开 PR，
+   还是等正式合并 main 时顺带跑，你定。
+2. **Docker 真机验收**：本机没有 Docker，装不装、要不要验，你定。
+3. **span 树截图**：需要打开追踪、跑一轮真实问答后截图。本机
+   `TRACING_CONSOLE=true` 不需要账号就能看树，但"跑一轮真实问答"要花
+   一次 DeepSeek + SiliconFlow 调用——要不要现在跑、截哪几张图，你定。
+4. **阿里云安全组只留 22/80/443**（⚠️ 只有你能做，我没有控制台权限）。
+5. **Langfuse 接上**（可选，需要注册账号）：`TRACING_ENABLED=false`，
+   线上没开追踪；本机看树不需要账号。
 
 ---
 
