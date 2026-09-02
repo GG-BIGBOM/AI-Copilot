@@ -18,6 +18,14 @@ from pathlib import Path
 
 EVAL_DIR = Path(__file__).resolve().parent
 ROOT = EVAL_DIR.parent
+# ⚠️ Windows 控制台默认 GBK，摘要里的 ✓ / ⛔ 一律编不出来。
+# 只放宽 errors、不改 encoding——和 `eval/run.py` 保持同一个判断：
+# 中文在 GBK 下本来就打得出来，把 stdout 改成 utf-8 反而会把整篇变成乱码，
+# 编不出的符号退化成 `?` 就够了。hasattr 守一下 pytest 接管 stdout 的场景。
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(errors="replace")
+
 STATUS_BY_CODE = {0: "PASS", 1: "FAIL", 2: "UNRELIABLE"}
 _DATE_RE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\s*$", re.MULTILINE)
 _SHA_RE = re.compile(r"当前语料指纹（[^）]+）：([^\s]+)")
@@ -33,6 +41,20 @@ class GateSnapshot:
 
 def run_gate() -> GateSnapshot:
     """运行统一门禁并提取部署摘要；未知异常一律按 UNRELIABLE。"""
+    # ⚠️⚠️ **`encoding="utf-8"` 不设置子进程，它只是在断言子进程**——
+    # 而在 Windows 上这个断言是假的：子进程按 locale（cp936）写 stdout，
+    # 这里按 utf-8 去解，整篇门禁报告变成一串 U+FFFD，再 print 到 GBK
+    # 控制台时当场 `UnicodeEncodeError: 'gbk' codec can't encode '\ufffd'`。
+    #
+    # ⚠️ **它长得像显示问题，动的却是判定的输入**，而且只坏一半——量过：
+    #   `_DATE_RE`  纯 ASCII，58 个 U+FFFD 里照样抠到三个证据日期
+    #   `_SHA_RE`   要匹配「当前语料指纹（…）：」这几个中文字，一乱就没了
+    # 于是摘要平静地打出「语料指纹：不可用」，而状态走退出码仍然是 PASS。
+    # **一份看起来通过、却说不出自己验的是哪份语料的门禁记录**——
+    # 它比直接崩掉危险，因为崩掉会有人查，这个不会。
+    #
+    # 所以让那个断言成立：`PYTHONUTF8=1` 强制子进程真的按 UTF-8 写。
+    env = {**os.environ, "PYTHONUTF8": "1"}
     proc = subprocess.run(
         [sys.executable, str(EVAL_DIR / "gate.py")],
         cwd=ROOT / "backend",
@@ -40,6 +62,7 @@ def run_gate() -> GateSnapshot:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
         check=False,
     )
     output = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part.strip())

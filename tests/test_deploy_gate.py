@@ -76,3 +76,52 @@ def test_deploy_script_keeps_the_unified_check_commands():
     assert "ruff check . ../tests ../eval" in script
     assert "npm run verify" in script
     assert "deploy_gate.py" in script
+
+
+def test_run_gate_forces_utf8_on_the_child_process():
+    """⚠️⚠️ **`encoding="utf-8"` 不是在设置子进程，是在断言子进程**——而这个断言曾经是假的。
+
+    2026-09-02 部署时撞上：`gate.py` 在 Windows 上按 locale（cp936）写 stdout，
+    父进程却声明 `encoding="utf-8"` 去解，于是整篇门禁报告变成一串 U+FFFD，
+    再 `print()` 到 GBK 控制台时 `\\ufffd` 编不出来，当场：
+
+        UnicodeEncodeError: 'gbk' codec can't encode character '\\ufffd'
+
+    ⚠️ **坏在它长得像显示问题，实际动的是判定的输入——而且只坏一半。**
+    `run_gate()` 从 `output` 里正则抠两样东西，实测（58 个 U+FFFD 的那份）：
+    证据日期是纯 ASCII，穿过乱码照样抠到；语料指纹要匹配「当前语料指纹（…）：」
+    这几个中文字，一乱就没了。于是摘要平静地打出「语料指纹：不可用」，
+    而门禁状态走的是退出码，仍然显示 PASS。**一份看起来通过、却说不出
+    自己验的是哪份语料的门禁记录**——比直接崩掉危险，因为崩掉会有人查。
+
+    真正修的是那个假设：给子进程 `PYTHONUTF8=1`，让它真的按 UTF-8 写。
+    父进程那一侧只放宽 `errors`（见 `eval/run.py` 里那段推理：中文在 GBK
+    控制台本来打得出来，把 stdout 改成 utf-8 反而会把整篇变成乱码）。
+    """
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+
+        class _P:
+            returncode = 0
+            stdout = "✓ 门禁通过。\n当前语料指纹（flagship）：abc123\n"
+            stderr = ""
+
+        return _P()
+
+    import subprocess
+
+    real = subprocess.run
+    subprocess.run = fake_run
+    try:
+        guard.run_gate()
+    finally:
+        subprocess.run = real
+
+    env = captured.get("env")
+    assert env is not None, "run_gate 没给子进程传 env——它会继承 GBK locale，输出解不出来"
+    assert env.get("PYTHONUTF8") == "1", (
+        f"子进程没有被强制成 UTF-8，encoding='utf-8' 这个声明就是假的：{env.get('PYTHONUTF8')!r}"
+    )
+    assert captured.get("encoding") == "utf-8", "父进程解码声明和子进程设置必须是同一个编码"
