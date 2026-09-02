@@ -176,6 +176,17 @@ function Message({
   /* ─── AI 消息：文档式排版，没有气泡 ─── */
   return (
     <article className="group">
+      {/* ⚠️ **只在导出 PDF 时出现的标题。**
+          用户那句提问渲染在**另一个** DOM 节点里（上面那个右对齐气泡），
+          而打印只截取这一条回答的 <article>——不补这一行，导出来的是
+          一段无头的答案，过两天自己都认不出它回答的是什么。
+          平时 `display:none`，见 globals.css 的 `[data-print-only]`。 */}
+      {question && (
+        <h1 data-print-only="" className="mb-4 text-xl font-semibold text-foreground">
+          {question}
+        </h1>
+      )}
+
       {/* 草稿排在最前：详解档的那几十秒里，它是页面上**唯一**在动的东西 */}
       <ReasoningPanel text={reasoning} hasAnswer={Boolean(text)} isStreaming={isStreaming} />
 
@@ -208,6 +219,8 @@ function Message({
               question={question}
               traceId={trace?.id}
               initialVote={trace?.vote}
+              citations={citations}
+              images={images}
               onRegenerate={onRegenerate}
             />
           )}

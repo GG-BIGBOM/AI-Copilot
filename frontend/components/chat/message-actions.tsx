@@ -22,11 +22,14 @@
  * （旧版按「有带链接的来源」判，因为那时改的是语雀原文，没有目标就无从盖起。）
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Check,
   Copy,
+  Download,
+  FileText,
   PencilLine,
+  Printer,
   RotateCcw,
   ThumbsDown,
   ThumbsUp,
@@ -34,8 +37,15 @@ import {
 
 import { VerifyDialog } from "@/components/chat/verify-dialog";
 import {
+  downloadTextFile,
+  exportFilename,
+  toMarkdown,
+} from "@/lib/export-answer";
+import type { AnswerImage } from "@/lib/chat-types";
+import {
   api,
   FEEDBACK_REASONS,
+  type Citation,
   type FeedbackReason,
   type FeedbackVote,
 } from "@/lib/api";
@@ -48,9 +58,15 @@ export function MessageActions({
   question,
   traceId,
   initialVote,
+  citations = [],
+  images = [],
   onRegenerate,
 }: {
   text: string;
+  /** 导出 Markdown 时要一起写进「## 来源」那一段 */
+  citations?: readonly Citation[];
+  /** 导出 Markdown 时用来把 `[图N]` 换成真的图片语法 */
+  images?: readonly AnswerImage[];
   /** 这一轮用户问的那句话。订正以它为键——没有它就无从订正 */
   question?: string;
   /** 这一轮在 request_trace 里的行号。没有就不显示赞/踩 */
@@ -60,6 +76,10 @@ export function MessageActions({
   onRegenerate?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  // 打印时要找到这一条回答对应的那个 <article>。用 closest 而不是往下传 ref：
+  // 传 ref 要穿过 MessageList → Message 两层，而这里只需要「我在谁里面」
+  const rootRef = useRef<HTMLDivElement>(null);
   const [correcting, setCorrecting] = useState(false);
   const [vote, setVote] = useState<FeedbackVote | null>(initialVote ?? null);
   // 点了踩之后展开的原因条。选完就收起来
@@ -93,15 +113,89 @@ export function MessageActions({
     }
   }
 
+  function exportMarkdown() {
+    downloadTextFile(
+      exportFilename(question ?? "", "md"),
+      toMarkdown({ question, answer: text, citations, images }, window.location.origin),
+      "text/markdown",
+    );
+    setExporting(false);
+  }
+
+  /**
+   * ⭐ **PDF 走浏览器打印，不做服务端渲染**（理由见 `lib/export-answer.ts` 文件头：
+   * 服务器 1.6GB 装不下渲染器、还缺中文字体；而 plan.md 2.4 那条许可红线
+   * 已经因为 AGPL 拒过一个 PDF 库）。
+   *
+   * 做法是给 body 和这一条回答各打一个标记，剩下的交给 `@media print`。
+   * ⚠️ **`afterprint` 必须清理标记。** 不清的话用户取消打印之后，页面上
+   * 那两个属性还在——下一次 Ctrl+P 就会只打印这一条回答，而他根本没点导出。
+   */
+  function exportPdf() {
+    const article = rootRef.current?.closest("article");
+    if (!article) return;
+    setExporting(false);
+    document.body.setAttribute("data-printing", "");
+    article.setAttribute("data-print-target", "");
+    const cleanup = () => {
+      document.body.removeAttribute("data-printing");
+      article.removeAttribute("data-print-target");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    window.print();
+  }
+
   if (!text) return null;
 
   return (
     <>
-    <div className="-mx-1.5 mt-3 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+    <div
+      ref={rootRef}
+      // ⚠️ 这一条不进 PDF：导出的东西里不该有「导出」按钮
+      data-no-print=""
+      className="-mx-1.5 mt-3 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100"
+    >
       <button type="button" className={ACTION} onClick={copy} aria-label="复制回答">
         {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
         {copied ? "已复制" : "复制"}
       </button>
+
+      <div className="relative">
+        <button
+          type="button"
+          className={ACTION}
+          onClick={() => setExporting((v) => !v)}
+          aria-expanded={exporting}
+          aria-label="导出这条回答"
+        >
+          <Download className="size-3.5" />
+          导出
+        </button>
+        {exporting && (
+          <div
+            className="absolute bottom-full left-0 z-10 mb-1 min-w-[9rem] overflow-hidden rounded-lg border border-border bg-surface py-1"
+            style={{ boxShadow: "var(--shadow-floating)" }}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-foreground hover:bg-surface-subtle"
+              onClick={exportMarkdown}
+            >
+              <FileText className="size-3.5 text-muted-foreground" />
+              Markdown
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-foreground hover:bg-surface-subtle"
+              onClick={exportPdf}
+            >
+              <Printer className="size-3.5 text-muted-foreground" />
+              PDF
+            </button>
+          </div>
+        )}
+      </div>
 
       {traceId && (
         <>

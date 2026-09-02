@@ -503,3 +503,48 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ═══════════ 导出 PDF：只打印被点了导出的那一条回答 ═══════════
+ *
+ * ⭐ 这就是 PDF 导出的**全部**实现。没有服务端渲染器、没有前端 PDF 库、
+ * 没有新依赖——理由见 `lib/export-answer.ts` 文件头（服务器 1.6GB 装不下
+ * 渲染器且缺中文字体；plan.md 2.4 的许可红线已经因为 AGPL 拒过一个 PDF 库）。
+ *
+ * ⚠️ 用 visibility 而不是 display：display:none 会让被隐藏元素**脱离布局**，
+ * 于是目标那一条会跟着塌到奇怪的位置。visibility 保留盒子、只是不画，
+ * 再把目标绝对定位到左上角，出来的分页才是对的。
+ */
+/* 只在导出 PDF 时出现的东西（现在只有那一行提问标题）。
+ * ⚠️ 平时必须真的不占位：这是屏幕上的常规状态，写在 @media print 外面 */
+[data-print-only] {
+  display: none;
+}
+
+@media print {
+  body[data-printing] [data-print-target] [data-print-only] {
+    display: block;
+  }
+  body[data-printing] * {
+    visibility: hidden;
+  }
+  body[data-printing] [data-print-target],
+  body[data-printing] [data-print-target] * {
+    visibility: visible;
+  }
+  body[data-printing] [data-print-target] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  /* 导出的东西里不该有「导出」按钮 */
+  body[data-printing] [data-no-print] {
+    display: none !important;
+  }
+  /* 截图别被切成两页 */
+  body[data-printing] [data-print-target] img,
+  body[data-printing] [data-print-target] figure,
+  body[data-printing] [data-print-target] pre {
+    break-inside: avoid;
+  }
+}
