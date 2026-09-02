@@ -315,6 +315,10 @@ def _switches() -> dict:
     s = get_settings()
     return {
         "history_budget_enabled": s.history_budget_enabled,
+        # ⚠️ 第三个开关（ISSUES.md I-9）。它拦的是 `lc-vague-reference-out-of-window`
+        # 那一类「指代对象已出窗口」的问题，而那道题在此之前**每一臂都失分**——
+        # 包括基线。不记进来的话，翻旧报告的人会把它的效果算到别的开关头上
+        "direct_boundary_enabled": s.direct_boundary_enabled,
         "history_char_budget": s.history_char_budget,
         "history_char_limit": s.history_char_limit,
         "history_digest_budget": s.history_digest_budget,
@@ -333,6 +337,7 @@ def print_report(meta: dict, metrics: dict, results: list[ChatResult], facts_on:
     cfg = _switches()
     print(f"  HISTORY_BUDGET_ENABLED={'true' if cfg['history_budget_enabled'] else 'false'}"
           f"   预算 {cfg['history_char_budget']} 字   摘要上限 {cfg['history_digest_budget']} 字")
+    print(f"  DIRECT_BOUNDARY_ENABLED={'true' if cfg['direct_boundary_enabled'] else 'false'}")
     print("═" * 62)
     for k in ("题数", "可解析题数", "上下文命中率", "已判题数", "跨窗口解析成功率"):
         if k in metrics:
@@ -399,6 +404,7 @@ def compare(tags: list[str]) -> None:
     for label, key, where in (
         ("SESSION_FACTS", "session_facts_enabled", None),
         ("HISTORY_BUDGET", "history_budget_enabled", "assembly"),
+        ("DIRECT_BOUNDARY", "direct_boundary_enabled", "assembly"),
     ):
         cells = ""
         for r in runs:

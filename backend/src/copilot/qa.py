@@ -834,6 +834,7 @@ def boundary_reply(
     history_truncated: bool,
     digest: str,
     facts_answerable: bool,
+    include_earliest: bool = True,
 ) -> str | None:
     """这一问该不该被边界话术短路；不该就返回 `None`。
 
@@ -849,10 +850,27 @@ def boundary_reply(
 
     ⚠️ 判据是「摘要**非空**」，不是"摘要里含不含答案"——后者要语义匹配，
     而这道闸门的作用是放行，不是替模型回答。
+
+    ⚠️⚠️ **`include_earliest` 默认开，但直路必须传 False。**
+
+    「我一开始说的是哪个版本」这一支（`_EARLIEST_HISTORY_RE`）在 Agent 路上
+    是安全的，因为那条路有一个逃生口：`SessionFacts.answers()` 判得出
+    「事实表里有版本这一项」，于是放行。**直路没有那个逃生口**——它手里
+    只有渲染好的 `facts` 文本，判不了"答不答得出"，而 `SESSION_FACTS_ENABLED`
+    还是关着的（付费评测的结论，见 EVALUATION.md 第四·六节）。
+
+    照搬过来的代价是当场量到的：`eval/longchat.py` 的
+    `lc-version-asked-late`（题集的**头号验收题**，`must_not_include` 里
+    写着「无法确认」）和 `lc-earliest-question-out-of-window`（同样禁「无法确认」）
+    都会被这一支短路成一句「我无法确认你最开始问的是什么」——**当场判错两道，
+    只修好一道**（`lc-vague-reference-out-of-window`）。净 -1。
+
+    「那个功能在哪配置来着」那一支没有这个问题：它问的是**指代对象**，
+    而指代对象从来不在事实表里，短路就是正确答案。
     """
     if not history_truncated or digest or facts_answerable:
         return None
-    if _EARLIEST_HISTORY_RE.search(question):
+    if include_earliest and _EARLIEST_HISTORY_RE.search(question):
         return "当前上下文只保留最近几轮，我无法确认你最开始问的是什么。"
     if _TRUNCATED_REFERENCE_RE.search(question):
         return (
@@ -1111,13 +1129,30 @@ async def ask_stream(
         # 判不了"事实表答不答得出这一问"。所以退一步：**只要有事实文本就放行**，
         # 让模型自己去读。放行是安全的那一侧（见 `boundary_reply`）。
         if boundary_enabled:
-            dropped = split_history(history)[1]
+            kept, dropped = split_history(history)
+            # ⚠️⚠️ **不能用 `bool(dropped)` 判「裁过没有」。**
+            # `split_history` 在预算装配器**关着**时永远返回空的 dropped
+            # （见它自己：`return usable[-HISTORY_TURNS:], []`）——那是刻意的，
+            # 因为 `assemble_messages` 拿 dropped 去生成摘要段，而关着时
+            # 必须逐字节等同 W2.1 之前、不能凭空多出一段摘要。
+            # 于是按 dropped 判的话，这道闸门**在任何配置下都不会触发**：
+            # 关着时 dropped 恒空，开着时 dropped 非空但摘要也非空。
+            # （这个 bug 是被免费探针抓到的，在花钱跑 A/B 之前。）
+            #
+            # 真正的判据是「有多少轮没进上下文」，两种模式通用：
+            usable = sum(
+                1 for r, c in (history or []) if r in ("user", "assistant") and c.strip()
+            )
             if (
                 reply := boundary_reply(
                     question,
-                    history_truncated=bool(dropped),
+                    history_truncated=usable > len(kept),
                     digest=history_digest(dropped),
                     facts_answerable=bool(facts),
+                    # ⚠️ 直路必须关掉「我一开始问的是什么」那一支——它没有
+                    # 事实表兜底，会把 `lc-version-asked-late` 判错。见
+                    # `boundary_reply` 的文档
+                    include_earliest=False,
                 )
             ) is not None:
                 sp_route.set(decision="boundary")

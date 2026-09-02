@@ -93,3 +93,37 @@ def test_the_direct_gate_is_off_by_default():
     from copilot.config import Settings
 
     assert Settings().direct_boundary_enabled is False
+
+
+# ─────────── 直路必须收窄（2026-09-02，免费探针量出来的） ───────────
+
+
+def test_the_direct_path_must_not_short_circuit_the_earliest_question():
+    """⚠️⚠️ **直路照搬 Agent 的判据会当场判错两道题。**
+
+    「我一开始说的是哪个版本」这一支在 Agent 路上安全，因为那条路有逃生口：
+    `SessionFacts.answers()` 判得出「事实表里有版本这一项」，于是放行。
+    直路**没有那个逃生口**——它手里只有渲染好的 `facts` 文本，判不了
+    "答不答得出"，而 `SESSION_FACTS_ENABLED` 还是关着的。
+
+    照搬的代价是 `eval/longchat.py` 上量到的：
+
+        lc-version-asked-late               must_not_include 含「无法确认」→ 判错
+        lc-earliest-question-out-of-window  must_not_include 含「无法确认」→ 判错
+        lc-vague-reference-out-of-window    修好
+
+    **净 -1。** 所以直路只留「那个功能」那一支——指代对象从来不在事实表里，
+    短路就是正确答案。
+    """
+    kwargs = {"history_truncated": True, "digest": "", "facts_answerable": False}
+
+    # Agent 口径：两支都在
+    assert qa.boundary_reply("我一开始说的是哪个版本？", **kwargs) is not None
+    # 直路口径：这一支必须放行
+    assert qa.boundary_reply("我一开始说的是哪个版本？", include_earliest=False, **kwargs) is None
+    assert qa.boundary_reply("我第一个问题问的是什么？", include_earliest=False, **kwargs) is None
+
+    # 而指代那一支两边都要短路
+    for kw in ({}, {"include_earliest": False}):
+        reply = qa.boundary_reply(VAGUE, **kwargs, **kw)
+        assert reply is not None and "说出功能名称" in reply
