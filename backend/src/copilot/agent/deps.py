@@ -136,6 +136,11 @@ class AgentDeps:
     # 这一轮 answer_kb 直接返回了人写定的标准答案（M16）。
     # 路由层靠它把 `answer_source` 记成 verified
     verified_hit: bool = False
+    # 命中的那条标准答案和它的纠错来源（M19-B 的台账列）。
+    # ⚠️ 和 `verified_hit` 分开存：那个布尔量是 `answer_source` 用的，
+    # 这两个 id 是给「这条标准答案被命中过几次」那种查法用的
+    verified_answer_id: uuid.UUID | None = None
+    verified_correction_id: uuid.UUID | None = None
     images_sent: bool = False  # 配图已经在正文之前发过了，路由层别再发一次
     # 本轮 `save_requirement` 空转了几次（字段已填、用户又没要求改）。
     # 连着空转说明模型把一句普通问题当成了需求，见 tools.save_requirement

@@ -385,6 +385,12 @@ async def _chat_stream(
             draft.private_hits = streamed.private_hits
             # 命中标准答案时这一轮**没有调过模型**，answer_source 记 verified
             draft.verified = streamed.verified_id is not None
+            draft.verified_answer_id = streamed.verified_id
+            draft.correction_id = streamed.verified_correction_id
+            # ⚠️ 记**发给前端的**张数，不是检索到的：「配图串台」和
+            # 「该配图没配」都只能从用户看到的那几张查起
+            draft.image_count = len(streamed.images)
+            draft.general_allowed = get_settings().allow_general_knowledge
             draft.model = getattr(providers.get_llm_for(mode), "model", None)
 
             buf: list[str] = []
@@ -654,6 +660,10 @@ async def _agent_stream(
             draft.retrieval(deps.citations)
             draft.private_hits = deps.private_hits
             draft.verified = deps.verified_hit
+            draft.verified_answer_id = deps.verified_answer_id
+            draft.correction_id = deps.verified_correction_id
+            draft.image_count = len(deps.images)
+            draft.general_allowed = get_settings().allow_general_knowledge
             draft.tokens = tokens
             draft.answer = answer
             draft.answer_chars = len(answer)

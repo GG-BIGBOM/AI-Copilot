@@ -142,6 +142,18 @@ class TraceDraft:
     # 这一轮直接返回了人写定的标准答案（`verified.lookup` 命中）。
     # 判定在 qa/tools 那边做，这里只负责如实记下来
     verified: bool = False
+    # ===== M19-B 的四个观测维度 =====
+    # 命中的那条标准答案，以及它是从哪次用户纠错来的。
+    # ⭐ `correction_id` 让「用户提的这条纠错，后来真的救到人了吗」
+    # 第一次可查——在此之前纠错发布之后就断线了
+    verified_answer_id: uuid.UUID | None = None
+    correction_id: uuid.UUID | None = None
+    # 这一轮**允许**常识兜底吗（`ALLOW_GENERAL_KNOWLEDGE` 或评测显式传的）。
+    # ⚠️ 这只是一半：另一半是「答案到底标没标来源」，两者与起来才是
+    # `general_knowledge_used`，见 `summary()`
+    general_allowed: bool = False
+    # 发给前端几张配图。⚠️ 是**发出去的**，不是检索到的
+    image_count: int | None = None
     # 答案正文。**只用来判 `answer_source`，不落库**——正文已经在 messages 表里
     # 有一份了，台账再存一份等于把每一条回答存两遍
     answer: str = ""
@@ -195,6 +207,13 @@ class TraceDraft:
         `ttfb_ms` 在流被打断、或者压根没出正文时是 None，照实返回 None，
         不填 0：0 的意思是"快得测不出来"，而那是另一回事。
         """
+        source = classify_answer_source(
+            route=self.route,
+            tools=self.tools,
+            answer=self.answer,
+            no_answer=self.no_answer,
+            verified=self.verified,
+        )
         return {
             "route": self.route,
             "mode": self.mode,
@@ -205,13 +224,17 @@ class TraceDraft:
             "tokens": self.tokens,
             "answer_chars": self.answer_chars,
             "no_answer": self.no_answer,
-            "answer_source": classify_answer_source(
-                route=self.route,
-                tools=self.tools,
-                answer=self.answer,
-                no_answer=self.no_answer,
-                verified=self.verified,
-            ),
+            "answer_source": source,
+            # ⚠️⚠️ **两个条件与起来，缺一不可。**
+            #   允许了 + 没标来源  → true，正常：常识这条路确实产出了这次答案
+            #   没允许 + 没标来源  → false，⚠️ 模型漏标 [n]，是引用正确率那条线的病
+            #   允许了 + 标了来源  → false，这一句指着材料说话
+            # 中间那一行是这一列存在的全部理由：在此之前这两种情形在表里
+            # 长得一模一样，只看 answer_source 分不出「允许的常识」和「漏标的引用」
+            "general_knowledge_used": self.general_allowed and source == GENERAL,
+            "image_count": self.image_count,
+            "verified_answer_id": self.verified_answer_id,
+            "correction_id": self.correction_id,
             "ttfb_ms": None if self._ttfb is None else int(self._ttfb * 1000),
             "ok": self.ok,
         }
@@ -227,6 +250,7 @@ class TraceDraft:
         if self._saved:
             return
         self._saved = True
+        snap = self.summary()
         with anyio.CancelScope(shield=True):  # 见文件头第 3 条
             try:
                 async with SessionLocal() as session:
@@ -250,13 +274,15 @@ class TraceDraft:
                             tokens=self.tokens,
                             answer_chars=self.answer_chars,
                             no_answer=self.no_answer,
-                            answer_source=classify_answer_source(
-                                route=self.route,
-                                tools=self.tools,
-                                answer=self.answer,
-                                no_answer=self.no_answer,
-                                verified=self.verified,
-                            ),
+                            # ⚠️ 从 `summary()` 取，**不在这里重算一遍**。
+                            # 这是文件头「每个数只有一个定义」那条规矩：看板上说
+                            # `answer_source=kb`、表里那行写 `general_knowledge`，
+                            # 两个数对不上时没有任何办法判断哪个是对的
+                            answer_source=snap["answer_source"],
+                            general_knowledge_used=snap["general_knowledge_used"],
+                            image_count=snap["image_count"],
+                            verified_answer_id=self.verified_answer_id,
+                            correction_id=self.correction_id,
                             ok=self.ok,
                             error=self.error,
                             created_at=datetime.now(UTC),

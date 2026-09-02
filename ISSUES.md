@@ -219,6 +219,51 @@ lc-vague-reference-out-of-window    修好
 引用的是**同一个正则对象**——各存一份的失败形态是无症状的：改了一处、
 另一处没改，而两条路的用户互不相见。
 
+### I-14　`alembic revision --autogenerate` 会生成**破坏性** DDL
+
+**症状**（2026-09-02，做 M19-B 第 1 项时撞到）　给 `request_trace` 加四列，
+按常规跑 `alembic revision --autogenerate`，生成出来的迁移里**除了那四列，
+还夹带了一堆没人要的改动**：
+
+```
+drop_index('ix_chunks_content_tsv', postgresql_using='gin')   混合检索的 GIN 索引
+drop_index('ix_chunks_space_owner')                           隔离查询的复合索引
+alter_column('chunks', 'knowledge_space_id', nullable=True)   ⚠️ 把隔离列改成可空
+drop_constraint('knowledge_spaces_code_key', type_='unique')  唯一约束
+alter_column(...)  ×7                                          各处 nullable=False
+```
+
+**为什么危险**　最后一条动的是 `knowledge_space_id`——plan.md 二·6 里
+「这个项目最不能出的 bug」，隔离的地基。而这一整批 DDL 在部署时会
+**安静地跑过去、退出码 0**：
+
+```
+删掉 GIN 索引        →  混合检索退化成顺序扫描，表现只是"变慢了"
+隔离列改成可空        →  地基松一格，要等到某天真漏了才知道
+```
+
+**两样都不当场报错**，也不会有任何一条测试变红——这正是最糟的失败形态。
+
+**根因**（部分查清）　模型和库之间本来就有漂移：有些索引/约束是在早期迁移里
+用原生 SQL 建的，或者名字和 `__table_args__` 里声明的对不上，于是
+autogenerate 认为"库里多了这些、模型里没有"，就要把它们删掉。
+⚠️ **漂移本身是另一件事**，得单独查、单独修——不能顺手夹带在一次加列里。
+
+**这一轮怎么处理的**　删掉自动生成那份，**手写**了一份只含四个 `add_column`
+和一个 `create_index` 的迁移（`5e04dd2b641d`），文件头把这件事记了下来。
+跑完实测确认：`ix_chunks_content_tsv` 还在、`chunks.knowledge_space_id`
+仍是 `NOT NULL`。
+
+**下次怎么办**　⭐ **autogenerate 的产物一律当成草稿看，逐行读完再留。**
+判据很简单：这次改动**只**打算加列的话，迁移里出现任何
+`drop_` / `alter_column` / `drop_constraint` 都是夹带。
+
+**什么条件下必须根治**　下一个人不知道这条、直接 commit 了 autogenerate 的
+产物时——而那一天不会有任何报警。可行的形态：给 `tests/` 加一道闸门，
+跑一次 autogenerate 到临时库、断言产出为空；或者退一步，扫
+`alembic/versions/` 里有没有未经标注的 `drop_index` / `alter_column`。
+前者能根治漂移，后者只拦"夹带"，成本差一个量级。
+
 ### I-11　测试之间共享的第三样东西：**模块级引擎的连接池**
 
 **症状**　`tests/test_spaces_cli.py` 里几道 async 测试单跑必过、

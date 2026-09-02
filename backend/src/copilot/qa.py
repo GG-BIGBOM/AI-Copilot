@@ -1040,6 +1040,10 @@ class StreamedAnswer:
     # 这一轮是**直接返回了一条人写定的标准答案**（`verified.lookup` 命中），
     # 一次模型调用都没花。调用方靠它把 `answer_source` 记成 `verified`
     verified_id: uuid.UUID | None = None
+    # 那条标准答案是从哪次用户纠错来的（`VerifiedAnswer.source_correction_id`）。
+    # ⭐ 台账记下它，「用户提的这条纠错后来真的救到人了吗」才第一次可查——
+    # 在此之前纠错一发布就断线了，没有任何一列能把它和后续的问答连起来
+    verified_correction_id: uuid.UUID | None = None
 
 
 async def ask_stream(
@@ -1118,7 +1122,10 @@ async def ask_stream(
             except Exception:  # noqa: BLE001
                 logger.warning("标准答案命中计数没记上 verified=%s", hit.id, exc_info=True)
             return StreamedAnswer(
-                stream=iter([("content", hit.answer)]), citations=[], verified_id=hit.id
+                stream=iter([("content", hit.answer)]),
+                citations=[],
+                verified_id=hit.id,
+                verified_correction_id=hit.source_correction_id,
             )
         # ⚠️ 窗口外指代的边界闸门（ISSUES.md I-9）。**它原来只长在 Agent 路上。**
         #

@@ -482,6 +482,41 @@ class RequestTrace(Base):
     # 填成 'kb' 会让半年前的统计凭空多出一批查库答案
     answer_source: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
 
+    # ===== M19-B：评测中心要的四列 =====
+    #
+    # ⚠️⚠️ **`answer_source` 的口径一个字都不动。** 这四列是**补充维度**，
+    # 不是新的 source 值。KB + 常识兜底那种情形仍然记 `answer_source='kb'` +
+    # `general_knowledge_used=true`——给 source 加一个新值的话，
+    # **半年的历史统计会集体换分母**，而那是个没人会发现的错。
+    #
+    # ⚠️ 四列**全部可空、老数据不回填**。NULL 在这里的意思是「那时候还没有
+    # 这一列」，填默认值会让上线之前的行凭空多出一批"确定的观测"。
+    # 这条规矩和上面 `answer_source` / `tools` 是同一条。
+
+    # 这一轮命中的那条标准答案。⚠️ **不加外键**（同 `message_id` 的理由）：
+    # 标准答案退役/删除时，台账里「那天它被命中过」这件事必须留着
+    verified_answer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    # 那条标准答案是从哪次用户纠错来的（`VerifiedAnswer.source_correction_id`）。
+    # ⭐ 有了它，「用户提的这条纠错，后来真的救到人了吗」才第一次可查——
+    # 在此之前纠错发布之后就断线了，没有任何一列能把它和后续的问答连起来
+    correction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # 这一轮**允许了常识兜底、而且答案确实一个来源编号都没标**。
+    #
+    # ⚠️ 它和 `answer_source='general_knowledge'` 不是一回事，两者一起看才有意义：
+    #
+    #     source=general_knowledge + used=true    正常：允许了，也确实这么答的
+    #     source=general_knowledge + used=false   ⚠️ **没允许却没标来源** —— 模型
+    #                                             漏标 [n]，是引用正确率那条线的病
+    #     source=kb                + used=true    允许着，但这一句指着材料说话
+    #
+    # 中间那一行是这一列存在的全部理由：在此之前这两种情形在表里长得一模一样
+    general_knowledge_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # 这一轮发给前端几张配图。⚠️ 记的是**发出去的**，不是检索到的——
+    # 「配图串台」和「该配图没配」都只能从用户看到的那几张查起
+    image_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
