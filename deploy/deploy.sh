@@ -139,6 +139,27 @@ tar -czf - --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
     -C backend src alembic alembic.ini pyproject.toml uv.lock .env.example \
   | $SSH "tar -xzf - -C $APP_DIR && chown -R copilot:copilot $APP_DIR"
 
+# ⚠️⚠️ **服务器上原来查不到「现在跑的是哪个 commit」。**
+#
+# `DEPLOY_AUDIT` 那行只打在**本机的 stdout** 上，终端一关就没了。
+# 于是线上出问题时第一个问题——「这是哪一版的行为」——只能靠翻聊天记录
+# 或者拿代码去比对，而那正是最不该靠记忆的时刻。
+#
+# 回滚演练更需要它：没有基准，「回滚到哪个版本」这句话写不出来。
+#
+# ⚠️ 用 `printf` 不用 `echo`：这一段是双引号包着的 ssh 命令串，
+# 里面不能出现反引号（会在本机做命令替换，见第 7 步那条注释）。
+# 单引号包住格式串，让 $ 和引号都原样过去。
+DEPLOYED_SHA=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+DEPLOYED_AT=$(date -u +%FT%TZ)
+DEPLOYED_DIRTY=$(git status --porcelain 2>/dev/null | head -1)
+$SSH "printf '%s\n' \
+    'commit=$DEPLOYED_SHA' \
+    'at=$DEPLOYED_AT' \
+    'scope=$DEPLOY_SCOPE' \
+    'dirty=${DEPLOYED_DIRTY:+yes}' \
+    > $APP_DIR/DEPLOYED"
+
 echo "==> [4/7] 推送勘误层"
 # corrections/ 在**仓库根**、不在 backend 下，所以单独推一次。
 #
