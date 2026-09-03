@@ -334,6 +334,33 @@ RuntimeError: Event loop is closed        （asyncpg 的 _cancel_current_command
 ⚠️ 没有任何机制在找第四个。可行的形态是把测试跑在一个**每次重建的库**上
 （CI 已经是了，本机不是）——而本机不是的理由是那 4568 块语料重灌一次要付费。
 
+---
+
+**2026-09-03 补一份硬证据：本机套件的不可靠是可量的，而且比"偶发"严重。**
+
+同一份代码、同一台机器，连跑三次全量：
+
+```
+第 1 次   871 passed                  全绿
+第 2 次   6 failed / 1 error          test_jobs::test_missing_file_is_permanent_failure
+                                      test_prune_images::test_document_images_are_not_orphans
+                                      test_session_facts::test_the_erp_version_survives...
+第 3 次   1 failed / 873 passed       test_jobs::test_the_loop_reclaims_without_waiting_for_a_restart
+```
+
+⭐⭐ **三次红的是三批不同的题**——这正是判断「flaky 还是真回归」的判据：
+真回归红的会是同一批。当时刚收紧过三列 `NOT NULL`，第一反应是"是不是把
+某条写入路径打断了"，而这个判据当场排除了它（红的那几道单跑连过三次）。
+
+⚠️⚠️ **这件事的真实代价不是"要重跑一次"，是它会让人对红灯脱敏。**
+一个每次红不同题的套件，跑久了人会默认"再跑一遍就好了"——而真回归第一次
+出现时长得**一模一样**。这才是这条 issue 该被根治的理由，
+不是"跑起来烦"。
+
+**目前唯一可信的验证路径是 CI**（每次重建的临时库）：846 / 856 / 868 三次
+都是干净的全绿。本机全量只能当"有没有明显崩掉"的粗筛，
+**不能当作「这次改动没问题」的证据**。
+
 ## 🟢 P2 —— 记账
 
 ### I-13　旗舰版「统计」类文档全灭：50 篇语雀表格文档 0 块，一条都搜不到　✅ 已决定不修

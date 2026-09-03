@@ -88,10 +88,8 @@ async def test_models_and_database_have_no_drift():
     finally:
         await engine.dispose()
 
-    assert not diffs, "模型和库漂移了 %d 项：\n  %s" % (
-        len(diffs),
-        "\n  ".join(_describe(d) for d in diffs),
-    )
+    detail = "\n  ".join(_describe(d) for d in diffs)
+    assert not diffs, f"模型和库漂移了 {len(diffs)} 项：\n  {detail}"
 
 
 def test_the_isolation_column_is_declared_not_null():
