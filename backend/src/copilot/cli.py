@@ -809,6 +809,7 @@ def corrections_export(
 async def _corrections_export(dry_run: bool) -> None:
     from sqlalchemy import select
 
+    from copilot import corrections_flow as flow
     from copilot.config import get_settings
     from copilot.db.models import Correction as CorrectionRow
     from copilot.db.session import SessionLocal
@@ -816,10 +817,15 @@ async def _corrections_export(dry_run: bool) -> None:
 
     settings = get_settings()
     async with SessionLocal() as session:
-        rows = list((await session.execute(select(CorrectionRow))).scalars())
+        # ⚠️ **只导已发布的。** 导出的产物要进 Git、要被 review、
+        # 而且文件那一路本身就是「生效的勘误」——把一条还没审的 pending
+        # 导进仓库，下一次别人跑 ingest 时它就从**文件**那一路生效了，
+        # 正好绕过刚建起来的审核门禁
+        stmt = select(CorrectionRow).where(CorrectionRow.status.in_(flow.LIVE))
+        rows = list((await session.execute(stmt)).scalars())
 
     if not rows:
-        typer.secho("数据库里没有网页勘误。", fg=typer.colors.CYAN)
+        typer.secho("数据库里没有已发布的网页勘误。", fg=typer.colors.CYAN)
         return
 
     # 已有的文件按 target_url 索引：同一篇要覆盖原来那个文件，
@@ -894,6 +900,77 @@ async def _admin(email: str, revoke: bool) -> None:
 
     verb = "取消了" if revoke else "设为"
     typer.secho(f"{email} 已{verb}管理员。", fg=typer.colors.GREEN)
+
+
+@app.command()
+def disable(
+    email: str = typer.Argument(..., help="要停用的账号邮箱"),
+    undo: bool = typer.Option(False, "--undo", help="改成重新启用"),
+) -> None:
+    """停用一个账号。**手里那张旧 JWT 下一次请求就失效。**
+
+        uv run copilot disable someone@example.com
+        uv run copilot disable someone@example.com --undo
+
+    ⭐⭐ **这是一条安全能力，不是普通后台功能。** 账号泄露、人离职、
+    有人在刷接口——这几种情况下要的是「现在就把他踢出去」，而在此之前
+    做这件事只有一条路：**登进服务器手写 SQL**。
+
+    ⭐ **不需要 `token_version` 那套。** 常见做法是在 JWT 里塞一个版本号、
+    停用时 +1，为的是避免每次请求查库。**这个项目本来就每次请求都查库**——
+    `auth/deps.get_current_user_optional` 拿 `sub` 去
+    `session.get(User, ...)`，顺手就读到了 `is_active`。也就是说撤销
+    在架构上**已经是即时的**，缺的只是一个把 `is_active` 改掉的入口。
+    再引一个 `token_version` 只会多一个必须和 `is_active` 保持一致的字段，
+    而它们不一致的表现是「停用了还能用」——正是这条能力要杜绝的事。
+
+    ⚠️ **为什么放在 CLI 而不是管理台。** 同 `copilot admin` 一条理由：
+    这是一次**高影响、低频率**的特权操作，而 `/api/admin/*` 的规矩是
+    「不留暂时没人调用的写接口——那等于留一个没人测过的提权入口」
+    （见 `api/routes/admin.py` 文件头）。放在服务器的 CLI 上，
+    能做这件事的人本来就已经有 root 了，审计由 shell 历史和登录记录承担。
+    要做成网页按钮的话，那是 M15-B，得先有一张管理员操作审计表。
+
+    ⚠️ **停用不等于删号。** 数据、会话、上传的文档全都留着，
+    `--undo` 一句就回来。真要删人是另一件事（级联删文档和图），不在这里。
+    """
+    import asyncio
+
+    asyncio.run(_disable(email, undo))
+
+
+async def _disable(email: str, undo: bool) -> None:
+    from sqlalchemy import select
+
+    from copilot.db.models import User
+    from copilot.db.session import SessionLocal
+
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.email == email.strip().lower()))
+        ).scalar_one_or_none()
+        if user is None:
+            typer.secho(f"库里没有这个账号：{email}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        # ⚠️ 判据是「**已经在目标状态**」。`undo` 本身就是目标值
+        # （True=启用、False=停用），所以直接和它比。
+        # 写成 `is_active == (not undo)` 是反的——那问的是「在不在相反状态」，
+        # 于是每一次真正的停用都会被当成"本来就是这样"而空转，
+        # 而命令还是打印一句绿色的成功。测试当场抓到了它
+        if user.is_active == undo:
+            state = "启用" if undo else "停用"
+            typer.secho(f"{email} 本来就是{state}状态，没有改动。", fg=typer.colors.YELLOW)
+            return
+        user.is_active = undo
+        await session.commit()
+
+    if undo:
+        typer.secho(f"{email} 已重新启用。", fg=typer.colors.GREEN)
+    else:
+        typer.secho(
+            f"{email} 已停用——他手里那张 JWT 下一次请求就会拿到 401。",
+            fg=typer.colors.GREEN,
+        )
 
 
 # ─────────────────────────────────────────────────────────

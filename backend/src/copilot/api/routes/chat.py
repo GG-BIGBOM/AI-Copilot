@@ -38,7 +38,7 @@ from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import FileResponse, StreamingResponse
 
 from copilot import obs, usage
-from copilot.api import providers, stream
+from copilot.api import progress, providers, stream
 from copilot.api.schemas import (
     BulkDeleteRequest,
     BulkDeleteResult,
@@ -66,6 +66,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
 TITLE_MAX = 40
+# 进度每句一行。写成常量而不是字面量，纯粹是为了让这个文件里
+# 一个转义字符都不出现——它已经够长了
+LINE_BREAK = chr(10)
 # 给用户看的错误话术。真正的异常连堆栈进服务端日志——错误信息会原样渲染在
 # 聊天框里，不该把内部细节（更别说密钥相关的报错正文）送到浏览器。
 GENERIC_ERROR = "生成回答时出错了，请稍后重试。"
@@ -318,6 +321,41 @@ class _AnswerWriter:
             await self.write(text, final=False)
 
 
+class _Progress:
+    """把系统自己的阶段进度编成 SSE。**只发 `copilot.api.progress` 里的常量。**
+
+    ⚠️⚠️ 它替代的是「把模型的 `reasoning_content` 逐字转发给浏览器」。
+    那条管子会把 system prompt、检索到的材料原文（含私有文档）、
+    以及材料里夹带的注入内容一起送出去——三道防幻觉闸门管的是**正文**，
+    草稿那一路它们一个字都管不到。理由写在 `api/progress.py` 文件头。
+
+    ⚠️ 用的仍然是 `reasoning` part：前端已经把它和正文分开收、
+    出正文就自动收起，那正是进度该有的行为。换 part 类型要同时改协议、
+    前端类型和历史还原三处，而这一轮要修的是**内容**不是**通道**。
+    """
+
+    def __init__(self) -> None:
+        self.id = stream.new_id("rsn")
+        self.open = False
+
+    def say(self, line: str) -> str:
+        """发一句进度。返回要 yield 的 SSE 片段（可能是两段拼在一起）。"""
+        out = ""
+        if not self.open:
+            out += stream.reasoning_start(self.id)
+            self.open = True
+        # 每句一行。前端是 `whitespace-pre-wrap`，换行原样显示
+        return out + stream.reasoning_delta(self.id, line + LINE_BREAK)
+
+    def close(self) -> str:
+        """收尾。**没开过就什么都不发**——发一个没有配套 start 的 end，
+        前端会安静地少掉这一段（同 stream.py 文件头那类故障）。"""
+        if not self.open:
+            return ""
+        self.open = False
+        return stream.reasoning_end(self.id)
+
+
 async def _chat_stream(
     user_id: uuid.UUID,
     question: str,
@@ -330,8 +368,7 @@ async def _chat_stream(
     message_id = stream.new_id("msg")
     text_id = stream.new_id("txt")
     text_open = False
-    reason_id = stream.new_id("rsn")
-    reason_open = False
+    prog = _Progress()
 
     yield stream.start(message_id)
     yield stream.start_step()
@@ -352,6 +389,12 @@ async def _chat_stream(
             # ⭐ trace id **在正文之前**发。前端点 👎 是在读到烂答案的第一秒，
             # 那时候流可能还没结束——等结束再发，那一秒就没有按钮可点
             yield stream.data_part("trace", {"id": str(draft.id)})
+
+            # ⭐ 进度从这里开始。**在 `ask_stream` 之前发**——它里面是改写 +
+            # 检索 + 重排，详解档下这一段本身就要几秒，而在此之前页面上
+            # 一个字都没有
+            yield prog.say(progress.UNDERSTANDING)
+            yield prog.say(progress.RETRIEVING)
 
             streamed = await ask_stream(
                 session,
@@ -379,6 +422,14 @@ async def _chat_stream(
             if streamed.images:
                 yield stream.data_part("images", {"images": streamed.images})
 
+            # 检索真的跑完了才说这一句，说的也只是**条数**——
+            # 一个整数不构成内容，而条数正是用户此刻想知道的
+            # （「它到底查到东西没有」）
+            if streamed.verified_id is not None:
+                yield prog.say(progress.VERIFIED)
+            else:
+                yield prog.say(progress.found(len(streamed.citations)))
+
             text_stream = streamed.stream
             citations = streamed.citations
             draft.retrieval(citations)
@@ -402,29 +453,39 @@ async def _chat_stream(
             # `ask_stream` 返回的是一个**还没开始跑**的迭代器——模型调用发生在
             # 第一次 `next()` 的时候，也就是下面这个 `async for` 里。只包那一句，
             # 量出来的是"拼了个 messages 列表花了 0.1ms"，而 TTFB 的大头一点没量到。
+            # ⚠️ **这一句要停留最久。** 详解档的 kimi-k2.6 第一个正文字要
+            # 8~60 秒，中间没有任何东西可发——前端那圈 shimmer 就是靠它在动。
+            #
+            # ⚠️ 命中标准答案那一轮**不说这句**：那条路一次模型调用都不花，
+            # 正文当场就到。说了也只是一闪而过，但进度报的是**真实阶段**，
+            # 一句不发生的阶段就是假的——这个文件的规矩不允许有例外
+            if streamed.verified_id is None:
+                yield prog.say(progress.GENERATING)
+
             with obs.span("generate", model=draft.model, mode=mode) as sp_gen:
                 try:
                     async for kind, piece in iterate_in_threadpool(text_stream):
-                        # ⭐ **推理草稿边出边发。**
-                        # 详解档走的 kimi-k2.6 是推理模型，实测第一个草稿字 1 秒就到，
-                        # 而**第一个正文字要 8~60 秒**。不发草稿的话，那几十秒前端
-                        # 一个字都没有——用户看到的就是「选了详解，它不回答」。
-                        # 草稿走 reasoning part，和正文分开：里面尽是「材料里没提到…」
-                        # 这种自我推翻的话，混进正文就成了一条会骗人的答案。
-                        if kind == "reasoning":
-                            if not reason_open:
-                                yield stream.reasoning_start(reason_id)
-                                reason_open = True
-                            yield stream.reasoning_delta(reason_id, piece)
+                        # ⭐⭐ **模型的原始推理草稿在这里被丢掉，不发给浏览器。**
+                        #
+                        # 它曾经是逐字转发的（填详解档 8~60 秒的空白），而那段
+                        # 草稿是模型在**完整上下文**里自言自语：system prompt、
+                        # 检索到的材料原文（含私有文档）、材料里夹带的注入内容，
+                        # 都在里面。三道防幻觉闸门管的是**正文**，草稿这一路
+                        # 它们一个字都管不到——等于在防线旁边开了一根管子。
+                        # 空白改由系统自己的阶段进度填（见 `api/progress.py`）。
+                        #
+                        # ⚠️ Agent 那条路一直就是这么做的
+                        # （`agent/tools.py`：`if kind != "content": continue`）。
+                        # 现在两条路一致了。
+                        if kind != "content":
                             continue
 
                         # ⭐ **第一个正文字到了才发 `text-start`。**
                         # 原来是在调模型之前就发，于是 AI SDK 立刻从 `submitted`
                         # 切到 `streaming`——前端那句「正在理解问题」消失，换成一条
                         # 空答案加一个闪烁光标。用户看到的就是「没有回答内容」。
-                        if reason_open:
-                            yield stream.reasoning_end(reason_id)
-                            reason_open = False
+                        if closing := prog.close():
+                            yield closing
                         if not text_open:
                             yield stream.text_start(text_id)
                             text_open = True
@@ -448,9 +509,8 @@ async def _chat_stream(
                     ttfb_ms=draft.summary()["ttfb_ms"],
                     answer_chars=len("".join(buf)),
                 )
-            if reason_open:
-                yield stream.reasoning_end(reason_id)
-                reason_open = False
+            if closing := prog.close():
+                yield closing
             if text_open:
                 yield stream.text_end(text_id)
                 text_open = False
@@ -488,8 +548,8 @@ async def _chat_stream(
     except Exception as exc:  # noqa: BLE001 —— 流已经开始了，异常不能再变成 HTTP 状态码
         logger.exception("聊天流出错：user=%s question=%r", user_id, question[:80])
         draft.failed(exc)
-        if reason_open:
-            yield stream.reasoning_end(reason_id)
+        if closing := prog.close():
+            yield closing
         if text_open:
             yield stream.text_end(text_id)
         yield stream.error(GENERIC_ERROR)

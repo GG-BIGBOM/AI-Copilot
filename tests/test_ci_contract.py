@@ -190,10 +190,16 @@ def test_committed_eval_results_are_lf_on_disk():
     ⚠️ 判据是**工作区的字节**，不是 `git diff`——后者会先过一遍 clean 过滤器，
     于是 CRLF 的文件和 LF 的 blob 比出来"没有差异"。那正是这个问题
     在此之前从来没被看见的原因。
+
+    ⚠️⚠️ **`rglob` 不是 `glob`。** 2026-09-03 加了 `eval/results/unreliable/`
+    这个子目录（放判分器故障那一轮的证据，见 ISSUES.md I-19），而它同样进版本库。
+    非递归的 `glob("*.json")` 当场把它漏掉了——**覆盖从 120 个掉到 119 个，
+    而这道题照样是绿的**。一道"只保护了它碰巧看得见的那些文件"的测试，
+    比没有这道题更坏：它会让人以为整个目录都被守着。
     """
     bad = [
         p.relative_to(ROOT).as_posix()
-        for p in sorted((ROOT / "eval" / "results").glob("*.json"))
+        for p in sorted((ROOT / "eval" / "results").rglob("*.json"))
         if b"\r\n" in p.read_bytes()
     ]
     assert not bad, f"这些结果文件在磁盘上是 CRLF（共 {len(bad)} 个）：{bad[:5]}"

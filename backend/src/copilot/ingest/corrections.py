@@ -228,12 +228,30 @@ def from_row(row) -> Correction:
 
 
 async def load_db_corrections(session) -> dict[str, Correction]:
-    """读数据库里的勘误，按 target_url 索引。"""
+    """读数据库里**已发布**的勘误，按 target_url 索引。
+
+    ⚠️⚠️ **这个 `where` 就是「提交 ≠ 生效」那条门禁的落点。**
+    在 2026-09-03 之前这里读的是全表——也就是说任何一个登录用户
+    `POST /api/corrections` 写进去的那一行，下一次 ingest 就会盖到语雀原文上，
+    对全站生效、无人审核。审核状态加在表上但这里忘了过滤的话，
+    整套流程等于没做，而**页面上一切正常**：审核队列照常显示 pending，
+    公共知识库照常被那条 pending 改掉。
+
+    ⚠️ 判据用 `corrections_flow.LIVE`，不写字面量 `"published"`：
+    两种纠错共用那一个常量，改口径时不该有第二处要跟着改
+    （另一处是 `verified.publish_correction`——它只在发布那一步建索引）。
+
+    ⚠️ 同一篇最多只有一条 published，由部分唯一索引
+    `ux_corrections_published_target` 保证，所以这个字典不会丢行。
+    """
     from sqlalchemy import select
 
+    from copilot import corrections_flow as flow
     from copilot.db.models import Correction as CorrectionRow
 
-    rows = (await session.execute(select(CorrectionRow))).scalars()
+    rows = (
+        await session.execute(select(CorrectionRow).where(CorrectionRow.status.in_(flow.LIVE)))
+    ).scalars()
     return {r.target_url: from_row(r) for r in rows}
 
 

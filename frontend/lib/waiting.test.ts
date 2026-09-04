@@ -28,10 +28,12 @@ test("正文来了第一个字：不再等待", () => {
   assert.equal(isWaitingForFirstOutput([USER, withText], "streaming"), false);
 });
 
-test("详解档的推理草稿算「在动」，不叠第二个转圈", () => {
-  // ReasoningPanel 自己会显示「正在思考」并把草稿流出来
-  const withReasoning = msg("assistant", [{ type: "reasoning", text: "材料里好像没提到…" }]);
-  assert.equal(isWaitingForFirstOutput([USER, withReasoning], "streaming"), false);
+test("处理进度算「在动」，不叠第二个转圈", () => {
+  // ReasoningPanel 自己会显示「正在处理」并把阶段流出来。
+  // ⚠️ 这个 part 里现在装的是后端写死的阶段常量，不再是模型的推理草稿
+  // （见 backend/src/copilot/api/progress.py）
+  const withProgress = msg("assistant", [{ type: "reasoning", text: "正在检索知识库…" }]);
+  assert.equal(isWaitingForFirstOutput([USER, withProgress], "streaming"), false);
 });
 
 test("工具步骤算「在动」，AgentTrace 会显示「正在分析」", () => {

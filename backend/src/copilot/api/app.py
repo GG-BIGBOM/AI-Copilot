@@ -9,10 +9,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from copilot import obs
 from copilot.api import logging_setup, providers, ratelimit
@@ -84,7 +86,11 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=s.cors_origin_list,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        # ⚠️ **PATCH 不能漏。** `/api/answer-corrections/{id}`（改自己的纠错、
+        # 撤回）是 PATCH，漏掉它的表现只在**本地开发**出现——线上前后端同源，
+        # 根本不发预检。也就是说这个 bug 只会在本机复现，
+        # 而本机复现的样子是浏览器一句 "CORS error"，看不出是方法没放行
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
@@ -112,10 +118,97 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", tags=["ops"])
     async def health() -> dict[str, str]:
-        """给 systemd / nginx / 上线后手动排查用。不碰数据库，永远秒回。"""
+        """给 systemd / nginx / 上线后手动排查用。不碰数据库，永远秒回。
+
+        ⚠️ **保留原样，`deploy.sh` 第 7 步等的就是它。** 下面那两条是补充，
+        不是替代——改这一条的形状会让部署脚本在「等 API 就绪」那一步卡死。
+        """
         return {"status": "ok"}
 
+    @app.get("/api/health/live", tags=["ops"])
+    async def health_live() -> dict[str, str]:
+        """存活：**只回答「这个进程还在不在」**，一个外部依赖都不碰。
+
+        ⚠️⚠️ **它必须永远秒回，哪怕数据库已经挂了。**
+        存活探针的语义是「要不要重启我」，把数据库塞进来的话，
+        一次 Postgres 抖动会让 systemd/编排层去重启一个**本身好好的** API 进程——
+        而重启解决不了数据库的问题，只会在故障期间额外制造几十秒的不可用。
+        「能不能干活」是下面那条 ready 的事。
+        """
+        return {"status": "ok"}
+
+    @app.get("/api/health/ready", tags=["ops"])
+    async def health_ready(response: Response) -> dict[str, object]:
+        """就绪：**能不能真的接一个请求**。不就绪回 503。
+
+        查两样，都是「不满足就一定答不了」的：
+
+            db         一句 `SELECT 1`。连不上就什么都干不了
+            migration  库里的 `alembic_version` 和代码里的 head 对不对得上
+
+        ⭐ **migration 那一项是这条接口存在的主要理由。** 「代码传上去了、
+        迁移没跑」是这个项目真实出过的一类事故形态（`deploy.sh` 从 2026-08-29
+        起跑不完那次，卡在第 1 步，谁都没发现）。它的表现不是 500，
+        是某一列查不到——**要等到有用户问到那条路径才暴露**。
+
+        ⚠️⚠️ **绝不查外部模型服务。** DeepSeek / Kimi / SiliconFlow 超时是
+        常态（免费额度限速），而超时的正确反应是这一轮答得慢或答不了，
+        不是「把整个站点从负载里摘掉」。把它们塞进 readiness，
+        等于把别人家的 SLA 变成自己的可用性。这一条比上面两条更重要，
+        因为它是最容易被"顺手加上"的那一项。
+
+        ⚠️ 任何一项查不出来时**说 unknown，不说 fail**：探测本身出错
+        （比如 alembic 目录没打包进去）不等于服务不可用，
+        把它算成 fail 会造成一次没有故障的故障。
+        """
+        checks: dict[str, object] = {}
+        ok = True
+
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            checks["db"] = "ok"
+        except Exception as e:  # noqa: BLE001 - 探针不该把异常抛成 500
+            logger.warning("readiness: 数据库不可用：%s", e)
+            checks["db"] = "fail"
+            ok = False
+
+        checks["migration"] = "skipped"
+        if checks["db"] == "ok":
+            try:
+                current, head = await _migration_state()
+                checks["migration"] = "ok" if current == head else "behind"
+                checks["alembic"] = {"current": current, "head": head}
+                if current != head:
+                    ok = False
+            except Exception as e:  # noqa: BLE001 - 见 docstring 最后一条
+                logger.warning("readiness: 查不到迁移版本：%s", e)
+                checks["migration"] = "unknown"
+
+        if not ok:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "ok" if ok else "not_ready", "checks": checks}
+
     return app
+
+
+async def _migration_state() -> tuple[str | None, str | None]:
+    """(库里的版本, 代码里的 head)。
+
+    ⚠️ head 从 `alembic/` 目录读，所以这一步依赖那个目录被部署上去——
+    `deploy.sh` 第 3 步的 tar 里有它。读不到就让调用方记成 `unknown`，
+    不要记成 fail：一个没打包全的部署包不等于服务不可用。
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    async with engine.connect() as conn:
+        current = await conn.scalar(text("SELECT version_num FROM alembic_version LIMIT 1"))
+
+    root = Path(__file__).resolve().parents[3]  # …/backend
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    return current, ScriptDirectory.from_config(cfg).get_current_head()
 
 
 # uvicorn 的 --reload 和 systemd 都按 "copilot.api.app:app" 找它

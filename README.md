@@ -305,5 +305,6 @@ bash deploy/deploy.sh ai              # 检索 / Prompt / Agent / 路由改动
 | [DECISIONS.md](DECISIONS.md) | 为什么不用 Docker / Redis / Graph RAG…（ADR） |
 | [samples/](samples/) | 20 篇脱敏样本语料，`docker compose up` 会自动灌进去 |
 | [ISSUES.md](ISSUES.md) | **知道了但这一轮没修**的东西。每条都写"什么条件下必须修" |
+| [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) | **哪些数据会离开这台机器**、发给哪个 provider、日志和 span 里留什么、删除后的生命周期 |
 | [plan.md](plan.md) | 实施计划。**只留还没做的事**，看当前状态请看最上面的 NOW |
 | [ARCHIVE.md](ARCHIVE.md) | 历史台账：M0–M20 的逐项任务、排查过程和证据 |

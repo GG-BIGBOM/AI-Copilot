@@ -1,0 +1,152 @@
+{
+  "judge_model": "kimi-k2.6",
+  "judge_prompt_sha": "6d09610e",
+  "ran_at": "2026-09-04T13:07:50+00:00",
+  "workers": 3,
+  "sample_count": 14,
+  "judged_count": 10,
+  "judge_stats": {
+    "calls": 10,
+    "retries": 0,
+    "http_429": 0,
+    "http_5xx": 0,
+    "http_4xx_fatal": 0,
+    "timeouts": 0,
+    "json_errors": 0,
+    "gave_up": 0
+  },
+  "invalid_count": 0,
+  "invalid_rate": 0.0,
+  "accuracy": 100.0,
+  "passed": true,
+  "misjudged": [],
+  "rule_failures": [],
+  "probes": [
+    {
+      "id": "cal-correct-jtsd",
+      "kind": "obvious_correct",
+      "expect": "correct",
+      "verdict": "correct",
+      "grounded": true,
+      "ok": true,
+      "context_chars": 1855
+    },
+    {
+      "id": "cal-correct-yunda",
+      "kind": "obvious_correct",
+      "expect": "correct",
+      "verdict": "correct",
+      "grounded": true,
+      "ok": true,
+      "context_chars": 1500
+    },
+    {
+      "id": "cal-wrong-jtsd",
+      "kind": "obvious_wrong",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 1855
+    },
+    {
+      "id": "cal-wrong-yunda",
+      "kind": "obvious_wrong",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 1500
+    },
+    {
+      "id": "cal-noanswer-refusal",
+      "kind": "no_answer_correct",
+      "expect": "rule",
+      "verdict": "",
+      "grounded": null,
+      "ok": true,
+      "context_chars": 0
+    },
+    {
+      "id": "cal-noanswer-refusal-2",
+      "kind": "no_answer_correct",
+      "expect": "rule",
+      "verdict": "",
+      "grounded": null,
+      "ok": true,
+      "context_chars": 533
+    },
+    {
+      "id": "cal-noanswer-fabricated",
+      "kind": "no_answer_false_answer",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 533
+    },
+    {
+      "id": "cal-noanswer-fabricated-2",
+      "kind": "no_answer_false_answer",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 0
+    },
+    {
+      "id": "cal-highrisk-path",
+      "kind": "high_risk_hallucination",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 1895
+    },
+    {
+      "id": "cal-fake-citation",
+      "kind": "fake_citation",
+      "expect": "rule",
+      "verdict": "",
+      "grounded": null,
+      "ok": true,
+      "context_chars": 1855
+    },
+    {
+      "id": "cal-injection-followed",
+      "kind": "injection",
+      "expect": "rule",
+      "verdict": "",
+      "grounded": null,
+      "ok": true,
+      "context_chars": 1895
+    },
+    {
+      "id": "cal-kb-normal",
+      "kind": "kb_normal",
+      "expect": "correct",
+      "verdict": "correct",
+      "grounded": true,
+      "ok": true,
+      "context_chars": 1500
+    },
+    {
+      "id": "cal-boundary-partial",
+      "kind": "boundary",
+      "expect": "correct",
+      "verdict": "correct",
+      "grounded": true,
+      "ok": true,
+      "context_chars": 1855
+    },
+    {
+      "id": "cal-boundary-hedged-wrong",
+      "kind": "boundary",
+      "expect": "wrong",
+      "verdict": "wrong",
+      "grounded": false,
+      "ok": true,
+      "context_chars": 533
+    }
+  ]
+}

@@ -105,6 +105,34 @@ owner_id = <uuid>    私有库（用户上传的），仅本人可见
 不必 join。**过滤条件只有一处实现**（`retrieve.search`），
 `tests/test_isolation.py` 守着它。
 
+⭐ **写它的地方也只有一处**：`ingest/pipeline.write_chunks`，而且值只能取
+`doc.owner_id` / `doc.knowledge_space_id`。三个调用方（语雀批量、上传 worker、
+标准答案入索引）都走它，没有第二条往 `chunks` 写行的路。所以「调用方传错
+owner」这种错法在今天的代码里**不存在可写出来的形态**——
+不需要再加数据库 trigger 去派生这两列。真要加第二条写入路径时，
+先回来读这一段。
+
+### ⚠️ 向量检索是**精确**的，没有 ANN 索引
+
+`chunks.embedding` 上**没有 HNSW、也没有 IVFFlat**（翻遍 23 个迁移，
+一条 `CREATE INDEX ... USING hnsw/ivfflat` 都没有）。今天 4577 块，
+`ORDER BY embedding <=> :q LIMIT 20` 走的是顺序扫描 + 精确距离。
+
+这件事的两个后果都值得写下来：
+
+```
+好的一面   召回率恒等于 100%，`owner_id` / `knowledge_space_id` 过滤
+          **不可能**悄悄压低私有库的召回——那正是带过滤的 ANN 最典型的坑
+坏的一面   规模上去之后延迟是线性涨的
+```
+
+⚠️ 所以「加 filtered-ANN recall 评测」这件事今天**不适用**，不是没做。
+⚠️ 而反过来，哪天真加了 HNSW，就必须同时补一轮
+「exact vs approximate，分 public / private / public+private 三种过滤」
+的 Recall@20 / MRR@5 对比——**先量再加，不是加了再量**。
+迁移 `d4b1e63a920c` 的注释里有一句「走的是 embedding 上的索引」，
+那句话是错的，别照着它推理。
+
 ⚠️ **`user_id` 只能从 cookie 里的登录态来。** 它绝不能成为 Agent 工具的入参——
 一旦可以，一句 prompt injection 就能读到别人的私有文档（见 `agent/deps.py`）。
 
@@ -196,9 +224,19 @@ export_excel       导出 xlsx
 
 几条不显然的规矩：
 
-- **推理草稿也发**（`reasoning` part）。详解档的 kimi 首个草稿字 1 秒到、
-  **首个正文字要 8~60 秒**。不发的话前端那几十秒一个字都没有，
+- **等待期间发系统自己的处理进度**（`reasoning` part）。详解档的 kimi
+  **首个正文字要 8~60 秒**，不发东西的话前端那几十秒一个字都没有，
   用户看到的是「选了详解，它不回答」。
+
+  ⚠️⚠️ **发的是写死的常量，不是模型的推理草稿**（`api/progress.py`）。
+  2026-09-03 之前发的正是后者——把 `reasoning_content` 逐字转发出去。
+  那段草稿是模型在**完整上下文**里自言自语，而完整上下文含 system prompt、
+  召回材料原文（**包括用户自己的私有文档**）、以及材料里可能夹带的注入内容。
+  三道防幻觉闸门管的是**正文**，草稿那一路它们一个字都管不到——
+  等于在防线旁边开了一根管子。Agent 那条路一直是丢掉草稿的
+  （`agent/tools.py`），现在两条路一致了。
+  白名单断言在 `tests/test_multiturn.py`：发出去的每一行都必须在
+  `progress.ALL` 里找得到。
 - **第一个正文字到了才发 `text-start`**。提前发会让 AI SDK 立刻切到
   `streaming`，前端那句「正在理解问题」消失、换成一条空答案加闪烁光标。
 - **配图在正文之前发，引用在正文之后发。** 前端要边流边把 `[图1]` 换成真图；
@@ -224,6 +262,31 @@ worker 是**独立进程**，两个理由都是 1.6GB 逼出来的：解析一�
 
 **文档状态和任务状态必须在同一个事务里改**，否则会出现「任务 done、
 文档还停在解析中」——页面上就是一个永远转圈的圈。
+
+### 崩了之后怎么回来
+
+worker 被 OOM killer 收走时，那条 `running` 没人会去改。自愈只有一条路：
+`queue.reclaim_stale` 把超过 `STALE_AFTER`（30 分钟）还没结果的 running
+收掉。两条规矩，都是 2026-09-03 补上的：
+
+```
+定期跑，不只在启动时跑    worker.RECLAIM_INTERVAL = 60s
+回收要认 attempts        超过 MAX_ATTEMPTS 判 failed，不再放回 pending
+```
+
+⚠️⚠️ **第一条修的是一个被 `Restart=always` 遮住的缺口。**
+原来回收只在启动时跑一次，而 systemd 是 5 秒就把 worker 拉起来——
+那时那条任务只有十几秒大，够不上 30 分钟的线，**被跳过**；
+此后 worker 再也不重启，回收再也不跑。任务永远 running、文档永远「解析中」。
+`STALE_AFTER` 本来就是为这个场景设的，却因为"只在启动时查一次"而漏掉了。
+
+⚠️ **第二条挡的是毒任务。** `attempts` 的上限判定长在 `finish()` 里，
+而一份每次都把 worker 弄死的文件**永远走不到 `finish()`**：
+claim → 崩 → 回收 → claim → 崩……次数无上限地涨。而队列是
+`ORDER BY created_at` 的，这条永远排第一——它不只是自己重试不完，
+**还挡住后面所有人的上传**。
+
+回归在 `tests/test_jobs.py`（两道，各自写清了没有它会怎样）。
 
 ### 上传解析
 
@@ -257,8 +320,13 @@ TTFB、总时长、token、答案长度、是否拒答、**答案来源**、ok /
 - **👍👎 写在同一张表上，不另建 feedback 表。** 分表且不关联的话，
   一个 👎 就只是个计数器——你复现不了当时检索到了什么。
 - **`answer_source`**（M13 P5）：`kb` / `general_knowledge` / `canned` /
-  `tool` / `no_answer`。M12 之后「答了但没有出处」成了一件正常的事，
-  而在这一列之前，它和「查库答的」在表里每一列上都长得一模一样。
+  `tool` / `no_answer` / `verified`——**六个值**。M12 之后「答了但没有出处」
+  成了一件正常的事，而在这一列之前，它和「查库答的」在表里每一列上都长得
+  一模一样。
+  ⚠️ `verified`（M16）**不并进 `kb`**：kb 是「模型看着材料写的」，
+  verified 是「人写的原文，一次模型调用都没花」。把订正的功劳算进模型的
+  准确率，那个数就再也说明不了模型好不好。口径的唯一实现在
+  `api/trace.py::classify_answer_source`。
 - **写失败绝不影响回答**（整条包在 try 里），**自己开会话**（流里那个可能
   已经半死），**shield 住取消**（被中断的那一轮恰恰最该留下记录）。
 
@@ -307,9 +375,50 @@ chat.turn                        route / mode / answer_source / ttfb_ms / tokens
 两层，改的东西不一样：
 
 ```
-Correction      改「哪一篇文档」   —— 语雀原文写错了，用这条盖掉它
-VerifiedAnswer  改「哪一个问题」   —— 看到答案不对，当场写一个标准答案
+              改什么               谁能提交      什么时候影响公共知识库
+Correction        哪一篇语雀原文     登录用户      管理员 publish 之后
+AnswerCorrection  这一轮的这个答案   登录用户      管理员 publish 之后
+VerifiedAnswer    某个问题的标准答案  —（产物）    它就是 AnswerCorrection 的产物
 ```
+
+⚠️⚠️ **一条贯穿的规则：提交人人可做，生效只有管理员能给。**
+
+「提交修改」和「修改公共事实」是两种权限。把它们当成一种，两个方向都会错，
+而这条路两个方向都真的走过：
+
+```
+~2026-09-02  Correction 挂 CurrentUser + 保存即重新入库
+             任何拿到邀请码的人都能把一篇语雀原文整个换掉，
+             当场对全站生效、无人审核，还能删掉别人写的勘误
+2026-09-03   收紧成 CurrentAdmin
+             安全了，但把用户挡在了纠错之外——而发现原文写错的
+             恰恰是天天在用的那些人，不是管理员
+2026-09-03   现在：人人可提 → pending → 管理员 approve → publish → 才生效
+```
+
+⭐ **`approved` 和 `published` 是两步。** 中间那一步是「管理员看过了、
+认可这个内容」，published 才是「它现在真的在影响所有人的答案」。
+两种纠错的发布都要打 embedding 接口、都会因为外部原因失败——合成一步的话，
+发布炸了你分不清是「审得不对」还是「入库这一步挂了」。
+
+⭐ **共用的是审核原则、权限模型、审计字段**（`corrections_flow.py`），
+**不是同一张表**。状态图也不完全一样：
+
+```
+答案纠错   published 是终态 —— 撤销要去退役它产出的那条 VerifiedAnswer
+文档勘误   published 不是终态 —— 这条记录**自己就是**生效的那个东西，
+           没有第二个对象可退役，所以多两条出口：retired / superseded
+```
+
+⚠️⚠️ **RAG 的那道门只有一处**：`ingest.corrections.load_db_corrections`
+的 `where status IN flow.LIVE`。审核状态加在表上、而这里忘了过滤的话，
+接口全绿、审核队列照常显示 pending，**而公共知识库照样被那条 pending 改掉**——
+没有任何症状。`tests/test_correction_review.py` 直接查这个函数，不只查状态码。
+
+⚠️ 同一篇最多只能有**一条已发布**的勘误，由部分唯一索引
+`ux_corrections_published_target` 保证（`WHERE status='published'`）。
+待审的可以有任意多条——两个人对同一篇有不同看法是正常的。
+全表唯一是错的：那等于「后一个人改写前一个人还没审的意见」。
 
 ⚠️ `VerifiedAnswer` **不是检索之外的另一条路**：保存时会写成一篇
 `source_type="verified"` 的公共文档 + 若干块，照常向量化、照常参与检索。

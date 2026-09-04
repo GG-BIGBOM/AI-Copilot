@@ -393,6 +393,16 @@ class Job(Base):
     status: Mapped[str] = mapped_column(
         String(16), default="pending", index=True
     )  # pending|running|done|failed
+    # ⭐ **一次 attempt = 一次真正被 `claim_next` 领走并开始执行。**
+    #
+    # 全项目只有 `queue.claim_next` 一处 `+= 1`（`reclaim_stale` 只**读**它、
+    # `finish` 也只读）。所以一次 worker 崩溃**只记一次**：
+    #
+    #     claim(attempts 1) → 崩 → 回收成 pending（不加）→ claim(attempts 2)
+    #
+    # ⚠️ 回收那一步不能顺手加：加了的话一次崩溃记两次，`MAX_ATTEMPTS=3`
+    # 实际只允许一次半重试，而"重试三次"这句话在文档和错误话术里到处都是。
+    # `tests/test_jobs.py::test_one_crash_counts_as_exactly_one_attempt` 钉着它
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -674,24 +684,75 @@ class Correction(Base):
     __tablename__ = "corrections"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    # 作者删号了也要留着这条勘误——知识还在生效，不能因为人走了就悄悄失效
+    # 提交人。删号了也要留着这条勘误——知识还在生效，不能因为人走了就悄悄失效。
+    # ⚠️ 名字保持 `author_id` 不改：`corrections-export`、迁移、既有测试都认它，
+    # 而改名换来的只是和 `answer_corrections.submitted_by` 长得一样
     author_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # 被勘误的那篇语雀文档，也是和原文对齐的唯一键。
-    # unique：两条勘误指向同一篇是配置错误，让数据库来挡，别等 ingest 时才抛
-    target_url: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
+    # 被勘误的那篇语雀文档，也是和原文对齐的键。
+    #
+    # ⚠️⚠️ **它不再是全表唯一的**（2026-09-03）。唯一性收窄成
+    # 「同一篇最多只能有**一条已发布**的勘误」，见下面的 `__table_args__`。
+    # 全表唯一在提交队列下是错的：两个用户先后给同一篇提勘误是完全正常的事，
+    # 而全表唯一会让第二个人直接 500——或者更糟，逼着接口去**改写**别人那条。
+    target_url: Mapped[str] = mapped_column(String(1024), index=True)
     title: Mapped[str] = mapped_column(String(512), default="")
     # 为什么改。**必填**，半年后你会需要它
     reason: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
     # 写这条勘误时语雀那篇的 content_updated_at。语雀后来又更新了就算「过期」
     based_on: Mapped[str] = mapped_column(String(64), default="")
+    # ⚠️ **`retired` 和下面的 `status` 是两件事，别看名字就当成一回事。**
+    #     retired=True   这条勘误说的是「语雀那篇整个作废，从索引里删掉」
+    #                    —— 它是**内容**语义，描述目标文档
+    #     status         这条勘误自己走到哪一步了 —— 它是**流程**语义
+    # 一条 `retired=True` 的勘误照样要过审才生效；一条 `status="retired"` 的
+    # 勘误则是被管理员撤销了，不管它 `retired` 是真是假
     retired: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ===== 审核（2026-09-03）=====
+    #
+    # ⭐⭐ 在此之前这张表**没有任何流程状态**：写进来就是生效的，
+    # `load_db_corrections` 无条件读全表。也就是说提交 = 覆盖公共知识库。
+    # 字段口径和 `AnswerCorrection` 对齐，状态图见 `corrections_flow.DOC_STATE_MACHINE`
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending", index=True
+    )
+    # 乐观锁，同 `AnswerCorrection.version`：两个管理员同时点「通过」和「拒绝」时，
+    # 后到的那个必须失败，而不是默默覆盖
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 什么时候真正开始影响公共知识库。撤销之后**不清空**——
+    # 「它曾经生效过、从哪天到哪天」是撤销这件事本身最该留下的东西
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # ⭐⭐ **同一篇文档最多只能有一条已发布的勘误。**
+        #
+        # 这是 `apply_corrections` 真正依赖的那条不变量：它按 target_url 建字典，
+        # 两条都生效的话行为取决于字典构造顺序——而那种错的样子是
+        # 「同一个问题时好时坏」，最难查。文件那一路的 `load_corrections`
+        # 撞到重复直接抛异常，就是同一条规矩。
+        #
+        # ⚠️ 用**部分**唯一索引而不是全表唯一：pending / rejected / retired
+        # 的行可以有任意多条（不同的人、不同的时间给同一篇提过），
+        # 它们一个字都不进 RAG，重复也无所谓。
+        Index(
+            "ux_corrections_published_target",
+            "target_url",
+            unique=True,
+            postgresql_where=text("status = 'published'"),
+        ),
     )
 
 

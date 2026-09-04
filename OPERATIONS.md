@@ -94,6 +94,19 @@ systemctl restart copilot-api          # 走优雅停止
 
 ## 三、备份与恢复
 
+⚠️ **一次备份不是一个原子快照。** `backup.sh` 是先 `pg_dump`、再打包
+`uploads` + `private-images`，两步之间有几秒到几十秒。方向是这样的：
+
+```
+这期间新传的图    在 tar 里、不在 dump 里   → 恢复后是个没人引用的孤儿文件，无害
+这期间删掉的图    在 dump 里、不在 tar 里   → 恢复后库里的 image id 指不到文件
+```
+
+后者才是问题，而它今天靠"删除很少发生"活着。要根治的形态是给一次备份一个
+`backup_id`（时间戳 + `git_commit`）并落一份 asset manifest，恢复时先对一遍。
+**还没做**，记在这里免得下次恢复时才发现。
+（`data/images` 那份是每周快照，公共图丢了可以从语雀重下，不在此列。）
+
 ```bash
 # 手工来一次
 systemctl start copilot-backup.service
@@ -142,6 +155,62 @@ pgvector 扩展在不在、向量列维度对不对、恢复出来的数据能�
 2026-08-20 在**生产备份**上真跑通过一次（3 用户 / 750 文档 / 4572 块 / 向量检索）。
 
 ---
+
+
+## Selective Hybrid 上线后看什么
+
+⭐⭐ **不需要新增任何字段。** 「这一轮走没走词法」不用记——
+`query_shape.is_identifier_query()` 是**纯函数、确定性**的，而
+`request_trace.question` 存到 2000 字（identifier 型查询实测最长 32 字，
+截断碰不到它）。所以触发率是从存量数据**算出来**的，不是记出来的。
+
+⚠️ 这一条值得记住：**能推导出来的东西不要建列。** 多一列就多一处
+「写的时候忘了填」和一次迁移；而这一列的值从第一天起就已经在库里了。
+
+```sql
+-- 触发率：这 30 天有多少轮被分类器判成 identifier 型
+-- ⚠️ 分类要在 Python 里做（正则在 query_shape 里），SQL 只负责把行捞出来
+select question, answer_source, no_answer, chunk_count, top_score,
+       feedback, ttfb_ms, ok
+from request_trace
+where created_at > now() - interval '30 days' and question is not null;
+```
+
+然后在本机跑 `query_shape.is_identifier_query(question)` 分组。
+
+⚠️ **别拿开发库的数字当基线**：那里面混着评测跑出来的 trace
+（`keyword.yaml` 45 题里 15 题是裸粘贴），实测触发率 31.0%——
+生产上真实用户的比例会低得多。**第一周的生产数字才是基线。**
+
+| 看什么 | 从哪来 | 关心什么 |
+|---|---|---|
+| selective 触发率 | 上面那段 | 突然飙高 = 分类器把正常问句judge成了 identifier |
+| identifier 轮次的结果 | `no_answer` / `answer_source` | 拒答率是否比 dense 时期高 |
+| 差评率 | `feedback = -1` | ⭐ 分 identifier / 非 identifier 两组看，别看总体 |
+| 拒答率 | `no_answer` | 整体不该上升（A/B 里两臂都是 0 false answer） |
+| 检索延迟 | `ttfb_ms` | identifier 那一组多一次 SQL，理论上略高 |
+| 词法降级 | journal 里的 warning | 没装 jieba / `content_tsv` 没回填时**静默退回纯向量** |
+| 异常低分答案 | `top_score` 低而 `no_answer=false` | 材料很弱却答了，正是 ADR-16 那条路 |
+
+⚠️ **词法那一路失效是静默的**（见 `config.py` 的 `hybrid_enabled` 注释）：
+服务器没装 `jieba` 或没跑 `copilot backfill-tsv` 时，它安安静静退回纯向量。
+表现是「开了开关但 identifier 还是搜不到」，而不是报错。
+上线后先确认一次：
+
+```bash
+sudo -u postgres psql -d kb -c "select count(*) from chunks where content_tsv is null;"
+# 期望 0；不是 0 就先跑 .venv/bin/copilot backfill-tsv
+journalctl -u copilot-api --since today | grep -i "jieba\|lexical" | head
+```
+
+### 两道留观的题（不修）
+
+`st-shipped-editable` 和 `probe-vague-stopzone` 在 A/B 里各翻转过一次，
+**没有形成稳定模式**（`plat-merge-order-limit` 在 v1 翻转、v2 没有，
+已确认是判分器 `temperature=1` 的抖动）。
+⚠️ **不要为这两道调 prompt 或检索**——n=1 的翻转改不出信息量。
+真实流量里出现重复的 failure pattern 再处理。
+
 
 ## 四、日志与追踪
 
@@ -388,6 +457,36 @@ ssh ... 'systemctl stop ssh-rollback.timer'
 **改配置不会踢掉当前连接**，`reload` 也未必存在 —— 但正因为如此，
 「当前连接还活着」完全不能证明新配置是对的。**必须开新连接验。**
 
+### CSRF：当前结论（2026-09-03 逐个接口核过）
+
+**基于当前同站部署、`SameSite=Lax`、状态修改接口的形态和 CORS 配置，
+没有发现可利用的典型 CSRF 路径。**
+
+⚠️ 这句话是有条件的，条件本身要能核查，所以钉在
+`tests/test_csrf_surface.py` 里（26 条）：
+
+```
+22 个改状态的接口，逐个查 requestBody 的 content-type
+  18 个只收 application/json   → 跨站 <form> 根本构造不出这个请求
+   2 个无 body（logout / DELETE）→ DELETE 表单发不出；logout 影响只是被登出
+   2 个收 multipart（两个上传）  → 清单钉死，加第三个必须先改那道题
+0 个 GET 带副作用              → Lax 唯一会带 cookie 的场景（顶级导航）改不了东西
+cookie: HttpOnly + SameSite=Lax + Secure（线上）+ path=/ + 无 domain=
+CORS: 逐个列来源，不用星号（与 allow_credentials=true 互斥）
+```
+
+⚠️ **仍然存在、只是今天不可利用的面**（别当成已经解决）：
+
+- `SameSite` 是**浏览器**在执行。不实现它的老浏览器会照发 cookie
+- Lax 认的是**可注册域**：`*.liushun666.cn` 上任何页面对本站都算"同站"。
+  今天那台机器上只有这一个应用，但这是**配置**决定的，不是代码
+- `extract_token` 还认 `Authorization: Bearer`。这**不是** CSRF 面：
+  跨站脚本设不了自定义头（会触发预检，被来源白名单挡掉）
+
+⭐ **没有引入 CSRF token。** 在同站部署 + 全 JSON 接口 + Lax 的组合下，
+它挡不住任何一条上面挡不住的路径，代价却是每个写接口都要多一次取 token 的
+往返和一处会忘记加的地方。哪天前后端分域部署，这个结论要重算。
+
 ### 还没做 / 需要你在控制台确认的
 
 - ⚠️ **阿里云安全组是独立于 ufw 的另一层。** ufw 是主机内的，安全组在网络边界。
@@ -399,6 +498,19 @@ ssh ... 'systemctl stop ssh-rollback.timer'
 ---
 
 ## 九、事故检查表
+
+### 先看两个探针
+
+```bash
+curl -s localhost:8000/api/health/live    # 进程还在不在。不碰数据库，永远秒回
+curl -s localhost:8000/api/health/ready   # 能不能干活：库 + 迁移版本。不就绪回 503
+```
+
+`ready` 回 `{"checks":{"migration":"behind", ...}}` 说明**代码上去了、迁移没跑**——
+那种故障不报 500，要等到有用户问到那条路径才暴露（`deploy.sh` 2026-08-29
+那次卡在第 1 步，四天没人发现，就是这个形态）。
+⚠️ 两个探针都**不查模型服务**：DeepSeek / Kimi 超时是常态，
+把它们塞进 readiness 等于把别人家的 SLA 变成自己的可用性。
 
 ### 站打不开
 
@@ -421,6 +533,21 @@ journalctl -u copilot-worker -n 100
 worker 挂了或者被一份文件拖住。`zipguard` + `PARSER_TIMEOUT` 之后
 后者应该很少见了；真发生就 `systemctl restart copilot-worker`
 （stale 回收会把那条任务放回队列）。
+
+⭐ **2026-09-03 起不用手动重启也能自愈**：回收改成每 60 秒在循环里跑一次
+（`worker.RECLAIM_INTERVAL`），超过 30 分钟没结果的 running 会被收回。
+在此之前回收**只在 worker 启动时跑一次**，而 systemd 是 5 秒就把它拉起来——
+那时任务只有十几秒大、够不上 30 分钟的线，被跳过；此后再也不会被检查。
+⚠️ 所以这一类的症状曾经是「重启 worker 也没用，因为它已经重启过了」。
+
+一份反复弄死 worker 的文件现在会在第 3 次之后判 `failed`，文档同步变成
+「解析失败」并给出一句人话。⚠️ 它同时也在**挡队列**——队列按
+`created_at` 排，那一条永远排第一。看到「所有上传都卡住」时先查：
+
+```sql
+select id, type, status, attempts, started_at, left(error, 80)
+from jobs where status <> 'done' order by created_at limit 10;
+```
 
 ### 答案突然全是「知识库暂无此内容」
 

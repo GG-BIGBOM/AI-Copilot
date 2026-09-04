@@ -102,7 +102,9 @@ class ChatLLM:
         with self._client.stream("POST", "/chat/completions", json=payload) as resp:
             if resp.status_code != 200:
                 resp.read()
-                raise ProviderError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+                raise ProviderError(
+                    f"HTTP {resp.status_code}: {resp.text[:300]}", status=resp.status_code
+                )
             for line in resp.iter_lines():
                 if not line or not line.startswith("data: "):
                     continue

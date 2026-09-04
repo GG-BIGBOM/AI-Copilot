@@ -238,6 +238,30 @@ class Settings(BaseSettings):
     # 整句都是常用词时的保底留词数。砍成空查询等于这一路直接消失
     hybrid_min_terms: int = 4
 
+    # ===== 按查询形状开词法那一路（Selective Hybrid）=====
+    #
+    # ⭐ **它要的是 hybrid 的收益、不要 hybrid 的伤害面。** 两者在
+    # `eval/keyword.yaml` 上分得很干净：
+    #
+    #     完整问句 30 题   dense 29/30 → hybrid 29/30    收益 0
+    #     裸粘贴   15 条   dense  6/15 → hybrid 15/15    收益全在这里
+    #
+    # 而 2026-08-29 那轮付费评测里，被 hybrid 顶出幻觉的两道
+    # （`none-sap-connector`、`ui-dashboard`）**都是完整问句**。
+    # 也就是说：伤害面 100% 落在没有收益的那一半上。
+    #
+    # 所以这个开关的语义是「只在裸粘贴/编码型查询上开词法」，判据在
+    # `copilot.query_shape.is_identifier_query`——**纯规则，不调模型**。
+    #
+    # ⚠️⚠️ **默认关，而且这一轮不打开。** 同 `hybrid_enabled` / `session_facts_enabled`
+    # 那条老规矩：改了会让答案变、但绝不会报错的东西，一律先做成开关、
+    # 默认关，等 A/B 数字出来再谈开不开。要跑的那几轮命令写在
+    # EVALUATION.md「Selective Hybrid 的 A/B 计划」一节。
+    #
+    # ⚠️ `hybrid_enabled=true` 优先：那是"一律开"，这一条是"按形状开"。
+    # 两个都开时以前者为准，免得出现第三种谁也说不清的组合。
+    selective_hybrid_enabled: bool = False
+
     # ===== 会话级已确认事实（W2.2）=====
     # ⚠️ **默认关，理由是这个项目的老规矩**：它改的是送进模型的 system prompt，
     # 也就是「会让答案变、但绝不会报错」的那一类——这一类一律先做成开关、

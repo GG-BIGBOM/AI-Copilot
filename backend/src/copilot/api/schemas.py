@@ -256,13 +256,40 @@ class CorrectionIn(BaseModel):
         return v
 
 
+class CorrectionPatch(BaseModel):
+    """改自己的 pending 勘误，或者撤回它。
+
+    和 `answer_corrections.CorrectionPatch` **同一个形状**，是刻意的：
+    两种纠错的用户侧生命周期一模一样（编辑 / 撤回，都只在 pending），
+    形状不同只会让前端写两套。
+    """
+
+    title: str | None = Field(default=None, max_length=512)
+    reason: str | None = Field(default=None, max_length=500)
+    body: str | None = None
+    action: Literal["withdraw"] | None = None
+    # 乐观锁：手上这份是第几版。管理员同时在审的话，后到的那个必须失败
+    version: int | None = None
+
+
 class CorrectionOut(BaseModel):
     id: uuid.UUID
     target_url: str
     title: str
     reason: str
     body: str
+    # ⚠️ 内容语义：这条勘误说的是「语雀那篇整个作废」。
+    # **和下面的 `status` 不是一回事**，见 db/models.Correction 的注释
     retired: bool
+    # ===== 流程与审计（2026-09-03）=====
+    # pending | approved | rejected | withdrawn | published | retired | superseded
+    status: str
+    version: int
+    author_id: uuid.UUID | None
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
+    review_note: str | None
+    published_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -270,11 +297,15 @@ class CorrectionOut(BaseModel):
 
 
 class CorrectionSaved(BaseModel):
-    """保存的回执。
+    """提交的回执。
 
-    `applied` 是关键字段：勘误落库了不等于生效了（找不到对应的语雀原文、
-    或者重新入库挂了）。不把这个区分告诉前端的话，用户改完看到"已保存"，
-    再问同一个问题却发现答案没变——他只会认为这个功能是假的。
+    `applied` 是关键字段：**提交不等于生效**。2026-09-03 之前它的含义是
+    「重新入库成功没有」（那时提交即生效）；现在提交一律落 pending，
+    所以这里恒为 `false`，`note` 会说清楚还要过审。
+
+    ⚠️ 字段没删是刻意的：管理员发布那一步用的是同一个回执形状
+    （`PublishDocOut`），而"生效没有"在那里仍然是真问题——
+    找不到对应的语雀原文、或者重新入库挂了，都会让发布只成功一半。
     """
 
     correction: CorrectionOut

@@ -9,9 +9,10 @@
 > | 为什么**不那么做**（不用 Docker / Redis / ES…） | [DECISIONS.md](DECISIONS.md) |
 > | 指标口径、A/B 规则、baseline | [EVALUATION.md](EVALUATION.md) |
 > | 部署、备份、日志、事故处置 | [OPERATIONS.md](OPERATIONS.md) |
+> | **哪些数据会离开这台机器**、发给谁、日志里留什么 | [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) |
 > | **知道了但这一轮没修**的东西 | [ISSUES.md](ISSUES.md) |
 >
-> 校对基准：`main` @ `3851f73`（2026-09-03）。清单里的每一项都能在代码里
+> 校对基准：`main` @ `aa0505c` + 本轮加固（2026-09-03）。清单里的每一项都能在代码里
 > 指到具体文件，改代码时**这份文件要跟着改**——一份对不上代码的功能清单，
 > 比没有更坏：它会让人以为某个开关是开着的。
 
@@ -52,7 +53,7 @@
 | 配图渲染 | ✅ | `retrieve.build_context` + 前端 `image-rendering.ts` | 原文有配图的步骤，`[图1]` 边流边换成真图 |
 | 两档回答 | ✅ | `mode: fast \| deep` | 简答走 DeepSeek，详解走 Kimi。**防幻觉铁律两档一字不差** |
 | 流式输出 | ✅ | `api/stream.py` | 自编 SSE，协议是 AI SDK data stream |
-| 推理草稿透传 | ✅ | `reasoning` part | 详解档首个正文字要 8–60s，不发草稿前端就是几十秒空白 |
+| 等待期处理进度 | ✅ | `api/progress.py` + `reasoning` part | 详解档首个正文字要 8–60s。⚠️ 发的是**写死的阶段常量**，不是模型草稿（2026-09-03 收紧，见 [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) 3.5） |
 | 边流边落库 | ✅ | `routes/chat.py` | 用户点停止 / 刷新，半截答案还在 |
 | 停止生成 | ✅ | 前端 `composer.tsx` | 中断的那一轮照样进台账（`shield` 住取消） |
 | 多轮改写 | ✅ | `qa.py` | 把「那不良品呢」补全成独立问题，**只拿它去检索** |
@@ -82,6 +83,8 @@
 | 向量召回 | ✅ | `RETRIEVE_TOP_K=20`，bge-m3 / 1024 维 | Postgres + pgvector |
 | 重排 | ✅ | `RERANK_TOP_K=5`，阈值 `0.005` | bge-reranker-v2-m3。阈值只滤明显垃圾 |
 | 词法召回 + RRF 融合 | 🔸 | `HYBRID_ENABLED=false` | jieba → tsvector + GIN → `ts_rank_cd`，RRF k=60 |
+| 按查询形状开词法 | 🔸 | `SELECTIVE_HYBRID_ENABLED=false` | 只在裸粘贴/编码型查询上走词法。判据纯规则不调模型（`query_shape.py`），**A/B 未跑，这一轮不开** |
+| 向量检索是**精确**的 | ✅ | `chunks.embedding` 上没有 HNSW/IVFFlat | 召回率恒 100%，过滤不会悄悄压低私有库召回；代价是规模上去后延迟线性涨 |
 | 高频词过滤 | 🔸 | `HYBRID_DF_MAX_RATIO=0.02` | ⚠️ 词法那一路**最要紧的一步**，判据是语料自己的文档频率 |
 | 公共 / 私有隔离 | ✅ | `owner_id`（`Chunk` 上冗余一份） | **这个项目唯一错了就不可挽回的规则**，`tests/test_isolation.py` 守着 |
 | 知识版本隔离 | ✅ | `knowledge_space_id` / `_space_filter` | 机制在，但今天只有 `flagship` 一个可选空间 |
@@ -197,17 +200,30 @@
 
 | 功能 | 状态 | 表 | 谁能做 |
 |---|---|---|---|
-| 文档级勘误 | ✅ | `corrections` | 登录用户 |
+| 文档级勘误（提交） | ✅ | `corrections` | **登录用户**，落成 `pending`，一个字都不进 RAG |
+| 文档级勘误（审核 / 发布 / 撤销） | ✅ | `/api/admin/doc-corrections/*` | **管理员**。`published` 才影响公共知识库；撤销是软撤销（`retired`），历史留着 |
 | 答案订正（标准答案） | ✅ | `verified_answers` | **管理员**（写接口挂 `CurrentAdmin`） |
 | 订正版本历史 | ✅ | `verified_answer_revisions` | 只读 |
 | 用户提交纠错 | ✅ | `answer_corrections` | 登录用户，**进审核队列** |
 | 纠错截图 | ✅ | ≤ 5MB，未提交悬空上限 20 张 / 人 | 先传后绑 |
 | 管理员审核（通过/拒绝） | ✅ | 留 `reviewed_by`/`reviewed_at`/`review_note` | 管理员 |
+| 撤销已生效的文档勘误 | ✅ | `status='retired'`，`published_at` **不清空** | 管理员 |
+| 同一篇的新勘误顶掉旧的 | ✅ | 旧的自动 `superseded`，两条不会同时生效 | 自动 |
 | 发布成标准答案 | ✅ | 额外留一版 `VerifiedAnswerRevision` | 管理员 |
 | 勘误导出 md | ✅ | `copilot corrections-export` | CLI |
 
 ⚠️⚠️ **M16 起：提交 ≠ 生效。** 在那之前任何登录用户点一下保存，
 那段文字就对全站立刻生效、无人审核。
+
+⚠️⚠️ **同一条判断 2026-09-03 才补到文档级勘误上，而且中间错了一次。**
+M16 只扫到了 `answer_corrections`，`POST /api/corrections`（直接覆盖一整篇
+语雀原文、保存即生效）一直挂着 `CurrentUser`。第一次修把它收紧成
+`CurrentAdmin`——安全了，但**把用户挡在了纠错之外**，而发现原文写错的
+恰恰是天天在用的那些人。
+
+⭐ 正确的切法不是「谁能提交」，是「提交之后要不要过审」：
+现在两种纠错都是**人人可提 → pending → 管理员 approve → publish → 才生效**，
+共用 `corrections_flow` 的审核原则、权限模型和审计字段。
 
 ⚠️ `VerifiedAnswer` **不是检索之外的另一条路**：保存时写成一篇
 `source_type="verified"` 的公共文档 + 若干块，照常向量化、照常参与检索。
@@ -225,9 +241,10 @@
 | 登录 / 登出 / me | ✅ | JWT 放 **HttpOnly cookie**，不放 localStorage |
 | 邀请码生成 | ✅ | 网页（管理员）+ `copilot invite` |
 | 管理员位 | ✅ | `users.is_admin`，`copilot admin <email>` 设置 |
-| 每日 token 配额 | ✅ | `users.daily_token_quota` + `token_usage` 表；超额 429。⭐ 检查必须在 `StreamingResponse` **之前** |
+| 每日 token 配额 | ✅ | `users.daily_token_quota` + `token_usage` 表；超额 429。⭐ 检查必须在 `StreamingResponse` **之前**。⚠️ **是软配额**：先查再放行、答完才记账，并发下能超；token 数还是按字符估的。它是保险丝不是计费（[ISSUES.md](ISSUES.md) I-15） |
 | 限流 | ✅ | login 20/5min · register 5/1h · chat 20/1min，进程内令牌桶 |
 | 本机免限流 | ✅ | `EXEMPT_IPS`。⭐ 否则评测跑到第 20 题全变错误，排查方向会被带到模型上 |
+| 停用 / 启用账号 | ✅ | `copilot disable <email>` / `--undo`。⭐ **手里的旧 JWT 下一次请求就 401**——每次请求都查库读 `is_active`，所以**不需要 `token_version`** |
 | 演示账号 | 🧪 | `copilot seed-user`，**绕过邀请码**，只给 docker-compose 用 |
 
 ---
@@ -242,7 +259,7 @@
 | 用户列表 + 详情 | ✅ | 分页**在 SQL 里做**（1.6GB，Python 切片等于把整张表读进内存） |
 | 反馈中心 | ✅ | 👍👎 + 差评原因，可翻回当时的检索情况 |
 | 纠错审核队列 | ✅ | M16 引入的**两个写接口**（review / publish），各自留审计记录 |
-| 启用 / 禁用用户 | ⛔ | 属于 M15-B，要配审计记录，未做 |
+| 启用 / 禁用用户（网页） | ⛔ | 能力本身有了（`copilot disable`，见第八节），**网页按钮**仍属 M15-B——要先有一张管理员操作审计表。放 CLI 的理由同 `copilot admin`：高影响低频率的特权操作不留网页写接口 |
 | 评测结果页 | ⛔ | 进 M19-B，和评测中心一起做 |
 
 ⚠️ 前端 `/admin` guard **只管体验**，挡不住任何一个会开控制台的人。
@@ -256,7 +273,7 @@
 |---|---|---|
 | `request_trace` 一轮一行 | ✅ | ⭐ **不是中间件**——中间件看不到答案、工具、检索命中 |
 | 👍👎 + 六类差评原因 | ✅ | `wrong` / `incomplete` / `should_know` / `bad_source` / `unclear` / `no_image`。**写在同一张表上**，不另建 feedback 表 |
-| `answer_source` 六值 | ✅ | `kb` / `general_knowledge` / `canned` / `tool` / `no_answer` / `verified` |
+| `answer_source` 六值 | ✅ | `kb` / `general_knowledge` / `canned` / `tool` / `no_answer` / `verified`。⚠️ 口径唯一实现在 `api/trace.py::classify_answer_source`；ARCHITECTURE.md 曾漏写 `verified`，2026-09-03 对齐 |
 | M19-B 补的四列 | ✅ | `verified_answer_id` / `correction_id` / `general_knowledge_used` / `image_count`。⚠️ 全部可空、老数据不回填 |
 | 写失败不影响回答 | ✅ | 整条包在 try 里，自己开会话，`shield` 住取消 |
 | span 树（OpenTelemetry） | 🔸 | `TRACING_ENABLED=false`，**且是可选依赖**（`uv sync --extra obs`） |
@@ -305,9 +322,9 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 
 | | 数量 | 命令 |
 |---|---|---|
-| 后端 | 55 个测试文件 / 846 用例 | `uv run pytest` |
+| 后端 | 57 个测试文件 / **936 用例** | `uv run pytest` |
 | 前端 | 5 个 `lib/*.test.ts` | `npm run verify`（单测 + lint + 类型 + 构建） |
-| 迁移 | 22 个 alembic 版本 | `uv run alembic upgrade head` |
+| 迁移 | 24 个 alembic 版本 | `uv run alembic upgrade head` |
 
 ⚠️ 前端**只有 `npm run verify` 这一条命令**，CI 和 `deploy.sh` 调的是同一个。
 清单曾经抄在三个地方，2026-08-25 就是这么破的——`tests/test_ci_contract.py` 现在盯着。
@@ -325,6 +342,7 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 | 新机器初始化 | ✅ | `deploy/setup-server.sh` |
 | 安全加固 | ✅ | `deploy/harden.sh`（关 SSH 密码登录、装 fail2ban）。**要在放数据之前** |
 | nginx 配置 | ✅ | `deploy/nginx.conf` |
+| 健康探针 | ✅ | `/api/health`（原样保留，`deploy.sh` 等的是它）、`/api/health/live`（**不碰库**）、`/api/health/ready`（库 + 迁移版本，不就绪回 503）。⚠️ ready **绝不查模型服务**——provider 超时不该把站点摘掉 |
 | systemd 常驻 | ✅ | `copilot-api.service`（600M）、`copilot-worker.service`（400M） |
 | systemd 定时 | ✅ | `copilot-backup` / `copilot-prune` / `copilot-sync`（各 `.service` + `.timer`） |
 | 备份 | ✅ | `deploy/backup.sh`（机上）、`backup-pull.sh`（拉回本机） |
@@ -373,8 +391,12 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| GET/POST | `/api/corrections` | 登录 | 文档级勘误 |
-| DELETE | `/api/corrections/{id}` | 登录 | |
+| GET | `/api/corrections` | 登录 | 已发布的（人人可见）+ 自己提的（任何状态） |
+| GET | `/api/corrections/mine` | 登录 | 只看自己提过的 |
+| GET | `/api/corrections/{id}` | 登录 | 已发布的人人可看；待审的只有作者和管理员 |
+| POST | `/api/corrections` | 登录 | 提交，落 `pending`。**不碰公共知识库** |
+| PATCH | `/api/corrections/{id}` | 登录 | 改自己的 pending，或 `{"action":"withdraw"}` 撤回 |
+| DELETE | `/api/corrections/{id}` | **管理员** | 撤销一条**已发布**的（软撤销，留历史） |
 | POST | `/api/answer-corrections` | 登录 | 提交纠错（进审核队列） |
 | POST | `/api/answer-corrections/images` | 登录 | 贴截图，先传后绑 |
 | GET | `/api/answer-corrections/mine` | 登录 | |
@@ -394,6 +416,7 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 | GET | `/api/feedback/recent` | 登录 |
 | GET | `/api/images/{id}` | 可选登录（私有图校验 owner） |
 | GET | `/api/knowledge-spaces` | 登录 |
+| GET | `/api/health` · `/api/health/live` · `/api/health/ready` | 公开 |
 | GET/POST | `/api/invites` | 管理员 |
 
 ### 管理台 `/api/admin`（全部 `CurrentAdmin`）
@@ -405,6 +428,8 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 | GET | `/feedback` |
 | GET | `/corrections` · `/corrections/{id}` |
 | POST | `/corrections/{id}/review` · `/corrections/{id}/publish` |
+| GET | `/doc-corrections` · `/doc-corrections/{id}` |
+| POST | `/doc-corrections/{id}/review` · `/doc-corrections/{id}/publish` |
 
 ---
 
@@ -419,6 +444,7 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 | `ask` | 检索知识库并生成带引用的答案 |
 | `invite` | 生成注册邀请码 |
 | `admin` | 把某个账号设为管理员 |
+| `disable` | 停用 / 启用一个账号（`--undo`）。**旧 JWT 下一次请求就失效** |
 | `seed-user` | 🧪 建演示账号，**绕过邀请码**，只给 compose 用 |
 | `correct` | 修正语雀文档里写错的内容 |
 | `corrections` | 列出所有人工勘误，并标出哪些已经过期 |
@@ -464,7 +490,8 @@ UNRELIABLE   有证据，但判分器失效率超线，或语料指纹对不上
 | `ALLOW_GENERAL_KNOWLEDGE` | `true` | 知识库没有时能否用模型常识答 |
 | `INJECTION_GUARD_ENABLED` | **`true`** | 材料围栏 + 私有块摘链接 |
 | `AGENT_ENABLED` / `AGENT_ROLLOUT` / `AGENT_ALLOW_EMAILS` | 线上 rollout=1.0 | Agent 灰度（**按用户分桶，不是按请求**） |
-| `HYBRID_ENABLED` | `false` | 词法召回 + RRF |
+| `HYBRID_ENABLED` | `false` | 词法召回 + RRF（一律开） |
+| `SELECTIVE_HYBRID_ENABLED` | `false` | 按查询形状开词法。⚠️ `HYBRID_ENABLED` 优先 |
 | `HISTORY_BUDGET_ENABLED` | `false` | 上下文预算装配器 + 滚动摘要 |
 | `SESSION_FACTS_ENABLED` | `false` | 已确认事实注入 prompt（记录不受影响） |
 | `DIRECT_BOUNDARY_ENABLED` | `false` | 直路的窗口外指代闸门 |

@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import random
 import re
 import sys
 import time
@@ -334,6 +335,27 @@ class Config:
             "space": self.space,
             "dataset": self.dataset,
             "hybrid": s.hybrid_enabled if self.hybrid is None else self.hybrid,
+            # ⚠️ 和 `hybrid` 同一个理由：它改检索结果、不报错，两轮结果的
+            # config 看不出差别的话，`--compare` 会把两个不同配置的数字
+            # 并排放着而报告上一个字都不提
+            "selective_hybrid": s.selective_hybrid_enabled,
+            # ⭐⭐ 下面四个是 2026-09-03 补的，都是**为了让 A/B 能自证**。
+            #
+            # 一次 A/B 的结论只有在「两臂只差一个变量」成立时才作数，而在此之前
+            # 档案里根本证明不了这件事：代码版本没记、常识兜底记的是命令行传没传
+            # （不传就是 None，看不出线上到底是开是关）、注入防线没记、
+            # 题集只记了文件名（改过内容也看不出来）。
+            #
+            # ⚠️ 它们**不参与任何计算**，只进档案。`compare()` 拿它们做身份核验。
+            "git_commit": _git_commit(),
+            # 命令行没传 `--general` 时，这里记的是**实际生效值**，不是 None。
+            # 老字段 `general` 保持原样：`_guard_suffix` 和 prompt_sha 都读它，
+            # 改它等于改指纹口径
+            "general_effective": (
+                s.allow_general_knowledge if self.general is None else self.general
+            ),
+            "injection_guard": s.injection_guard_enabled,
+            "dataset_sha": _dataset_sha(self.dataset),
             "top_k": self.top_k or s.retrieve_top_k,
             "rerank_k": self.rerank_k or s.rerank_top_k,
             "threshold": s.rerank_score_threshold if self.threshold < 0 else self.threshold,
@@ -355,6 +377,95 @@ class Config:
                 (prompt_text + _guard_suffix(self.mode, self.general)).encode()
             ).hexdigest()[:8],
         }
+
+
+def apply_selective(choice: str) -> None:
+    """把 `--selective on|off` 落到进程的 settings 上。空串 = 不动，读 .env。
+
+    ⚠️ 直接改 `get_settings()` 返回的那个缓存对象，不改环境变量：
+    `Settings` 是 `lru_cache` 的，进程起来之后再改 env 不生效，
+    而这里要的正是「这一次运行到底用哪个值」。
+    """
+    if not choice:
+        return
+    from copilot.config import get_settings
+
+    get_settings().selective_hybrid_enabled = choice == "on"
+
+
+def _git_commit() -> str:
+    """当前代码版本。**A/B 的第一条身份证明**——两臂之间动过代码就不是对照实验。
+
+    拿不到（不是 git 仓库、没装 git）返回空串：档案里少一行，
+    比让评测因为一个记录性字段跑不起来强。
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(EVAL_DIR.parent),
+        )
+        # ⚠️⚠️ **`-uno`（不列未跟踪文件）不能省。**
+        #
+        # 第一版没加，结果是：跑完 Dense 臂会写出
+        # `eval/results/risk-dense-v2.json`——一个**未跟踪**文件——于是
+        # Selective 臂算出来的指纹和 Dense 不一样，`compare` 当场判
+        # 「不止一个变量」。**两个连着跑的臂永远不可能相同**，
+        # 这个字段因此从"证明代码没动"退化成"保证每次都报警"。
+        # 实测 2026-09-04：50606e47 vs 9fcb1df2，而两臂之间一行代码都没改。
+        #
+        # ⭐ 它要防的是「两臂之间改了没提交的**源码**」，那件事全在
+        # `git diff HEAD` 和已跟踪文件的状态里。产物文件不属于那件事。
+        #
+        # ⚠️ 代价说清楚：新增一个**未跟踪的源文件**从此不体现在指纹里。
+        # 那是可以接受的——它要能影响行为，就得被某个已跟踪文件 import，
+        # 而那次修改会出现在 `git diff HEAD` 里。
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "-uno"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(EVAL_DIR.parent),
+        )
+    except Exception:  # noqa: BLE001 - 记录性字段，拿不到就算了
+        return ""
+    if out.returncode != 0:
+        return ""
+    sha = out.stdout.strip()
+    if not dirty.stdout.strip():
+        return sha
+
+    # ⚠️⚠️ **脏工作区不能只标一个 `-dirty`。** 两臂之间改了一行没提交的代码，
+    # commit 一样、`-dirty` 也一样，而实验已经不成立了——那正好是这个字段
+    # 要拦的事，却被一个恒定的后缀盖过去。所以把**改动本身**也指纹进去：
+    # 两个不同的脏状态得到两个不同的串，`compare()` 当场看得出来。
+    import hashlib
+
+    try:
+        diff = subprocess.run(
+            ["git", "diff", "HEAD"],
+            capture_output=True,
+            timeout=15,
+            cwd=str(EVAL_DIR.parent),
+        ).stdout
+    except Exception:  # noqa: BLE001
+        diff = b""
+    fp = hashlib.sha256(dirty.stdout.encode() + diff).hexdigest()[:8]
+    return f"{sha}-dirty.{fp}"
+
+
+def _dataset_sha(name: str) -> str:
+    """题集内容指纹。只记文件名的话，改过题目也看不出来。"""
+    import hashlib
+
+    path = EVAL_DIR / name
+    if not path.exists():
+        return ""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
 @dataclass
@@ -964,6 +1075,152 @@ JUDGE_ERROR_LIMIT = 5.0
 
 JUDGE_UNAVAILABLE = "judge_unavailable"
 
+# 这一轮判分器的健康状况。**进结果档案**，不只是打在屏幕上。
+#
+# ⭐ 为什么要记：判分器不稳的表现是「指标看起来退步了」，而它和模型真的退步
+# 在报告上长得一模一样。2026-09-03 那次 38 题判分失效，如果不是
+# `judge_error` 那一列顶到 67.9%，报告会是一张 18 题分母的满分表。
+# 重试次数和 429 次数比失效率更早看得出问题——**失效率是结果，它们是征兆**。
+JUDGE_STATS: dict[str, int] = {}
+
+
+def reset_judge_stats() -> None:
+    JUDGE_STATS.clear()
+    JUDGE_STATS.update(
+        calls=0, retries=0, http_429=0, http_5xx=0, http_4xx_fatal=0,
+        timeouts=0, json_errors=0, gave_up=0,
+    )
+
+
+reset_judge_stats()
+
+# 不值得重试的 HTTP 状态码。
+# ⚠️ **404 在这里是刻意的。** 模型被下架时每道题都重试 3 次，只是把一个
+# 从第一次就定死的结论放大成三倍等待——2026-09-03 那次 30 道 404 题
+# 白白多打了 60 次请求（ISSUES.md I-18）。401/403 同理：密钥不对，重试不会变对。
+_FATAL_STATUS = frozenset({400, 401, 403, 404, 422})
+
+
+def judge_retryable(exc: BaseException) -> bool:
+    """这个异常值不值得再试一次。
+
+    判据按可靠性排序：先看结构化的 HTTP 状态码，拿不到才退回看异常类型。
+    ⚠️ **不解析错误字符串**——供应商改一句文案就会让判据静默失效。
+    """
+    status = getattr(exc, "status", None)
+    if isinstance(status, int):
+        if status in _FATAL_STATUS:
+            return False
+        return status == 429 or status >= 500
+    # JSON 解析失败：模型这一次没按格式回，再问一次通常就好了
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    # 网络类（超时、连接重置、SSL 断流）——跨境链路上是常态
+    return isinstance(exc, OSError | TimeoutError) or "timeout" in type(exc).__name__.lower()
+
+
+def _note_judge_error(exc: BaseException) -> None:
+    status = getattr(exc, "status", None)
+    if status == 429:
+        JUDGE_STATS["http_429"] += 1
+    elif isinstance(status, int) and status >= 500:
+        JUDGE_STATS["http_5xx"] += 1
+    elif isinstance(status, int) and status in _FATAL_STATUS:
+        JUDGE_STATS["http_4xx_fatal"] += 1
+    elif isinstance(exc, json.JSONDecodeError):
+        JUDGE_STATS["json_errors"] += 1
+    else:
+        JUDGE_STATS["timeouts"] += 1
+
+
+def judge_complete(judge, messages: list[dict]) -> dict:
+    """问一次判分器，返回解析好的 JSON。**两套题集共用这一份。**
+
+    ⚠️ 各写一份的下场是：某一天有人给其中一份加了「404 不重试」，另一份没加，
+    而两套题集的报告看起来一样正常（同 `corrections_flow` 那条规矩）。
+
+    重试策略：指数退避 + **抖动**，只对可重试的错误，次数有上限，
+    用完之后抛出去由调用方记成 INVALID（**不是记成答错**，见 M13 P0）。
+    """
+    last: Exception | None = None
+    raw = ""
+    for attempt in range(JUDGE_RETRIES):
+        JUDGE_STATS["calls"] += 1
+        try:
+            raw = judge.complete(messages, temperature=0.0)
+            return json.loads(_strip_fence(raw))
+        except Exception as e:  # noqa: BLE001 - 分类交给 judge_retryable
+            last = e
+            _note_judge_error(e)
+            if attempt == JUDGE_RETRIES - 1 or not judge_retryable(e):
+                break
+            JUDGE_STATS["retries"] += 1
+            # ⚠️ **抖动不能省。** workers 个线程一起撞上 429，不加抖动的话
+            # 它们会在同一毫秒一起醒来再撞一次——退避退了个寂寞
+            base_wait = JUDGE_BACKOFF[min(attempt, len(JUDGE_BACKOFF) - 1)]
+            time.sleep(base_wait + random.uniform(0, base_wait * 0.5))
+    JUDGE_STATS["gave_up"] += 1
+    raise JudgeFailed(str(last), raw) from last
+
+
+class JudgeFailed(RuntimeError):
+    """判分器最终没给出可用结果。带上最后一次的原始输出，方便查是格式问题还是网络。"""
+
+    def __init__(self, why: str, raw: str = "") -> None:
+        super().__init__(why)
+        self.why = why
+        self.raw = raw
+
+
+# 只认 temperature=1 的模型。传别的直接 HTTP 400
+# （`invalid temperature: only 1 is allowed for this model`）。
+#
+# ⭐⭐ 2026-09-04 判分器标定当场撞到这个：换成 `kimi-k2.6` 之后 10 道标定题
+# **全部** 400。而这件事 `config.py` 里早就写着（`llm_deep_temperature: 1.0`），
+# `ChatLLM` 也早就有 `forced_temperature` 这个口子——只是判分器那三处
+# 各自 new 了一个 ChatLLM，谁都没想起来。**所以这里收成一个工厂**：
+# 判分器只能从这一个函数出来，下次再换模型时只有一处要改。
+_TEMP1_MODELS = ("kimi-k2", "kimi-k3", "kimi-k2.5", "kimi-k2.6")
+
+
+def judge_temperature(model: str) -> float | None:
+    """这个判分模型该锁死在什么温度上。None = 不锁，用调用方给的。
+
+    ⚠️⚠️ **锁成 1 是有代价的，而且这个代价要写进报告：**
+    判分器本来用 `temperature=0.0`，图的是**同一份答案每次判出同样的结论**——
+    一把每次读数都不一样的尺子，量出来的 A/B 差值分不清是改动的效果还是尺子的抖动。
+    kimi 系列不给这个选项。所以换上它之后，判分器从确定性变成了随机性，
+    标定必须**跑两遍看一致性**，正式评测的小差值也不能再当成信号。
+    """
+    return 1.0 if any(model.startswith(m) for m in _TEMP1_MODELS) else None
+
+
+def build_judge(timeout: float | None = None):
+    """造判分器客户端。**三处调用方（run / risk_boundary / judge_calibration）
+    共用这一个**，别各 new 各的。"""
+    from copilot.config import get_settings
+    from copilot.providers.llm import ChatLLM
+
+    s = get_settings()
+    model = s.eval_judge_model or s.llm_model
+    return (
+        ChatLLM(
+            api_key=s.eval_judge_api_key or s.llm_api_key,
+            base_url=s.eval_judge_base_url or s.llm_base_url,
+            model=model,
+            forced_temperature=judge_temperature(model),
+            timeout=JUDGE_TIMEOUT if timeout is None else timeout,
+        ),
+        model,
+    )
+
+
+def judge_prompt_sha(*extra: str) -> str:
+    """判分 prompt 的指纹。**换了判分口径而档案看不出来**是这一列要防的事。"""
+    import hashlib
+
+    return hashlib.sha256("".join([JUDGE_SYSTEM, JUDGE_USER, *extra]).encode()).hexdigest()[:8]
+
 
 def judge_all(
     results: list[CaseResult],
@@ -983,8 +1240,6 @@ def judge_all(
     留下来的是三条**规则判定**的发布红线：该拒答有没有拒答、有没有编来源
     编号、有没有串别家的规则。它们只看答案文本，判分器在不在场都成立。
     """
-    from copilot.config import get_settings
-    from copilot.providers.llm import ChatLLM
 
     if skip:
         by_id = {c["id"]: c for c in cases}
@@ -1004,14 +1259,7 @@ def judge_all(
             print("  ⚠️ --no-judge：语义判分全部记为「没判成」，本轮不可用于比较")
         return ""
 
-    s = get_settings()
-    model = s.eval_judge_model or s.llm_model
-    judge = ChatLLM(
-        api_key=s.eval_judge_api_key or s.llm_api_key,
-        base_url=s.eval_judge_base_url or s.llm_base_url,
-        model=model,
-        timeout=JUDGE_TIMEOUT,
-    )
+    judge, model = build_judge()
     by_id = {c["id"]: c for c in cases}
 
     def one(cr: CaseResult) -> None:
@@ -1053,26 +1301,17 @@ def judge_all(
         # 差一点就据此把一个正确的产品决定回滚掉。
         #
         # 所以这里只负责如实标记，判不判得进准确率交给 `score()`。
-        raw = ""
-        last: Exception | None = None
-        for attempt in range(JUDGE_RETRIES):
-            try:
-                raw = judge.complete(messages, temperature=0.0)
-                payload = json.loads(_strip_fence(raw))
-                cr.verdict = str(payload.get("verdict", ""))
-                cr.grounded = bool(payload.get("grounded"))
-                cr.unsupported = cr.unsupported or str(payload.get("unsupported") or "")
-                cr.reason = str(payload.get("reason") or "")
-                return
-            except Exception as e:  # noqa: BLE001
-                last = e
-                if attempt < JUDGE_RETRIES - 1:
-                    # 指数退避。限流（429）和跨境抖动都要一点时间才缓过来，
-                    # 固定间隔重试等于三次撞同一堵墙
-                    time.sleep(JUDGE_BACKOFF[min(attempt, len(JUDGE_BACKOFF) - 1)])
-        cr.verdict = "judge_error"
-        cr.judge_error = True
-        cr.reason = f"{type(last).__name__}: {last} | 原始输出：{raw[:160]}"
+        try:
+            payload = judge_complete(judge, messages)
+        except JudgeFailed as e:
+            cr.verdict = "judge_error"
+            cr.judge_error = True
+            cr.reason = f"{e.why} | 原始输出：{e.raw[:160]}"
+            return
+        cr.verdict = str(payload.get("verdict", ""))
+        cr.grounded = bool(payload.get("grounded"))
+        cr.unsupported = cr.unsupported or str(payload.get("unsupported") or "")
+        cr.reason = str(payload.get("reason") or "")
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for i, _ in enumerate(pool.map(one, results), 1):
@@ -1339,7 +1578,15 @@ def save(
         "scope": scope,
         "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "corpus": meta.get("corpus", ""),
-        "config": {**cfg.resolved(), **CORPUS_STATS},
+        # ⚠️ 见 risk_boundary 里同一处：判分器身份要进 config，
+        # 因为身份核验是按 config 比的
+        "config": {
+            **cfg.resolved(),
+            **CORPUS_STATS,
+            "judge_model": judge,
+            "judge_prompt_sha": judge_prompt_sha(),
+        },
+        "judge_stats": dict(JUDGE_STATS),
         "judge_model": judge,
         # ⭐ 顶层也存一份。`compare()` 要在读 metrics 之前就知道这一轮能不能比，
         # 而老结果里没有这个字段——那边会从 cases 现算，见 `_reliability`
@@ -1522,7 +1769,85 @@ def _reliability(run: dict) -> tuple[bool, float, int]:
     return rate <= JUDGE_ERROR_LIMIT, rate, stuck
 
 
-def compare(tags: list[str], allow_unreliable: bool = False) -> None:
+# A/B 时**必须逐项相同**的 config 键。差一项，这一轮就不是对照实验。
+#
+# ⭐⭐ 这张表是 2026-09-03 加的，起因是一个真实的踩空：`compare()` 一直
+# 只**打印**几个参数，从来没**核对**过。于是下面这两件事都能安静地发生：
+#
+#     两臂之间跑了一次 sync-yuque    语料变了，差值一半是语料的
+#     baseline 那一臂忘了显式关开关   两臂同配置，而对比表照样打出"差异"
+#
+# 而对比表长得一本正经，看的人不会去核每一行 config。
+#
+# ⚠️ **`corpus_sha` 是这里面最要紧的一项。** 它变了就说明底下那批块换过，
+# 任何逐题比较都失去意义——不是"结论弱一点"，是**不能比**。
+IDENTITY_KEYS = (
+    # ⭐⭐ 判分器排在最前面，因为它是**量尺**本身。
+    # 两臂用不同判分器量出来的差值不是"这个改动的效果"，是两把尺的刻度差。
+    # 2026-09-03 换掉下架的 `moonshot-v1-128k` 时加的（ISSUES.md I-18）：
+    # 那一次之后，新旧证据的绝对分数**永久不可直接比较**，
+    # 而没有这一行的话，档案里根本看不出两轮用的不是同一把尺。
+    "judge_model",
+    "judge_prompt_sha",
+    "git_commit",
+    "corpus_sha",
+    "chunk_count",
+    "dataset",
+    "dataset_sha",
+    "space",
+    "path",
+    "prompt",
+    "prompt_sha",
+    "answer_model",
+    "embedding_model",
+    "rerank_model",
+    "mode",
+    "general_effective",
+    "injection_guard",
+    "hybrid",
+    "top_k",
+    "rerank_k",
+    "threshold",
+    "chunk_size",
+    "chunk_overlap",
+)
+
+
+def _identity_diff(runs: list[dict], variable: str | None) -> list[tuple[str, list]]:
+    """两轮之间**不该变而变了**的 config 键。
+
+    `variable` 是这次 A/B 允许变的那一个（比如 `selective_hybrid`），
+    它不参与核对——其余每一项都必须逐轮相同。
+
+    ⚠️ 老档案里没有新加的那几个键（`git_commit` / `dataset_sha` / …）。
+    **缺席不算差异**：把"这轮没记"判成"配置不同"会让所有历史对比一夜之间
+    全部 UNRELIABLE，而那不是事实。缺席只是证据弱一点，报告里另有一行说它。
+    """
+    out = []
+    for key in IDENTITY_KEYS:
+        if key == variable:
+            continue
+        seen = [r.get("config", {}).get(key) for r in runs]
+        present = [v for v in seen if v is not None]
+        if len(present) < 2:
+            continue
+        if len(set(map(str, present))) > 1:
+            out.append((key, seen))
+    return out
+
+
+def _missing_identity(runs: list[dict]) -> list[str]:
+    """哪些身份字段这几轮里根本没记（多半是新加字段之前跑的老档案）。"""
+    return [
+        k
+        for k in IDENTITY_KEYS
+        if all(r.get("config", {}).get(k) is None for r in runs)
+    ]
+
+
+def compare(
+    tags: list[str], allow_unreliable: bool = False, variable: str | None = None
+) -> None:
     runs = []
     for t in tags:
         p = RESULTS_DIR / f"{t}.json"
@@ -1545,6 +1870,40 @@ def compare(tags: list[str], allow_unreliable: bool = False) -> None:
             print("  （真要看，加 --allow-unreliable。）")
             return
         print("  ⚠️ --allow-unreliable：下面的数字不作数，只当原始记录看。")
+
+    # ⛔ 身份核验。**放在判分失效那一关之后、出表之前**：两件事都能让这一轮
+    # 不能比，而这一件更硬——判分失效还能重跑判分，配置不同只能重跑整轮
+    if drift := _identity_diff(runs, variable):
+        print()
+        print("【UNRELIABLE】 —— 这几轮的实验身份对不上，**不是对照实验**：")
+        for key, seen in drift:
+            cells = "  ".join(
+                f"{r['tag']}={v if v is not None else '—'}" for r, v in zip(runs, seen, strict=True)
+            )
+            print(f"     {key:<18} {cells}")
+        print()
+        if variable:
+            print(f"  这次 A/B 只允许 `{variable}` 不同，上面每一项都是额外的变量。")
+        print("  差值归不了因。**先把配置对齐重跑，再比。**")
+        if not allow_unreliable:
+            print("  （真要看，加 --allow-unreliable。）")
+            return
+        print("  ⚠️ --allow-unreliable：下面的数字不作数，只当原始记录看。")
+
+    if missing := _missing_identity(runs):
+        print()
+        print(f"⚠️ 这几轮都没记这些身份字段（老档案）：{'、'.join(missing)}")
+        print("   它们**证明不了**两臂在这几项上一致，只是没有反证。")
+
+    if variable:
+        vals = [r.get("config", {}).get(variable) for r in runs]
+        print()
+        print(f"实验变量 `{variable}`：" + "  ".join(
+            f"{r['tag']}={v}" for r, v in zip(runs, vals, strict=True)
+        ))
+        if len(set(map(str, vals))) < 2:
+            print("  ⚠️⚠️ **两臂的这个值一模一样**——这一轮根本没有对照，")
+            print("     多半是分臂时忘了显式传参、或者被 shell 里的环境变量盖住了。")
 
     keys = ["准确率", "判分失效率", "检索命中率", "引用正确率", "幻觉率", "假阴性率", "无据陈述率"]
     w = max(len(t) for t in tags) + 2
@@ -1569,11 +1928,16 @@ def compare(tags: list[str], allow_unreliable: bool = False) -> None:
     print()
     print("参数：")
     for r in runs:
-        c = r["config"]
+        # ⚠️ `--check` 产出的老档案没有 `config` 这一节。用 `.get` 兜住——
+        # 一次对比因为 KeyError 崩掉，等于把刚跑完的那两轮付费结果的
+        # 唯一出口堵死（结果文件还在，但人已经看不到表了）
+        c = r.get("config", {})
         print(
             f"  {r['tag']:<{w}} prompt={c.get('prompt', '?')}／{c.get('prompt_sha', '?')} "
-            f"top_k={c['top_k']} rerank_k={c['rerank_k']} threshold={c['threshold']} "
-            f"chunk={c['chunk_size']}/{c['chunk_overlap']} 块数={c.get('chunk_count', '?')}"
+            f"top_k={c.get('top_k', '?')} rerank_k={c.get('rerank_k', '?')} "
+            f"threshold={c.get('threshold', '?')} "
+            f"chunk={c.get('chunk_size', '?')}/{c.get('chunk_overlap', '?')} "
+            f"块数={c.get('chunk_count', '?')}"
         )
 
     # 逐题变化：调参时真正有用的信息
@@ -1647,6 +2011,13 @@ def main() -> None:
     )
     ap.add_argument("--compare", nargs="+", metavar="TAG", help="对比若干轮结果")
     ap.add_argument(
+        "--variable",
+        default="",
+        metavar="KEY",
+        help="这次 A/B 允许不同的那一个 config 键（如 selective_hybrid）。"
+        "其余身份字段有任何一项不一致就判 UNRELIABLE、不出表",
+    )
+    ap.add_argument(
         "--allow-unreliable",
         action="store_true",
         help="判分失效率超线时仍然打印对比表（默认拒绝，见 compare()）",
@@ -1667,6 +2038,24 @@ def main() -> None:
         choices=("on", "off"),
         default="",
         help="常识兜底开/关。不传则读 .env 的 ALLOW_GENERAL_KNOWLEDGE",
+    )
+    # ⭐⭐ Selective Hybrid 的 A/B。**必须能在命令行显式指定，理由和 `--general`
+    # 一模一样，而且这一条更硬**：
+    #
+    # 靠环境变量分臂的话，baseline 那一臂等于「**没设**这个变量」，
+    # 而它到底是什么值取决于**当前 shell 继承了什么**。一次
+    # `$env:SELECTIVE_HYBRID_ENABLED="true"` 留在会话里，后面那句
+    # 「跑 dense 基线」就会安安静静地跑成 selective——两臂同配置，
+    # 而对比表照常打印出一个"差异"。这种污染没有任何症状。
+    #
+    # 传了它就**当场覆盖 `get_settings()` 的缓存对象**，并进 `resolved()`，
+    # 所以档案里那一行是实际生效值，不是"命令行传了什么"。
+    ap.add_argument(
+        "--selective",
+        choices=("on", "off"),
+        default="",
+        help="按查询形状开词法（Selective Hybrid）。不传则读 .env 的 "
+        "SELECTIVE_HYBRID_ENABLED。⚠️ A/B 时两臂都要显式传，别靠 shell 继承",
     )
     ap.add_argument(
         "--no-judge",
@@ -1703,7 +2092,11 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.compare:
-        compare(args.compare, allow_unreliable=args.allow_unreliable)
+        compare(
+            args.compare,
+            allow_unreliable=args.allow_unreliable,
+            variable=args.variable or None,
+        )
         return
 
     if args.rescore:
@@ -1712,6 +2105,11 @@ def main() -> None:
 
     # 指定了用户就跑 private 那组题，否则跑 public。两组题不混跑——
     # 混跑等于把两个不同的题集算进同一个准确率
+    # ⚠️ **在任何检索发生之前**落到 settings 上。`retrieve._search` 读的是
+    # `get_settings().selective_hybrid_enabled`，而 `Settings` 是 lru_cache 的，
+    # 所以这里改的就是整个进程后面看到的那一份
+    apply_selective(args.selective)
+
     user_id = resolve_user(args.as_user) if args.as_user else None
     dataset = Path(args.dataset).resolve() if args.dataset else None
     if dataset is not None and not dataset.exists():

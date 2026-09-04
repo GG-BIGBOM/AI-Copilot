@@ -6,10 +6,21 @@
     GET  /api/admin/users             用户列表，分页
     GET  /api/admin/users/{id}        单个用户的使用情况
     GET  /api/admin/feedback          反馈中心，分页
-    GET  /api/admin/corrections       纠错审核队列，分页（M16）
-    GET  /api/admin/corrections/{id}  一条纠错的全部内容（M16）
+    GET  /api/admin/corrections       **答案**纠错审核队列，分页（M16）
+    GET  /api/admin/corrections/{id}  一条答案纠错的全部内容（M16）
     POST /api/admin/corrections/{id}/review    通过 / 拒绝（M16）
     POST /api/admin/corrections/{id}/publish   发布成标准答案（M16）
+
+    GET  /api/admin/doc-corrections                 **文档**勘误审核队列
+    POST /api/admin/doc-corrections/{id}/review     通过 / 拒绝
+    POST /api/admin/doc-corrections/{id}/publish    发布：盖掉语雀原文并重新入库
+
+⚠️ **两组路径管的是两种东西，名字必须分得开。**
+`/corrections` 是答案纠错（改「这一轮的这个答案」，发布成 VerifiedAnswer），
+`/doc-corrections` 是文档勘误（改「哪一篇语雀原文」，发布后进 ingest）。
+共用的是**审核原则、权限模型、审计字段**（都在 `corrections_flow` 里），
+不是同一张表——理由见那个模块的文件头。
+前端已经在用 `/corrections` 这个路径，所以新的那组换名字，不动老的。
 
 ⚠️⚠️ **三条规矩，每一条都写着"不这么做会怎样"：**
 
@@ -43,6 +54,7 @@ M19 才建。现在临时做一个读文件的页面，M19-A 定契约时会整�
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
@@ -70,7 +82,11 @@ from copilot.db.models import (
     User,
     VerifiedAnswer,
 )
+from copilot.db.models import (
+    Correction as DocCorrection,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 # 客户端能要的最大一页。**写死在服务端**：分页的意义是「不把整张表读进内存」，
@@ -966,3 +982,263 @@ async def publish_correction(
             else "已发布，但索引没建成——下一次知识库同步会补上。"
         ),
     )
+
+
+# ─────────────────────── 文档勘误的审核（2026-09-03）───────────────────────
+#
+# ⭐⭐ 这一组补的是一个真实缺口：`corrections` 那张表原来**没有审核**，
+# 任何登录用户 POST 一条就直接盖掉语雀原文、对全站生效。上一轮把它收紧成
+# 管理员专用，安全了但**把用户挡在了纠错之外**——而发现原文写错的恰恰是
+# 天天在用的那些人。现在是「人人可提、管理员审、发布才生效」，
+# 这一组就是中间那两步。
+#
+# ⚠️ 权限和审计字段和上面那组**逐条对齐**（同一套 `corrections_flow`），
+# 只有状态图多两条出口（published → retired / superseded），
+# 因为文档勘误这条记录**自己就是**生效的那个东西，没有第二个对象可退役。
+
+
+class DocCorrectionRow(BaseModel):
+    id: uuid.UUID
+    target_url: str
+    title: str
+    reason: str
+    status: str
+    version: int
+    author_email: str | None
+    retired: bool
+    reviewed_at: datetime | None
+    published_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocCorrectionDetail(DocCorrectionRow):
+    """详情：审核要看的全部内容。
+
+    ⚠️ 这里给 `body` 全文——管理员要读的就是"改成什么样"。
+    列表页刻意不给（同 overview 不给问题原文的理由：一眼扫过去的东西
+    不该顺带摊开一屏正文）。
+    """
+
+    body: str
+    review_note: str | None
+
+
+class DocCorrectionPage(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[DocCorrectionRow]
+
+
+class PublishDocOut(BaseModel):
+    correction_id: uuid.UUID
+    target_url: str
+    chunks: int
+    applied: bool
+    note: str
+    # 这一篇原来有没有一条已发布的勘误被顶掉。**要报出来**：
+    # 管理员点发布时未必知道自己在替换谁的东西
+    superseded_id: uuid.UUID | None = None
+
+
+async def _get_doc_correction(session, correction_id: uuid.UUID) -> DocCorrection:
+    row = await session.get(DocCorrection, correction_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这条勘误不存在")
+    return row
+
+
+async def _doc_row(session, c: DocCorrection) -> DocCorrectionRow:
+    email = (
+        await session.scalar(select(User.email).where(User.id == c.author_id))
+        if c.author_id
+        else None
+    )
+    return DocCorrectionRow(
+        id=c.id,
+        target_url=c.target_url,
+        title=c.title,
+        reason=c.reason,
+        status=c.status,
+        version=c.version,
+        author_email=email,
+        retired=c.retired,
+        reviewed_at=c.reviewed_at,
+        published_at=c.published_at,
+        created_at=c.created_at,
+        updated_at=c.updated_at,
+    )
+
+
+@router.get("/doc-corrections", response_model=DocCorrectionPage)
+async def list_doc_corrections(
+    admin: CurrentAdmin,
+    session: SessionDep,
+    status_filter: Annotated[str, Query(alias="status", max_length=16)] = flow.PENDING,
+    limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> DocCorrectionPage:
+    """文档勘误的审核队列。默认只看 `pending`，同答案纠错那一组。"""
+    where = []
+    if status_filter != "all":
+        if status_filter not in flow.STATUSES:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"没有这个状态：{status_filter}（可选 {'/'.join(flow.STATUSES)} 或 all）",
+            )
+        where.append(DocCorrection.status == status_filter)
+
+    total = await _count(session, select(DocCorrection.id).where(*where))
+    rows = list(
+        (
+            await session.execute(
+                select(DocCorrection)
+                .where(*where)
+                .order_by(DocCorrection.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+    )
+    return DocCorrectionPage(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[await _doc_row(session, c) for c in rows],
+    )
+
+
+@router.get("/doc-corrections/{correction_id}", response_model=DocCorrectionDetail)
+async def doc_correction_detail(
+    correction_id: uuid.UUID, admin: CurrentAdmin, session: SessionDep
+) -> DocCorrectionDetail:
+    c = await _get_doc_correction(session, correction_id)
+    base = await _doc_row(session, c)
+    return DocCorrectionDetail(**base.model_dump(), body=c.body, review_note=c.review_note)
+
+
+@router.post("/doc-corrections/{correction_id}/review", response_model=DocCorrectionDetail)
+async def review_doc_correction(
+    correction_id: uuid.UUID, body: ReviewIn, admin: CurrentAdmin, session: SessionDep
+) -> DocCorrectionDetail:
+    """通过或拒绝。**通过不等于发布**——发布是下一个接口。
+
+    ⚠️ 和答案纠错同一个理由：发布那一步要重新切分 + 打 embedding 接口，
+    是这条路上唯一会因为外部原因失败的一步。合成一步的话，
+    发布炸了你分不清是「审得不对」还是「入库这一步挂了」。
+    """
+    c = await _get_doc_correction(session, correction_id)
+    if body.version is not None and body.version != c.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "这条勘误刚被人改过，请刷新后再看")
+
+    target = flow.APPROVED if body.decision == "approve" else flow.REJECTED
+    try:
+        flow.check_transition(c.status, target, flow.DOC_STATE_MACHINE)
+    except flow.TransitionError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+    # 管理员的二次修改，同答案纠错：用户写的十有八九不能直接发布，
+    # 只给「通过 / 拒绝」两个按钮的话，改一个字也只能拒绝再让人重提
+    if body.corrected_answer_markdown is not None:
+        if not (text := body.corrected_answer_markdown.strip()):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "正文不能为空")
+        c.body = text
+
+    c.status = target
+    c.version += 1
+    c.reviewed_by = admin.id
+    c.reviewed_at = datetime.now(UTC)
+    c.review_note = body.note.strip() or None
+    await session.commit()
+    await session.refresh(c)
+    return await doc_correction_detail(correction_id, admin, session)
+
+
+@router.post("/doc-corrections/{correction_id}/publish", response_model=PublishDocOut)
+async def publish_doc_correction(
+    correction_id: uuid.UUID, body: PublishIn, admin: CurrentAdmin, session: SessionDep
+) -> PublishDocOut:
+    """发布：**从这一刻起这一篇语雀原文被它盖掉，所有人的答案都跟着变。**
+
+    三件事在同一个事务里：把同一篇上一条已发布的置为 `superseded`、
+    把这一条置为 `published`、写审计字段。**顺序不能反**——
+    `ux_corrections_published_target` 是部分唯一索引，两条同时是 published
+    会直接撞库（那正是它存在的意义：同一篇有两条生效，`apply_corrections`
+    的行为就取决于字典构造顺序，而那种错的样子是「答案时好时坏」）。
+
+    ⚠️ **重新入库放在提交之后，而且失败不回滚状态。**
+    和答案纠错那边相反，这里是刻意的：那边发布产出的是一条**新建**的
+    VerifiedAnswer，半发布（状态变了、索引没建）会让它彻底卡死；
+    而这里状态就是事实来源，入库只是把它**兑现**到索引上——
+    退一步说，下一次全量 ingest（每天一次的 `copilot-sync.timer`）
+    会自动补上。所以入库失败只影响"多久生效"，不影响"发布了没有"。
+    """
+    c = await _get_doc_correction(session, correction_id)
+    if body.version is not None and body.version != c.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "这条勘误刚被人改过，请刷新后再看")
+    try:
+        flow.check_transition(c.status, flow.PUBLISHED, flow.DOC_STATE_MACHINE)
+    except flow.TransitionError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+    prior = (
+        await session.execute(
+            select(DocCorrection).where(
+                DocCorrection.target_url == c.target_url,
+                DocCorrection.status.in_(flow.LIVE),
+                DocCorrection.id != c.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if prior is not None:
+        prior.status = flow.SUPERSEDED
+        prior.version += 1
+        prior.reviewed_by = admin.id
+        prior.reviewed_at = datetime.now(UTC)
+        prior.review_note = f"被 {c.id} 顶替"
+        # ⚠️⚠️ **必须在这里 flush，不能和下面那句一起提交。**
+        #
+        # `ux_corrections_published_target` 是**部分唯一索引**，Postgres 逐条
+        # 语句检查、不能 DEFERRABLE。而 SQLAlchemy 在一次 flush 里发 UPDATE 的
+        # 顺序是不定的——先发新的那条（→ published）时，旧的还是 published，
+        # 当场撞唯一索引 500。
+        #
+        # 表现是**间歇性**的：同一段代码同一份数据，两次跑一次成一次崩，
+        # 取决于两个对象进 dirty 集合的先后。`tests/test_correction_review.py`
+        # 加了随机顺序之后 3 次里红 2 次，才把它逼出来——
+        # 而它是**生产 bug**，不是测试问题：同一篇发布第二条勘误就可能撞上。
+        await session.flush()
+
+    now = datetime.now(UTC)
+    c.status = flow.PUBLISHED
+    c.version += 1
+    c.reviewed_by = admin.id
+    c.reviewed_at = now
+    c.published_at = now
+    await session.commit()
+
+    from copilot.api.routes.corrections import reingest_one
+
+    try:
+        chunks = await reingest_one(session, c.target_url)
+    except Exception:  # noqa: BLE001 - 见 docstring 最后一段
+        logger.exception("勘误已发布但重新入库失败：%s", c.target_url)
+        chunks = -2
+
+    return PublishDocOut(
+        correction_id=c.id,
+        target_url=c.target_url,
+        chunks=max(chunks, 0),
+        applied=chunks >= 0,
+        note=_doc_publish_note(chunks),
+        superseded_id=prior.id if prior is not None else None,
+    )
+
+
+def _doc_publish_note(chunks: int) -> str:
+    if chunks >= 0:
+        return "已发布并生效，现在提问就会用改过的内容。"
+    if chunks == -1:
+        return "已发布，但没在语雀原文里找到这个地址，暂时不会生效——检查一下链接对不对。"
+    return "已发布，但重新入库失败了，下一次同步会自动补上。"

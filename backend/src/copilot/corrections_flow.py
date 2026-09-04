@@ -1,26 +1,50 @@
-"""答案纠错的状态机与 Markdown 快照（M16）。
+"""内容治理的**共用**状态机与 Markdown 快照（M16 起）。
 
 **状态机为什么要单独写在一处：** 「未审核的东西不许生效」这条规则，散在
 四五个接口里各判一次的话，漏掉一处的表现是——某条路径上一个 pending 的纠错
-被当成 approved 用了，而它看起来一切正常。所以合法迁移只有这一张表，
+被当成 approved 用了，而它看起来一切正常。所以合法迁移只有这里，
 每个接口都来查它。
 
+⭐⭐ **两种纠错共用这一层，但各有一张迁移表。**
+
+    AnswerCorrection   改「这一轮的这个答案」  → 发布成 VerifiedAnswer
+    Correction         改「哪一篇语雀原文」    → 发布后进 ingest，盖掉原文
+
+它们的**审核原则、权限模型、审计字段完全一样**（这正是共用这个模块的理由），
+但**状态图不一样**，所以不合成一张：
+
+    答案纠错   published 是终态 —— 撤销要去动它产出的那条 VerifiedAnswer
+               （`/api/verified/{id}` 退役），纠错这条记录本身不该被改写
+    文档勘误   published **不是**终态 —— 这条记录**自己就是**生效的那个东西，
+               没有第二个对象可退役。所以它需要 retired / superseded 两条出口
+
+⚠️ **强行合成一张图会出事**：那样 `AnswerCorrection` 就允许 published → retired，
+而那条路径没有任何实现——退役标准答案走的是另一个接口。留一条没人走、
+也没人测的迁移，等于留一个以后会被误用的洞。
+
+    ── 共用 ──────────────────────────────────────────
     pending    → approved | rejected | withdrawn
     approved   → published | rejected
-    published  → （终态。要改就改标准答案本身，并留一条修订记录）
     rejected   → （终态。要再来一次就重新提一条，别复活旧的）
     withdrawn  → （终态，同上）
 
-谁能做什么：
+    ── 只有文档勘误有 ────────────────────────────────
+    published  → retired      管理员撤销：这条不该再生效了
+               → superseded   同一篇文档有了更新的一条已发布勘误
 
-    withdrawn                作者本人（管理员也可以，替人撤回）
+谁能做什么（两种一致）：
+
+    提交 / 编辑 / 撤回        作者本人，且只在 pending
     approved / rejected      **只有管理员**
     published                **只有管理员**，且必须先 approved
+    retired / superseded     **只有管理员**（superseded 由发布动作自动写）
 
 ⚠️ `approved` 和 `published` 是两步，不是一步。中间那一步是「管理员看过了、
 认可这个内容」，而 published 是「它现在真的在影响所有人的答案了」。
 合成一步的话，审核通过的瞬间就写库、进索引、动检索——一旦发布出问题，
 你分不清是「审得不对」还是「发布这一步炸了」。
+两种纠错的发布都要打 embedding 接口，都会因为外部原因失败，所以这一条
+对两边同样成立。
 """
 
 from __future__ import annotations
@@ -36,10 +60,14 @@ APPROVED = "approved"
 REJECTED = "rejected"
 WITHDRAWN = "withdrawn"
 PUBLISHED = "published"
+# 下面两个只有文档勘误用得上，见文件头
+RETIRED = "retired"  # 管理员主动撤销一条已经生效的勘误
+SUPERSEDED = "superseded"  # 同一篇文档有了更新的一条已发布勘误，这条自动让位
 
-STATUSES = (PENDING, APPROVED, REJECTED, WITHDRAWN, PUBLISHED)
+STATUSES = (PENDING, APPROVED, REJECTED, WITHDRAWN, PUBLISHED, RETIRED, SUPERSEDED)
 
-# 合法迁移。**全项目唯一一份**
+# 答案纠错的合法迁移。**published 是终态**——撤销要去退役它产出的那条
+# VerifiedAnswer，而不是回头改写这条纠错记录
 STATE_MACHINE: dict[str, tuple[str, ...]] = {
     PENDING: (APPROVED, REJECTED, WITHDRAWN),
     APPROVED: (PUBLISHED, REJECTED),
@@ -48,10 +76,26 @@ STATE_MACHINE: dict[str, tuple[str, ...]] = {
     WITHDRAWN: (),
 }
 
-# 只有作者还能改内容的状态。审核过了再改，等于绕过审核
+# 文档勘误的合法迁移。前四行和上面**逐字相同**（共用的就是这部分），
+# 差别只在 published 那一行：这条记录自己就是生效的东西，没有第二个对象
+# 可退役，所以它必须有出口
+DOC_STATE_MACHINE: dict[str, tuple[str, ...]] = {
+    PENDING: (APPROVED, REJECTED, WITHDRAWN),
+    APPROVED: (PUBLISHED, REJECTED),
+    PUBLISHED: (RETIRED, SUPERSEDED),
+    REJECTED: (),
+    WITHDRAWN: (),
+    RETIRED: (),
+    SUPERSEDED: (),
+}
+
+# 只有作者还能改内容的状态。审核过了再改，等于绕过审核。**两种纠错一致**
 EDITABLE = (PENDING,)
 
-# 允许进 RAG 的状态。**只有一个**——这就是「未审核不进 RAG」那条门禁
+# ⭐⭐ 允许进 RAG 的状态。**只有一个**——这就是「未审核不进 RAG」那条门禁。
+# 两种纠错共用这一个常量，也共用这一条规矩：
+#     答案纠错   `verified.publish_correction` 只在 published 这一步建索引
+#     文档勘误   `ingest.corrections.load_db_corrections` 只读 published 的行
 LIVE = (PUBLISHED,)
 
 
@@ -59,8 +103,17 @@ class TransitionError(ValueError):
     """不合法的状态迁移。调用方翻译成 409。"""
 
 
-def check_transition(current: str, target: str) -> None:
-    if target not in STATE_MACHINE.get(current, ()):
+def check_transition(
+    current: str, target: str, machine: dict[str, tuple[str, ...]] | None = None
+) -> None:
+    """`machine` 不传就是答案纠错那张表（历史调用方都不传，行为一字不变）。
+
+    ⚠️ 文档勘误那条路**必须显式传 `DOC_STATE_MACHINE`**。忘了传的表现是
+    「已发布的勘误撤销不了」——`check_transition` 会说不能从 published 变成
+    retired，而那是另一张表的规矩。
+    """
+    allowed = (machine or STATE_MACHINE).get(current, ())
+    if target not in allowed:
         raise TransitionError(f"不能从「{current}」变成「{target}」")
 
 

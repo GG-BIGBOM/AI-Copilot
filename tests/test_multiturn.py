@@ -640,19 +640,63 @@ class ThinkingLLM:
         pass
 
 
-async def test_reasoning_is_streamed_separately_from_the_answer(
+async def test_model_reasoning_never_reaches_the_browser(
     api_client, logged_in, public_chunk, fake_providers, monkeypatch
 ):
-    """⭐ 草稿要**边出边发**，而且和正文分开。
+    """⭐⭐ **模型的原始推理草稿一个字都不许流到前端。**
 
-    这是「详解太慢」的正解：模型其实 1 秒就开口了，只是说的是草稿。
-    不发草稿，前端那几十秒就是一片空白；混进正文，用户会读到
-    「材料里没提到…」这种自我推翻的话，比空白更糟。
+    这道题原来是反过来的：它断言草稿**逐字发出去**（那是当初填详解档
+    8~60 秒空白的做法）。改掉它的理由不是风格——那段草稿是模型在
+    **完整上下文**里自言自语，而完整上下文里有 system prompt、检索到的
+    材料原文（含用户私有文档）、以及材料里可能夹带的注入内容。
+    三道防幻觉闸门管的是**正文**；草稿那一路它们一个字都管不到，
+    等于在防线旁边开了一根管子。
+
+    ⚠️ 空白仍然要填，但填的是**系统自己的阶段进度**（`api/progress.py`），
+    见下面那道题。
+
+    这里造的草稿故意长得很像一次真实泄漏：它同时包含伪造的 system prompt
+    片段和一段材料原文。断言是「这些字符串一个都不出现在整条响应里」——
+    不是「reasoning-delta 里没有」，因为泄漏可能换个 part 类型再出来。
     """
     from copilot.api import providers
 
+    secret_prompt = "铁律1：不得使用你自己的常识补全"
+    secret_material = "客户A的对账口径是月结30天"
     title, body = public_chunk
-    llm = ThinkingLLM(draft="先看材料里有没有提到绑定网点", answer="第一步进入设置[1]。")
+    llm = ThinkingLLM(
+        draft=f"看看 system 里怎么说：{secret_prompt}；材料里写着{secret_material}",
+        answer="第一步进入设置[1]。",
+    )
+    monkeypatch.setattr(providers, "get_llm", lambda: llm)
+
+    r = await ask(api_client, body)
+    assert r.status_code == 200
+    assert secret_prompt not in r.text, "system prompt 从草稿那条管子漏出去了"
+    assert secret_material not in r.text, "材料原文从草稿那条管子漏出去了"
+    assert "看看 system 里怎么说" not in r.text
+
+    answered = "".join(c["delta"] for c in parts(r.text) if c["type"] == "text-delta")
+    assert answered == "第一步进入设置[1]。", "正文不该受影响"
+
+
+async def test_progress_fills_the_wait_and_is_all_constants(
+    api_client, logged_in, public_chunk, fake_providers, monkeypatch
+):
+    """⭐ 草稿拿掉了，但**空白不能回来**。
+
+    详解档第一个正文字要 8~60 秒。这段时间前端必须有东西在动，否则用户
+    看到的还是那句「选了详解，它不回答」。所以系统自己按真实阶段报进度。
+
+    ⚠️⚠️ **白名单断言**：发出去的每一行都必须能在 `api/progress.py`
+    的常量表里找到。它要拦的是「顺手拼一句带上下文的进度」——
+    比如「正在检索『客户A的对账口径』」，那一句就把问题原文送出去了。
+    新增一句进度就要往 `progress.ALL` 里加一行，否则这里当场变红。
+    """
+    from copilot.api import progress, providers
+
+    title, body = public_chunk
+    llm = ThinkingLLM(draft="随便想想", answer="第一步进入设置[1]。")
     monkeypatch.setattr(providers, "get_llm", lambda: llm)
 
     r = await ask(api_client, body)
@@ -661,12 +705,21 @@ async def test_reasoning_is_streamed_separately_from_the_answer(
     kinds = [c["type"] for c in chunks]
 
     assert "reasoning-start" in kinds and "reasoning-end" in kinds
-    drafted = "".join(c["delta"] for c in chunks if c["type"] == "reasoning-delta")
-    answered = "".join(c["delta"] for c in chunks if c["type"] == "text-delta")
-    assert drafted == "先看材料里有没有提到绑定网点"
-    assert answered == "第一步进入设置[1]。"
+    lines = [
+        line
+        for c in chunks
+        if c["type"] == "reasoning-delta"
+        for line in c["delta"].splitlines()
+        if line
+    ]
+    assert lines, "等待期间一个字都没有——空白回来了"
 
-    # 草稿在正文之前，而且**先收尾**——不然前端两个块会叠在一起
+    # `FOUND` 带一个 `{n}`，它是唯一允许的变量（一个整数不构成内容）
+    allowed = {t for t in progress.ALL if "{" not in t}
+    allowed |= {progress.FOUND.format(n=n) for n in range(0, 51)}
+    assert set(lines) <= allowed, f"发出了不在白名单里的进度：{set(lines) - allowed}"
+
+    # 进度在正文之前，而且**先收尾**——不然前端两个块会叠在一起
     assert kinds.index("reasoning-start") < kinds.index("text-start")
     assert kinds.index("reasoning-end") < kinds.index("text-start")
 
@@ -678,6 +731,10 @@ async def test_draft_never_becomes_the_stored_answer(
 
     落库的话，用户翻历史记录看到的是一段自言自语；参与判定的话，
     草稿里一句「材料里好像没有」就能把整条回答的来源全撤掉。
+
+    ⚠️ 2026-09-03 起草稿连**发**都不发了（见上一道题），但这道题仍然有效
+    而且更该留着：它验的是「草稿不许影响落库和来源」这条**下游**规则。
+    哪天有人把草稿接回来（比如做本机调试开关），这条规则必须还在。
     """
     from copilot.api import providers
 

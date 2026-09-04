@@ -120,13 +120,34 @@ async def finish(
     return job.status
 
 
+# 被回收的僵尸任务重排时写进 `job.error` 的话。用户会在文档页面上看到它
+# （`worker._mark_failed` 会把同一句抄进 `documents.error`），所以是人话。
+RECLAIM_NOTE = "上一次执行没有正常结束（worker 中断），已重新排队"
+# 反复弄死 worker 的那一份文件，最终判词。
+POISON_NOTE = (
+    "这份文件连续多次让解析进程中断，已停止重试。"
+    "多半是文件本身异常，请换一份或改成 PDF/Markdown 再传。"
+)
+
+
 async def reclaim_stale(session: AsyncSession, older_than: timedelta = STALE_AFTER) -> list[Job]:
-    """把卡在 running 的僵尸任务放回 pending，返回被回收的那些。
+    """把卡在 running 的僵尸任务收掉，返回被动过的那些（状态已经改好）。
 
     worker 被 OOM killer 收走、或机器直接重启时，那条 running 没人会去改。
-    worker 每次启动都跑一遍这个，是这套「没有心跳」的简易队列唯一的自愈手段。
+    这是这套「没有心跳」的简易队列唯一的自愈手段。
 
-    不提交：调用方还要把对应文档的状态一起改回去（见 worker.py），
+    ⚠️⚠️ **回收要认 `attempts`，不能一律放回 pending。**
+    放回 pending 走的是 `claim_next`，而 `attempts` 的上限判定长在
+    `finish()` 里——**一份每次都把 worker 弄死的文件永远走不到 `finish()`**：
+
+        claim → attempts+1 → 解析吃爆 400M → 被 systemd 收走 → 5 秒后重启
+        → 回收成 pending → claim → attempts+1 → …
+
+    次数无上限地涨，而队列是 `ORDER BY created_at` 的，这条永远排第一——
+    它不只是自己重试不完，还**挡住后面所有人的上传**。
+    所以这里补上同一条上限：超了就判 failed，和 `finish()` 一个口径。
+
+    不提交：调用方还要把对应文档的状态一起改过去（见 worker.py），
     两者必须同一个事务，否则任务回了 pending、文档还停在「解析中」。
     """
     cutoff = _now() - older_than
@@ -137,8 +158,14 @@ async def reclaim_stale(session: AsyncSession, older_than: timedelta = STALE_AFT
     )
     stale = list((await session.execute(stmt)).scalars())
     for job in stale:
-        job.status = "pending"
-        job.error = "上一次执行没有正常结束（worker 中断），已重新排队"
+        if job.attempts >= MAX_ATTEMPTS:
+            job.status = "failed"
+            job.error = POISON_NOTE
+            job.finished_at = _now()
+        else:
+            job.status = "pending"
+            job.error = RECLAIM_NOTE
+            job.finished_at = None
     return stale
 
 

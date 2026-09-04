@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -24,7 +25,14 @@ from sqlalchemy import delete, select
 from copilot.config import get_settings
 from copilot.db.models import Chunk, Document, Job, User
 from copilot.jobs import queue
-from copilot.jobs.worker import handle_parse_upload, run_job, run_once, startup_reclaim
+from copilot.jobs import worker as worker_mod
+from copilot.jobs.worker import (
+    handle_parse_upload,
+    run_job,
+    run_once,
+    run_worker,
+    startup_reclaim,
+)
 
 DIM = 1024
 
@@ -98,11 +106,18 @@ async def _make_upload(
     # 默认正文要够长到切得出块：太短会走进「切不出可检索片段」那条分支，
     # 把本来想测的东西盖掉
     body: str = "退货入库的操作步骤：先在收货单里录入运单号，再确认入库。",
+    job_status: str = "pending",
+    job_age_hours: float = 0.0,
 ) -> uuid.UUID:
     """造一份「已上传、待解析」的文档：落盘文件 + documents 行 + jobs 行。
 
     落盘走的是真实的 `Settings.upload_path`——相对路径拼接和越界检查
     也顺带一起验了。
+
+    `job_status="running"` + `job_age_hours` 直接造一条**僵尸**任务：
+    `claim_next` 只看 pending，所以这样造出来的任务只有回收能动它。
+    验「worker 起来之后才变成僵尸」那一类场景要用它——`claim_next` 造不出来，
+    那样造出来的僵尸在 worker 启动前就存在了。
     """
     s = get_settings()
     rel = f"{user_id}/{uuid.uuid4().hex}{filename[filename.rfind('.'):]}"
@@ -126,7 +141,12 @@ async def _make_upload(
         )
         session.add(doc)
         await session.flush()
-        await queue.enqueue(session, queue.PARSE_UPLOAD, queue.document_payload(doc.id))
+        job = await queue.enqueue(session, queue.PARSE_UPLOAD, queue.document_payload(doc.id))
+        if job_status != "pending":
+            job.status = job_status
+            job.attempts = 1
+            job.started_at = datetime.now(UTC) - timedelta(hours=job_age_hours)
+            doc.status = "running"
         await session.commit()
         return doc.id
 
@@ -253,6 +273,128 @@ async def test_fresh_running_job_is_left_alone(maker, owner):
     async with maker() as s:
         await queue.claim_next(s, [queue.PARSE_UPLOAD])
     assert await startup_reclaim(maker) == 0
+
+
+async def test_a_job_that_keeps_killing_the_worker_eventually_fails(maker, owner):
+    """⭐⭐ **毒任务不能无限重试。**
+
+    一份每次都把 worker 吃到 OOM 的文件，**永远走不到 `queue.finish()`**——
+    而 `attempts` 的上限判定原来只长在那里。回收一律放回 pending 的话：
+
+        claim(attempts=1) → 进程被收走 → 回收成 pending
+        claim(attempts=2) → 进程被收走 → 回收成 pending → …
+
+    次数一直涨，而队列是 `ORDER BY created_at`，这条永远排第一——
+    它不只是自己重试不完，**还挡住后面所有人的上传**。
+
+    ⚠️ 文档也要跟着判 failed。只收任务不收文档的话，队列里那行结案了，
+    页面上那篇还在「解析中」转圈。
+    """
+    doc_id = await _make_upload(maker, owner)
+    async with maker() as s:
+        job = await queue.claim_next(s, [queue.PARSE_UPLOAD])
+        # 模拟「已经被弄死过 MAX_ATTEMPTS 次」：每次都是 claim 成功、进程消失
+        job.attempts = queue.MAX_ATTEMPTS
+        job.started_at = datetime.now(UTC) - timedelta(hours=2)
+        (await s.get(Document, doc_id)).status = "running"
+        await s.commit()
+        job_id = job.id
+
+    assert await startup_reclaim(maker) == 1
+
+    async with maker() as s:
+        assert (await s.get(Job, job_id)).status == "failed"
+        doc = await s.get(Document, doc_id)
+        assert doc.status == "failed"
+        # 给用户的话必须是人话，它会原样显示在知识库页面上
+        assert "停止重试" in (doc.error or "")
+
+
+async def test_one_crash_counts_as_exactly_one_attempt(maker, owner):
+    """⭐ **一次崩溃只记一次 attempt。**
+
+    `attempts` 的定义是「被 `claim_next` 领走并开始执行了几次」。
+    回收那一步**只改状态、不动计数**——加了的话一次崩溃记两次，
+    `MAX_ATTEMPTS=3` 实际只允许一次半重试，而"最多重试三次"这句话
+    在文档和给用户的错误话术里到处都是。
+
+    ⚠️ 这道题验的是**不变量，不是新行为**：今天的代码本来就是对的
+    （全项目只有 `claim_next` 一处 `+= 1`）。钉下来是因为回收那一段
+    2026-09-03 刚改过，而"顺手把 attempts 也加上"看起来非常自然。
+    """
+    await _make_upload(maker, owner)
+
+    async with maker() as s:
+        job = await queue.claim_next(s, [queue.PARSE_UPLOAD])
+        assert job.attempts == 1
+        # 模拟崩溃：进程消失，这条 running 没人改
+        job.started_at = datetime.now(UTC) - timedelta(hours=2)
+        await s.commit()
+        job_id = job.id
+
+    await startup_reclaim(maker)
+    async with maker() as s:
+        assert (await s.get(Job, job_id)).attempts == 1, "回收把 attempts 也加了一次"
+
+    async with maker() as s:
+        again = await queue.claim_next(s, [queue.PARSE_UPLOAD])
+        assert again.id == job_id
+        assert again.attempts == 2, "第二次真正执行才该是第 2 次"
+
+
+async def test_the_loop_reclaims_without_waiting_for_a_restart(maker, owner):
+    """⭐⭐ **回收必须在循环里也跑，不能只在启动时跑一次。**
+
+    这是这一条真正的缺口，而且它恰好**绕开**了 `STALE_AFTER`：
+    `copilot-worker.service` 是 `Restart=always` + `RestartSec=5`，所以
+    最常见的那种崩溃（解析吃爆 MemoryMax=400M）自愈不了——
+
+        t=0    claim，started_at 记下
+        t=10s  被 systemd 收走
+        t=15s  worker 起来跑一次回收 → 这条只有 15 秒大，够不上 30 分钟 → 跳过
+        此后   worker 再也不重启，回收再也不跑
+               → 任务永远 running，文档永远「解析中」
+
+    ⚠️ **这道题必须让任务在 worker 起来之后才变成僵尸**，否则验的是启动那一次
+    回收（`test_stale_running_job_is_reclaimed` 已经在验它了）。所以：
+    先起 worker、等它空转，再直接插一行 `running` 的任务。
+    """
+    monkeypatched = worker_mod.RECLAIM_INTERVAL
+    worker_mod.RECLAIM_INTERVAL = 0.0  # 别让这道题真的等 60 秒
+    lines: list[str] = []
+    task = asyncio.create_task(
+        run_worker(poll_interval=0.01, embedder=FakeEmbedder(), report=lines.append)
+    )
+    try:
+        # 等 worker 起来并且把启动那一次回收跑完
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if any("队列已空" in m for m in lines):
+                break
+        else:
+            pytest.fail("worker 没起来")
+
+        # 现在才造僵尸：直接插一行 running，`claim_next` 碰不到它，
+        # 只有回收能把它挪走
+        doc_id = await _make_upload(maker, owner, job_status="running", job_age_hours=2)
+
+        for _ in range(400):  # 最多等 4 秒
+            await asyncio.sleep(0.01)
+            async with maker() as s:
+                if (await s.get(Document, doc_id)).status == "done":
+                    break
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        worker_mod.RECLAIM_INTERVAL = monkeypatched
+
+    async with maker() as s:
+        doc = await s.get(Document, doc_id)
+        assert doc.status == "done", (
+            "循环里没有回收：worker 不重启的话这条任务永远停在 running，"
+            f"文档永远停在「解析中」（现在是 {doc.status}）"
+        )
 
 
 # ---------- worker 端到端 ----------

@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -221,8 +222,14 @@ async def run_once(
         return "done" if ok else "failed"
 
 
-async def startup_reclaim(maker: async_sessionmaker[AsyncSession] | None = None) -> int:
-    """启动自愈：把上次没跑完的任务和文档一起放回排队状态。"""
+async def reclaim_orphans(maker: async_sessionmaker[AsyncSession] | None = None) -> int:
+    """自愈：把没人认领的 running 任务和它那篇文档一起收掉。
+
+    ⚠️ **文档状态要跟着任务走，而且两个方向都要跟。**
+    `reclaim_stale` 现在有两种去向（重排 / 认命），只处理 pending 那一支的话，
+    一条被判 failed 的任务背后那篇文档会永远停在「解析中」——
+    页面上是一个永远转圈的圈，而队列里那行早就结案了。
+    """
     maker = maker or SessionLocal
     async with maker() as session:
         stale = await queue.reclaim_stale(session)
@@ -230,11 +237,44 @@ async def startup_reclaim(maker: async_sessionmaker[AsyncSession] | None = None)
             if job.type != queue.PARSE_UPLOAD:
                 continue
             doc = await _load_document_safe(session, job.payload)
-            if doc is not None and doc.status == "running":
+            if doc is None or doc.status not in ("running", "pending"):
+                continue
+            if job.status == "failed":
+                doc.status = "failed"
+                doc.error = queue.POISON_NOTE
+            else:
                 doc.status = "pending"
+                doc.error = queue.RECLAIM_NOTE
         if stale:
             await session.commit()
         return len(stale)
+
+
+# 向后兼容的名字。启动那一次和循环里那些跑的是同一段逻辑——
+# **必须是同一段**，否则「启动能自愈、跑着不能」这种差异只会在事故当天被发现
+startup_reclaim = reclaim_orphans
+
+# 循环里多久自愈一次。
+#
+# ⭐⭐ **这个常量是补一个真实缺口，不是"顺手加个定时任务"。**
+# 在它之前，回收**只在 worker 启动时跑一次**，而 `copilot-worker.service`
+# 是 `Restart=always` + `RestartSec=5`。于是最常见的那种崩溃自愈不了：
+#
+#     t=0    claim，started_at 记下
+#     t=10s  解析吃爆 MemoryMax=400M，被 systemd 收走
+#     t=15s  worker 起来，跑 startup_reclaim
+#            → 这条任务只有 15 秒大，够不上 30 分钟的 stale 线 → **跳过**
+#     此后   worker 再也不重启，回收再也不跑
+#            → 任务永远 running，文档永远「解析中」
+#
+# 那正是 STALE_AFTER 想挡的场景，却因为「只在启动时查一次」而漏掉了。
+# 放进循环之后，同一条任务在 t=30min 的某一次空转里被收掉，不需要任何人干预。
+#
+# ⚠️ 60 秒是刻意远小于 `STALE_AFTER`（30 分钟）：判据仍然是那条线，
+# 这里只决定「多久去看一眼」。看得勤一点没有代价——一条走索引的 SELECT。
+# ⚠️ **只在没活干的时候看。** 循环在跑任务时是阻塞的（解析故意没丢线程池），
+# 所以这一句不可能和自己正在跑的那条任务撞上。
+RECLAIM_INTERVAL = 60.0
 
 
 async def run_worker(
@@ -265,11 +305,12 @@ async def run_worker(
             # 所以这里静默退让即可
             signal.signal(sig, lambda *_: stopping.set())
 
-    if n := await startup_reclaim():
+    if n := await reclaim_orphans():
         say(f"回收了 {n} 条上次没跑完的任务")
     say(f"worker 已启动，轮询间隔 {poll_interval}s，Ctrl-C 退出")
 
     announced_idle = False
+    last_reclaim = time.monotonic()
     while not stopping.is_set():
         try:
             outcome: Outcome = await run_once(embedder)
@@ -280,6 +321,18 @@ async def run_worker(
         if outcome == "done":
             announced_idle = False
             continue  # 队列里可能还堆着，立刻接着取
+
+        # ⭐ 定期自愈。**放在这里而不是只放启动那一次**，理由见 RECLAIM_INTERVAL。
+        # 包在 try 里：回收失败（库抖了一下）不该把 worker 整个打断，
+        # 下一轮还会再来一次
+        if time.monotonic() - last_reclaim >= RECLAIM_INTERVAL:
+            last_reclaim = time.monotonic()
+            try:
+                if n := await reclaim_orphans():
+                    say(f"回收了 {n} 条没人认领的任务")
+                    announced_idle = False
+            except Exception:  # noqa: BLE001 - 同上，不能因为自愈失败而停摆
+                logger.exception("回收僵尸任务失败，下一轮再试")
 
         if outcome == "idle" and not announced_idle:
             announced_idle = True

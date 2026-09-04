@@ -110,6 +110,172 @@ I-7（21 条无关来源）、I-8（两处语料笔误）复核为**早已修好
 理由见 `frontend/lib/export-answer.ts` 文件头——1.6GB 内存和 2.4 的许可
 红线各否掉了一种服务端做法）。
 
+### 2026-09-03　可靠性 / 安全 / RAG 加固
+
+**做完的四项**（都带回归，详情在各文件的注释和 [ISSUES.md](ISSUES.md)）：
+
+1. ⭐⭐ **`POST/DELETE /api/corrections` 收紧成管理员。** 在此之前**任何一个
+   拿到邀请码的注册用户**都能把一篇语雀文档的正文整个换掉——保存那一刻
+   重新入库、对全站生效、无人审核，还能删掉别人写的勘误。
+   M16 对 `answer_corrections` 下过一模一样的判断（「提交 ≠ 生效」），
+   只是没扫到这一条；而它比另外两条改公共知识的路**更强**。
+   零用户可见影响：前端从来没调用过这两个接口。
+2. ⭐⭐ **模型原始推理草稿不再流给浏览器。** 详解档曾把 `reasoning_content`
+   逐字转发（填 8~60 秒的空白）。那段草稿是模型在**完整上下文**里自言自语——
+   system prompt、召回材料原文（含私有文档）、材料里夹带的注入内容都在里面。
+   三道闸门管的是正文，草稿那一路一个字都管不到。改成系统自己的阶段进度
+   （`api/progress.py`，全是常量，有白名单断言）。
+3. ⭐ **worker 崩溃后任务不再永久卡死。** 回收原来只在启动时跑一次，而
+   systemd 5 秒就把 worker 拉起来——那时任务才十几秒大，够不上 30 分钟的
+   stale 线，**被跳过**，此后再也不会被检查。改成循环里每 60 秒跑一次；
+   顺带补上 `attempts` 上限，挡住"每次都弄死 worker 的毒任务"无限重试
+   （它同时在挡整条队列）。
+4. **`copilot disable <email>`。** 撤销本来就是即时的（每次请求都查库读
+   `is_active`），缺的只是一个改它的入口——在此之前只能登服务器写 SQL。
+   ⭐ 因此这个项目**不需要 `token_version`**，理由写在命令的 docstring 里。
+
+**顺带**：`/api/health/live` + `/api/health/ready`（ready 查库和迁移版本，
+**不查模型服务**）、CORS 补上 `PATCH`（漏了它只在本机开发复现）、
+新增 [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md)。
+
+**审计结论里"已经是对的、不要动"的几项**（写下来免得下次重复查）：
+
+| 查的东西 | 结论 |
+|---|---|
+| `chunks.owner_id` 会不会被调用方写错 | **不会**。`write_chunks` 是唯一写入点，值只取 `doc.*`，三个调用方都走它。**不需要加数据库 trigger** |
+| Agent guard 是不是 post-output | **不是**。Agent 自己写的正文全程攒在 `drafted` 里，闸门判完才发；`answer_kb` 的正文直通，Agent 碰不到原始材料 |
+| pgvector filtered-ANN recall | **不适用**。`embedding` 上根本没有 ANN 索引，是精确检索，召回率恒 100%。哪天加 HNSW 再补那轮评测 |
+| CSRF | cookie 是 `SameSite=Lax` + `HttpOnly` + `Secure`，写接口全是 POST/PATCH/DELETE，跨站发不出去。CORS 逐个列来源、不用星号 |
+| 用户禁用后旧 JWT | 立刻失效，已有回归 |
+| 上传安全 | 扩展名白名单 + uuid 落盘 + 边写边判大小 + 每人份数上限 + zipguard + 解析超时；纠错截图走魔数白名单。systemd 已经是 `NoNewPrivileges`/`PrivateTmp`/`ProtectSystem=strict`/`ProtectHome`/`ReadWritePaths` |
+| 私有正文会不会进日志 / span | **不会**（逐条 grep + 逐个 span 属性核对）。但**没有机制在守**，见 ISSUES I-16 |
+
+### 2026-09-03 下半场　文档勘误改成「提交 → 审核 → 发布」
+
+⚠️⚠️ **上半场那一刀切错了方向，这里纠正。** 把 `POST /api/corrections`
+收紧成 `CurrentAdmin` 确实堵住了「任何注册用户能污染公共知识库」，
+但顺带**把用户挡在了纠错之外**——而发现原文写错的恰恰是天天在用的那些人。
+
+⭐ 正确的切法不是「谁能提交」，是「提交之后要不要过审」。
+现在两种纠错的语义完全对齐：
+
+```
+登录用户提交 → pending → 管理员 approve → publish → 才影响公共知识库
+```
+
+**做了什么**
+
+1. `corrections` 表补审核与审计字段（迁移 `9b3f2ac71d08`，手写）：
+   `status` / `version` / `reviewed_by` / `reviewed_at` / `review_note` / `published_at`。
+   ⚠️ **存量行整体映射到 `published`**——它们今天就是生效的，
+   落成 pending 的话线上那几条会在下一次 ingest 时集体失效，
+   而迁移退出码 0、没有任何一处看得出来。
+2. `target_url` 的唯一性从**全表**收窄成**只在已发布之间**
+   （部分唯一索引 `ux_corrections_published_target`）。全表唯一在提交队列下
+   是错的：那等于「后一个人改写前一个人还没审的意见」。
+3. ⭐⭐ **RAG 的那道门**：`load_db_corrections` 加 `where status IN flow.LIVE`。
+   这一句才是「提交 ≠ 生效」的真正落点——状态加在表上而这里忘了过滤的话，
+   接口全绿、队列照常显示 pending，公共库照样被改掉，**没有任何症状**。
+4. 重新入库从 `POST` 挪到 **publish / retire**。提交那一刻绝不碰公共知识库。
+5. 撤销是**软撤销**（`status='retired'`，`published_at` 不清空）+ 重新入库
+   还原成语雀原文。同一篇发布新的一条时，旧的自动 `superseded`。
+6. 管理台补 `/api/admin/doc-corrections/{list,detail,review,publish}`，
+   和答案纠错那一组逐条对齐。
+7. `corrections-export` 只导已发布的——把一条 pending 导进仓库，
+   下次别人跑 ingest 时它就从**文件**那一路生效了，正好绕过刚建的门禁。
+
+**共用但不合表**　`corrections_flow` 现在有两张迁移表：审核那一半逐字相同
+（`test_the_two_state_machines_agree_on_the_review_half` 钉着），
+只在 published 之后分岔——文档勘误这条记录**自己就是**生效的那个东西，
+没有第二个对象可退役。
+
+**回归**　`tests/test_correction_review.py` 21 条，其中「生效」那一组
+**直接查 `load_db_corrections`**，不只查状态码。
+
+### 顺带确认、没有改代码的两项
+
+- **worker `attempts` 的定义**：全项目只有 `claim_next` 一处 `+= 1`，
+  回收只读不写 → **一次崩溃恰好记一次**。已加
+  `test_one_crash_counts_as_exactly_one_attempt` 钉住（改回收那一段时
+  "顺手把 attempts 也加上"看起来非常自然）。
+- **CSRF**：22 个改状态的接口逐个核过 content-type，0 个 GET 带副作用。
+  结论和条件写进 [OPERATIONS.md](OPERATIONS.md)「CSRF：当前结论」，
+  可核查的部分钉在 `tests/test_csrf_surface.py`。**没有引入 CSRF token**。
+
+### 2026-09-03 第三段　付费 A/B 停在判分器上
+
+**要做的事**：Dense vs Selective Hybrid 的付费 A/B。**没跑成**，
+第一臂就撞上判分器故障，已按规矩停手、没有继续烧钱。
+
+⛔ **[ISSUES.md](ISSUES.md) I-18：判分器模型被 Moonshot 下架。**
+`risk-dense` 一臂 56 题里 38 题判分失效（67.9%，红线 5%）。
+账号上只剩 `kimi-k2.6` / `kimi-k3`（两个 `-code` 的不适合判分），
+两个都实测能用。**换判分器 = 换量尺**，换完绝对数字不能再和历史 baseline 比，
+这是产品决定——已问，等拍板。
+
+⚠️ 那一轮打出来的准确率是 **100.0%**，而分母只有 18 题。
+`reliable=False` 拦住了它——这正是 M13 P0 三态判分存在的理由。
+
+⛔ **[ISSUES.md](ISSUES.md) I-19：那份失败证据顶掉了好证据，门禁从退出码 0
+变成 2**，也就是说它会挡住下一次 `deploy.sh ai`，而原因和部署的改动无关。
+已把它移到 `eval/results/unreliable/`（`load_runs` 的 glob 非递归，
+子目录不参与挑选），门禁实测回到 0。**文件留着**，故障证据没销毁。
+
+**这一段做好了、可以直接用的部分**（判分器修好就能跑）：
+
+1. **`--selective on|off`** 加在两个 runner 上（形状同 `--general`）。
+   ⚠️ 在此之前只能靠环境变量分臂，而 baseline 那一臂等于"什么都不设"——
+   一次 `$env:SELECTIVE_HYBRID_ENABLED="true"` 留在 shell 里，
+   「跑 dense 基线」就会安静地跑成 selective，**两臂同配置而对比表照出差异**。
+2. **`compare --variable KEY` 的身份核验**（21 个字段）。在此之前 `compare`
+   只**打印**参数、从来没**核对**过。现在语料指纹/代码版本/模型/prompt 指纹
+   任何一项不一致就判 UNRELIABLE 并拒绝出表。`git_commit` 带脏工作区指纹，
+   两臂之间改了没提交的代码也拦得住。
+3. **档案补了四个身份字段**：`git_commit` / `general_effective` /
+   `injection_guard` / `dataset_sha`。⚠️ `general` 老字段没动——
+   `prompt_sha` 读它，改了等于改指纹口径。
+4. PowerShell 下的完整命令写进 [EVALUATION.md](EVALUATION.md) 四·五·一。
+
+⭐⭐ **顺带抓出一个生产 bug（已修）**：`publish_doc_correction` 把「旧勘误降级」
+和「新勘误升为 published」放在同一次 flush 里提交，而
+`ux_corrections_published_target` 是**部分唯一索引**、逐条语句检查、
+不能 DEFERRABLE——SQLAlchemy 先发哪条 UPDATE 不定，先发新的那条就当场
+撞索引 **500**。表现是间歇性的（随机顺序下 3 次红 2 次）。
+修法是降级之后显式 `await session.flush()`。
+⚠️ 值得记住的是发现方式：第一反应是"共享开发库又污染了"——
+**按那个结论把题改绿的话，线上就会留着「同一篇发布第二条勘误偶尔失败」**。
+
+### 还没做的（本轮清出来的）
+
+1. **Selective Hybrid 的付费评测**（免费那一档已跑完全绿；付费那一档
+   ⛔ **被判分器故障挡住**，见上面那一节和 [ISSUES.md](ISSUES.md) I-18。
+   要先定判分器换哪个模型）。
+
+   ```
+                     dense   hybrid-all   selective
+   完整问句 hit      29/30      29/30       29/30
+   完整问句 MRR@5    0.911      0.911       0.911
+   identifier hit     6/15      15/15       15/15
+   identifier MRR@5  0.367      0.933       0.933
+   classifier FP/FN     —          —          0/0
+   ```
+
+   ⚠️⚠️ **但免费这一档看不见安全指标。** `keyword.yaml` 里 0 道
+   `no_answer` 题，而 ADR-16 那次回退（幻觉 0% → 10%）的机理只在
+   no_answer 题上显形——2026-08-29 那轮的「检索命中率一点没动」
+   正是这个结构性盲区。所以还要跑付费那两轮，命令和放行判据在
+   [EVALUATION.md](EVALUATION.md) 四·五·一。**开关继续默认关。**
+2. **[ISSUES.md](ISSUES.md) I-16**：span / 日志「不带原文」没有闸门。
+   `TRACING_ENABLED=true` 上生产之前必须补。
+3. **备份不是同一个 generation**（[OPERATIONS.md](OPERATIONS.md) 第三节）：
+   dump 和文件 tar 之间被删掉的图，恢复后会留下指不到文件的 image id。
+4. **`SESSION_FACTS_ENABLED` 打开之前**要先给事实表加一个来源标记。
+   今天存的是 `{value, turn, was}`，三个来源（会话的 `knowledge_space_id`、
+   用户原话里的主体、Agent `save_requirement` 填的 7 项）在库里**长得一模一样**，
+   而第三个是模型转写的。开 flag 那天会把存量低置信度事实一起注入 prompt。
+   ⚠️ `session_facts.py` 文件头写着「一条都不靠模型抽取」——
+   那句话对前两个来源成立，对第 7 项那组不完全成立。
+
 ### 以下几项需要你本人操作，我做不了
 
 1. **[ISSUES.md](ISSUES.md) I-6 后半「配图编号跳号」需要一个真实例子**

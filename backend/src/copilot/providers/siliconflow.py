@@ -17,7 +17,18 @@ from copilot.providers.base import RerankResult
 
 
 class ProviderError(RuntimeError):
-    pass
+    """外部模型服务出错。
+
+    `status` 是 HTTP 状态码（拿不到就是 None）。⚠️ **它存在的理由是「该不该重试」
+    这个判断不能靠解析错误字符串。** 2026-09-03 判分器那次故障里，
+    `moonshot-v1-128k` 被下架返回 404，而重试逻辑对所有异常一视同仁——
+    于是每一道题都白白重试 3 次，把一次「模型不存在」放大成三倍的等待，
+    而结论从第一次就已经定了。
+    """
+
+    def __init__(self, *args: object, status: int | None = None) -> None:
+        super().__init__(*args)
+        self.status = status
 
 
 class SiliconFlowClient:

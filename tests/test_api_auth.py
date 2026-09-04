@@ -333,6 +333,60 @@ async def test_health_needs_no_login(api_client):
     assert r.status_code == 200 and r.json()["status"] == "ok"
 
 
+async def test_liveness_never_touches_the_database(api_client, monkeypatch):
+    """⭐ 存活探针**不许碰数据库**。
+
+    它回答的是「要不要重启我」。把数据库塞进来的话，一次 Postgres 抖动
+    会让 systemd 去重启一个本身好好的 API 进程——重启治不好数据库，
+    只会在故障期间额外制造几十秒的不可用。
+
+    断言方式是把引擎的 `connect` 换成会炸的：真碰了库，这道题当场变红。
+    """
+    from copilot.api import app as app_mod
+
+    class Exploding:
+        def connect(self, *a, **kw):
+            raise AssertionError("存活探针碰了数据库")
+
+    # ⚠️ 换的是 `app.py` 里那个模块级引用，不是 `AsyncEngine` 实例的属性——
+    # 后者不让改（AttributeError），而 app.py 是 `from ... import engine`，
+    # 所以真正要拦的就是这一个名字
+    monkeypatch.setattr(app_mod, "engine", Exploding())
+    r = await api_client.get("/api/health/live")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+async def test_readiness_reports_db_and_migration(api_client):
+    """就绪探针要说清**为什么**就绪，不能只回一个 ok。
+
+    ⭐ `migration` 那一项是这条接口存在的主要理由：「代码传上去了、迁移
+    没跑」在这个项目真实发生过（`deploy.sh` 从 2026-08-29 起跑不完，
+    卡在第 1 步，四天没人发现）。那种故障不报 500，
+    要等到有用户问到那条路径才暴露。
+    """
+    r = await api_client.get("/api/health/ready")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["db"] == "ok"
+    # 本机跑测试时库一定是 upgrade head 过的
+    assert body["checks"]["migration"] == "ok", body["checks"]
+
+
+async def test_readiness_says_not_ready_when_the_database_is_down(api_client, monkeypatch):
+    """库连不上就要 503，而且**不能抛 500**——探针自己崩掉等于没有探针。"""
+    from copilot.api import app as app_mod
+
+    class Exploding:
+        def connect(self, *a, **kw):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(app_mod, "engine", Exploding())
+    r = await api_client.get("/api/health/ready")
+    assert r.status_code == 503, r.text
+    assert r.json()["checks"]["db"] == "fail"
+
+
 # ---------- 管理员守卫（M14-A）----------
 
 
@@ -381,3 +435,41 @@ async def test_a_disabled_account_cannot_even_authenticate(api_client, logged_in
 
     r = await api_client.get("/api/knowledge-spaces")
     assert r.status_code == 401
+
+
+async def test_disable_command_revokes_a_live_token(api_client, logged_in, maker):
+    """⭐⭐ **`copilot disable` 之后，**签发在停用之前**的那张 JWT 立刻作废。**
+
+    这是 plan.md「Release Blockers」里「用户禁用后旧 JWT 还能调用」那一条的
+    证据。它成立靠的是一件架构上的事实：`get_current_user_optional` 每次请求
+    都拿 `sub` 去 `session.get(User, ...)`，顺手就读到了 `is_active`——
+    也就是说**撤销本来就是即时的**，缺的只是一个改 `is_active` 的入口。
+
+    ⚠️ 所以这个项目**不需要 `token_version`**。那套东西是为「校验时不查库」
+    设计的；在一个每次都查库的系统里加它，只会多一个必须和 `is_active`
+    保持一致的字段，而它们不一致的表现正是「停用了还能用」。
+
+    ⚠️ 令牌**在停用之前签**，这一步不能省：停用后再签一张来测，验的是
+    「签发时会不会拒绝」，而这里要验的是「已经发出去的那张会不会失效」。
+    """
+    from copilot.auth.security import create_access_token
+    from copilot.cli import _disable
+    from copilot.db.models import User
+
+    async with maker() as s:
+        user = await s.get(User, logged_in)
+        email = user.email
+        token = create_access_token(user.id)
+
+    headers = {"Authorization": f"Bearer {token}"}
+    api_client.cookies.clear()  # 罐子里那份登录态会先于 Bearer 被读到
+    assert (await api_client.get("/api/auth/me", headers=headers)).status_code == 200
+
+    await _disable(email, undo=False)
+    assert (await api_client.get("/api/auth/me", headers=headers)).status_code == 401, (
+        "停用之后旧令牌还能用——撤销不是即时的"
+    )
+
+    # --undo 之后同一张令牌又能用了：停用不等于删号，数据和会话都还在
+    await _disable(email, undo=True)
+    assert (await api_client.get("/api/auth/me", headers=headers)).status_code == 200

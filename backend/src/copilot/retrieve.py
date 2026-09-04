@@ -25,7 +25,7 @@ from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from copilot import assets, obs
+from copilot import assets, obs, query_shape
 from copilot import lexical as lexical_mod
 from copilot.config import get_settings
 from copilot.db.models import Chunk, KnowledgeSpace
@@ -609,8 +609,27 @@ async def _search(
     # ⚠️ 池子大小仍然是 `top_k`。融合会挤掉向量那一路排在最后的几块——
     # 那是 hybrid 的**本意**（让词法命中的块有机会顶掉语义上似是而非的块），
     # 也让重排的开销和改动前一模一样（同样 20 条进去）。
-    if s.hybrid_enabled:
-        with obs.span("retrieve.lexical", top_k=s.hybrid_lexical_k) as sp_lex:
+    # ⭐ 走不走词法这一路，两个开关：
+    #     hybrid_enabled            一律走（W1.2 的原形态，2026-08-29 被打回默认关）
+    #     selective_hybrid_enabled  只在"裸粘贴/编码型"查询上走
+    # 判据是纯规则、不调模型，见 `copilot.query_shape`。
+    #
+    # ⚠️ **判的是 `query`——也就是多轮改写之后真正拿去检索的那一句**，
+    # 不是用户的原话。改写会把「那不良品呢」补成一个完整问句，那时它就
+    # **应该**按完整问句处理（走纯向量）。拿原话判的话，一句被改写成
+    # 完整问句的追问会被当成裸粘贴，那正好是判反了
+    use_lexical = s.hybrid_enabled or (
+        s.selective_hybrid_enabled and query_shape.is_identifier_query(query)
+    )
+    if use_lexical:
+        with obs.span(
+            "retrieve.lexical",
+            top_k=s.hybrid_lexical_k,
+            # 哪个开关放它进来的。**两条路的效果要能分开归因**——
+            # 台账里只写"走了词法"的话，selective 的 A/B 没法回答
+            # 「它到底在哪些查询上生效了」
+            selective=not s.hybrid_enabled,
+        ) as sp_lex:
             lexical = await _lexical_recall(
                 session, query, space_id, common, user_id, limit=s.hybrid_lexical_k
             )

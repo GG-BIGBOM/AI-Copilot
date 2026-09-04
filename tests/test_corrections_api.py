@@ -17,6 +17,7 @@ from chat_helpers import PASSWORD
 from sqlalchemy import delete, select
 
 from copilot.auth.invites import create_invite_codes
+from copilot.auth.security import create_access_token
 from copilot.db.models import Correction, InviteCode, User
 
 URL = "https://www.yuque.com/wdterpqjb/test/correction-case"
@@ -55,6 +56,20 @@ async def author(api_client, maker):
         await s.commit()
 
 
+@pytest.fixture
+async def editor(author, maker):
+    """`author`，但是管理员。
+
+    ⚠️ 提交勘误**人人可做**（见 `test_any_logged_in_user_can_submit`）；
+    这个夹具给的是要**审核 / 发布 / 撤销**那几道题。
+    下面「邀请码」那一节仍然用 `author`——它要先验一次普通用户被拒。
+    """
+    async with maker() as s:
+        (await s.get(User, author)).is_admin = True
+        await s.commit()
+    return author
+
+
 def _payload(**over):
     body = {
         "target_url": URL,
@@ -66,25 +81,32 @@ def _payload(**over):
     return body
 
 
-async def test_save_reports_whether_it_took_effect(api_client, author, no_reingest, maker):
-    """⭐ 回执要如实说**生效没有**，不能只说「已保存」。
+async def test_submit_reports_that_it_is_not_effective_yet(api_client, author, no_reingest):
+    """⭐⭐ 回执要如实说**还没生效**。
 
-    落库了不等于生效了。只说保存成功的话，用户改完再问一遍发现答案没变，
-    只会认定这个功能是假的。
+    这条题原来断言的是相反的事（`applied is True`、note 里有「已生效」），
+    因为那时提交就是覆盖公共知识库。现在提交只进审核队列，
+    **回执必须说清楚**——说成"已生效"的话，用户改完再问一遍发现答案没变，
+    只会认定这个功能是假的（而这一次它其实是对的，只是还没审）。
     """
     r = await api_client.post("/api/corrections", json=_payload())
     assert r.status_code == 201, r.text
     data = r.json()
-    assert data["applied"] is True
-    assert data["chunks"] == 3
-    assert "生效" in data["note"]
+    assert data["applied"] is False
+    assert data["chunks"] == 0
+    assert "审核" in data["note"]
+    assert data["correction"]["status"] == "pending"
     assert data["correction"]["target_url"] == URL
 
 
-async def test_second_save_updates_instead_of_duplicating(api_client, author, no_reingest, maker):
-    """同一篇再改一次是**更新**，不是新增。
+async def test_resubmitting_the_same_doc_updates_my_own_pending_one(
+    api_client, author, no_reingest, maker
+):
+    """同一个人对同一篇再提一次是**更新自己那条待审的**，不是堆一串草稿。
 
-    两条勘误指向同一篇是配置错误——ingest 那边会直接抛。让唯一约束在这里就挡住。
+    ⚠️ 注意这条不变量比原来**弱**：原来 `target_url` 是全表唯一，
+    现在只有「已发布」之间唯一。两个**不同的人**给同一篇各提一条待审的，
+    是完全正常的事（见 `test_two_users_may_both_submit_for_the_same_doc`）。
     """
     await api_client.post("/api/corrections", json=_payload())
     r = await api_client.post("/api/corrections", json=_payload(body="# 改第二遍"))
@@ -92,7 +114,13 @@ async def test_second_save_updates_instead_of_duplicating(api_client, author, no
 
     async with maker() as s:
         rows = list(
-            (await s.execute(select(Correction).where(Correction.target_url == URL))).scalars()
+            (
+                await s.execute(
+                    select(Correction).where(
+                        Correction.target_url == URL, Correction.author_id == author
+                    )
+                )
+            ).scalars()
         )
     assert len(rows) == 1
     assert rows[0].body == "# 改第二遍"
@@ -110,30 +138,80 @@ async def test_target_must_be_a_link(api_client, author, no_reingest):
     assert r.status_code == 422
 
 
-async def test_everyone_sees_every_correction(api_client, author, no_reingest):
-    """列表不按作者过滤——它们改的是同一个公共知识库，谁改了什么大家都该看见。"""
+async def test_i_can_always_see_my_own_submission(api_client, author, no_reingest):
+    """自己提的，任何状态都看得见。
+
+    ⚠️ 「已发布的人人可见」那一半在 `test_correction_review.py` 里验——
+    它要先真的走完发布，而这个文件里 `_reingest_one` 是假的。
+    """
     await api_client.post("/api/corrections", json=_payload())
     r = await api_client.get("/api/corrections")
     assert r.status_code == 200
     assert any(c["target_url"] == URL for c in r.json())
 
+    mine = await api_client.get("/api/corrections/mine")
+    assert mine.status_code == 200
+    assert [c["status"] for c in mine.json() if c["target_url"] == URL] == ["pending"]
 
-async def test_delete_removes_it(api_client, author, no_reingest, maker):
-    """撤销之后那一篇回到语雀原文。"""
+
+async def test_delete_refuses_a_pending_one(api_client, editor, no_reingest, maker):
+    """⭐ `DELETE` 是「撤销一条**已发布**的」，不是「删掉这一行」。
+
+    还没发布的东西没有"撤销"可言——作者要收回自己那条走
+    `PATCH {"action": "withdraw"}`。管理员对着一条 pending 点 DELETE
+    应该拿到 409 而不是把它删掉：物理删掉的话，那条提交连同它的作者、
+    时间、理由一起消失，而审核队列上刚才还显示着它。
+    """
     cid = (await api_client.post("/api/corrections", json=_payload())).json()["correction"]["id"]
-    assert (await api_client.delete(f"/api/corrections/{cid}")).status_code == 204
+    r = await api_client.delete(f"/api/corrections/{cid}")
+    assert r.status_code == 409, r.text
 
+    # ⚠️ 按 **id** 查，不按 target_url 数行数。开发库是共享的，
+    # 一次半路失败的历史运行会留下同 URL 的孤儿行（`author_id` 是
+    # `ON DELETE SET NULL`，删用户删不掉它）——那正是 ISSUES I-3 那一族
     async with maker() as s:
-        rows = list(
-            (await s.execute(select(Correction).where(Correction.target_url == URL))).scalars()
-        )
-    assert rows == []
+        row = await s.get(Correction, uuid.UUID(cid))
+    assert row is not None, "被物理删掉了"
+    assert row.status == "pending"
 
 
 async def test_requires_login(api_client):
     """未登录一律 401——勘误改的是所有人都会看到的内容。"""
     assert (await api_client.post("/api/corrections", json=_payload())).status_code == 401
     assert (await api_client.get("/api/corrections")).status_code == 401
+
+
+async def test_any_logged_in_user_can_submit(api_client, maker, no_reingest):
+    """⭐⭐ **提交人人可做。** 这条题是上一轮那道 `test_writing_needs_admin` 的反面。
+
+    上一轮把 POST 收紧成管理员，安全了，但**把用户挡在了纠错之外**——
+    而发现原文写错的恰恰是天天在用的那些人，不是管理员。
+    正确的切法不是"谁能提交"，是"提交之后要不要过审"。
+
+    ⚠️ 用 Bearer 而不是 cookie：`api_client` 的罐子里可能已经有别人的登录态，
+    而 `extract_token` **先看 cookie 再看 Authorization**（同 test_admin_api）。
+    """
+    email = f"plain-{uuid.uuid4().hex[:8]}@test.local"
+    async with maker() as s:
+        u = User(email=email, password_hash="x", is_active=True, is_admin=False)
+        s.add(u)
+        await s.commit()
+        headers = {"Authorization": f"Bearer {create_access_token(u.id)}"}
+        uid = u.id
+
+    try:
+        api_client.cookies.clear()
+        r = await api_client.post("/api/corrections", json=_payload(), headers=headers)
+        assert r.status_code == 201, r.text
+        # ⚠️ 但它**没有生效**：落的是 pending
+        assert r.json()["correction"]["status"] == "pending"
+        assert r.json()["applied"] is False
+        assert (await api_client.get("/api/corrections", headers=headers)).status_code == 200
+    finally:
+        async with maker() as s:
+            await s.execute(delete(Correction).where(Correction.author_id == uid))
+            await s.execute(delete(User).where(User.id == uid))
+            await s.commit()
 
 
 # ---------- 两路合并 ----------

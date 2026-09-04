@@ -50,20 +50,39 @@ export type Citation = {
 };
 
 /** 一条人工勘误：语雀原文写错了，用这条盖掉它。字段跟后端 `CorrectionOut` 对齐。 */
+/**
+ * 文档勘误：语雀某一篇写错了，提一条修改。
+ *
+ * ⚠️⚠️ **提交 ≠ 生效**（2026-09-03）。任何登录用户都能提，落成 `pending`，
+ * 一个字都不进知识库；管理员审核通过并发布之后才影响所有人的答案。
+ * 生命周期和 `AnswerCorrection` 完全一样，共用 `CorrectionStatus`。
+ */
 export type Correction = {
   id: string;
   target_url: string;
   title: string;
   reason: string;
   body: string;
+  /** 内容语义：这条勘误说的是「语雀那篇整个作废」。**不是流程状态**，别和 status 混 */
   retired: boolean;
+  status: DocCorrectionStatus;
+  version: number;
+  author_id: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  published_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export type CorrectionSaved = {
   correction: Correction;
-  /** 落库了不等于生效了——找不到对应的语雀原文、或重新入库挂了，都会是 false */
+  /**
+   * **提交之后恒为 false**：新提的勘误一律是 pending，还没影响任何人。
+   * 管理员发布那一步用的是另一个回执（`PublishDocOut`），那里它才有意义——
+   * 找不到对应的语雀原文、或重新入库挂了，都会是 false
+   */
   applied: boolean;
   chunks: number;
   note: string;
@@ -303,6 +322,30 @@ export type CorrectionStatus =
   | "rejected"
   | "withdrawn"
   | "published";
+
+/**
+ * 文档勘误多两个终态。
+ *
+ * ⚠️ 答案纠错**没有**这两个：它发布出去的是一条 VerifiedAnswer，撤销要去
+ * 退役那条，而不是回头改写纠错记录。文档勘误这条记录**自己就是**生效的
+ * 那个东西，所以它需要出口。后端两张迁移表，见 `corrections_flow.py`
+ */
+export type DocCorrectionStatus =
+  | CorrectionStatus
+  /** 管理员撤销了这条已经生效的勘误 */
+  | "retired"
+  /** 同一篇有了更新的一条已发布勘误，这条自动让位 */
+  | "superseded";
+
+export const DOC_CORRECTION_STATUS_LABEL: Record<DocCorrectionStatus, string> = {
+  pending: "待审核",
+  approved: "已通过，待发布",
+  rejected: "已拒绝",
+  withdrawn: "已撤回",
+  published: "已生效",
+  retired: "已撤销",
+  superseded: "已被新版本替代",
+};
 
 export const CORRECTION_STATUS_LABEL: Record<CorrectionStatus, string> = {
   pending: "待审核",
@@ -562,13 +605,19 @@ export const api = {
   deleteVerified: (id: string) =>
     request<void>(`/api/verified/${id}`, { method: "DELETE" }),
 
+  // ⚠️ 文档勘误这一族统一带 `Doc` 前缀。**答案纠错那边已经占了 `submitCorrection`**
+  // 这个名字（`/api/answer-corrections`），两族同名的下场是改一处、错另一处
+  /** 已发布的（人人可见）+ 自己提的（任何状态）。别人还没审的不在里面 */
   corrections: () => request<Correction[]>("/api/corrections"),
 
+  /** 只看自己提过的，含被拒绝和已撤回的 */
+  myDocCorrections: () => request<Correction[]>("/api/corrections/mine"),
+
   /**
-   * 写一条勘误。服务端会**当场**把那一篇重新入库，所以回执里的 `applied`
-   * 才是「现在提问会不会用上」——只看 201 会骗人。
+   * 提一条勘误。**落成 pending，不会立刻生效**——回执里的 `note` 会说清楚
+   * 还要过审。只看 201 就告诉用户"已生效"是骗人的。
    */
-  saveCorrection: (body: {
+  submitDocCorrection: (body: {
     target_url: string;
     title: string;
     reason: string;
@@ -579,7 +628,28 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  deleteCorrection: (id: string) =>
+  /** 改自己的 pending 勘误，或 `{action:"withdraw"}` 撤回它 */
+  patchDocCorrection: (
+    id: string,
+    body: {
+      title?: string;
+      reason?: string;
+      body?: string;
+      action?: "withdraw";
+      version?: number;
+    },
+  ) =>
+    request<Correction>(`/api/corrections/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * **管理员**：撤销一条已经发布的勘误，那一篇回到语雀原文。
+   * ⚠️ 是软撤销（`status='retired'`），不是删行——谁发布的、什么时候、
+   * 发过什么都要留着。撤回自己**还没审**的那条走 `patchCorrection`
+   */
+  retireDocCorrection: (id: string) =>
     request<void>(`/api/corrections/${id}`, { method: "DELETE" }),
 
   /**

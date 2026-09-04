@@ -248,6 +248,237 @@ bge-m3 + 重排在这类问句上已经饱和。真正断掉的是裸粘贴那�
 ⚠️ **这份题集里留着一条 hybrid 输了的**（`kw-paste-jospin`，#1 → #2）。
 删掉它这份证据就成了只报喜的东西。
 
+### 四·五·一、Selective Hybrid —— 免费检索 A/B ✅ 已跑（2026-09-03）
+
+⭐ **它要的是上面那张表的收益，不要 ADR-16 那两道的伤害。** 两者分得很干净：
+
+```
+收益   完整问句 29/30 → 29/30      0
+       裸粘贴    6/15 → 15/15      全在这里
+伤害   none-sap-connector / ui-dashboard 被顶出幻觉  ← 两道**都是完整问句**
+```
+
+也就是说**伤害面 100% 落在没有收益的那一半上**。所以按查询形状分流：
+
+```
+像在提问（有 ？ 或疑问词）    → 纯向量，一如今天
+否则且含标识符形状 / 全 ASCII → 向量 + 词法 + RRF
+```
+
+判据是 `copilot/query_shape.py`，**纯规则、一个模型调用都不花**，
+量出来的（45 条按形状统计）：裸粘贴 15 条问号 0/15、疑问词 0/15；
+完整问句 30 条问号 30/30。**长度分不开**（裸粘贴最长 32 字、完整问句最短 18 字）。
+
+#### 怎么跑（免费这一档）
+
+⚠️⚠️ **不能用 `run.py --check --tag X` 再 `--compare`。**
+`--check` 走的是 `check()` 那条分支，**只打印、不落 `results/<tag>.json`**
+（`run.main` 里 `if args.check: check(...); return`），接不上 `--compare`。
+2026-09-03 这里写错过一次。三臂改成一个入口，在**同一个进程、同一份语料**上跑完：
+
+```bash
+cd backend
+.venv/Scripts/python.exe ../eval/selective.py     # Windows
+.venv/bin/python ../eval/selective.py             # Linux
+```
+
+判据一个都不新造：检索走 `run.retrieve_all`（和 `--check` 同一个函数），
+命中的定义就是 `CaseResult.source_hit` 那一行，MRR@5 由 `retrieved_titles`
+的次序算。多做的只有一件事——**按题集自己的 id 前缀分组**，
+而那正是这次决策唯一缺的那一维（`--check` 把 45 题混在一起报一个数）。
+
+#### 实测（2026-09-03，4573 块语料）
+
+| Metric | dense | hybrid-all | selective |
+|---|---:|---:|---:|
+| 完整问句 hit | 29/30 | 29/30 | **29/30** |
+| 完整问句 MRR@5 | 0.911 | 0.911 | **0.911** |
+| identifier hit | 6/15 | 15/15 | **15/15** |
+| identifier MRR@5 | 0.367 | 0.933 | **0.933** |
+| classifier FP | — | — | **0** |
+| classifier FN | — | — | **0** |
+
+⭐ **selective 在完整问句上和 dense 逐题相同**（唯一没中的
+`kw-limit-goods-designation` 三臂一致），在裸粘贴上和 hybrid-all 逐题相同。
+分类器在这 45 条上零误判——也就是说这一臂在结构上就是
+「完整问句走 dense、裸粘贴走 hybrid」，不是"平均下来差不多"。
+
+⭐ **候选污染没有发生**：identifier 那一组 MRR@5 = 0.933 且 hit 15/15，
+意味着 15 道里 13 道期望来源排**第 1**、2 道排第 2。词法带进来的候选
+没有把重排带偏——**这一条不需要新指标，MRR 已经回答了**。
+完整问句那一侧更直接：classifier FP=0 → 词法那一路**根本没执行**，
+逐字节等同 dense。
+
+#### ⚠️⚠️ 免费这一档**看不见**什么（这是最要紧的一段）
+
+`keyword.yaml` 里 **0 道 `no_answer` 题**（45 题全部有期望来源）。
+而 ADR-16 那次回退的机理恰恰只在 no_answer 题上显形：
+
+```
+纯向量池 top-5 的第 5 位常常是个重复块（等于一个空位）
+→ 那个空位正是模型愿意拒答的原因
+→ 词法把它填上一块"话题相邻但不是这件事"的材料，就足以把它劝离拒答
+```
+
+2026-08-29 那轮的数字是「检索命中率 98.5% → 98.5%，**一点没动**」，
+而幻觉率 0% → 10%。**免费指标结构上看不见这种失败**——no_answer 题
+没有期望来源，根本不进 `source_hit` 的分母。
+
+⭐⭐ 所以「免费这一档全绿」**只能证明收益还在、分流判对了**，
+**不能证明安全指标没退**。同一个坑不踩第二次：付费那一档不能省。
+
+#### 判分器换代（2026-09-04）：`moonshot-v1-128k` → `kimi-k2.6`
+
+> **Judge model replacement creates a metric discontinuity. Absolute scores
+> across different judge models are not directly comparable. Release decisions
+> after replacement use same-judge paired runs.**
+
+旧判分器被 Moonshot 下架（404，ISSUES.md I-18），账号上只剩 `kimi-k2.6` /
+`kimi-k3` 和两个 code 专用。定为 **`kimi-k2.6`**：判分要的是稳定的结构化
+正确性判定，不需要 k3 的长程能力；换尺本身已经产生一次 discontinuity，
+不该同时再引入一个更新更主动的模型当额外变量。
+
+⚠️ 历史那些 `moonshot-v1-128k` 的 PASS 证据**保留为历史证据**，但它们的绝对
+分数不再是可直接比较的 baseline。换代之后的上线决策一律用**同判分器的配对轮次**
+（same judge / same commit / same corpus / same dataset / same config，
+只差一个变量）。`compare --variable` 的身份核验里 `judge_model` 和
+`judge_prompt_sha` 排在最前面，两轮判分器不同会直接判 UNRELIABLE。
+
+⚠️⚠️ **kimi 系列只接受 `temperature=1`**（传别的直接 HTTP 400）。也就是说
+判分器从**确定性**变成了**随机性**——一把每次读数可能不同的尺子，量出来的
+小差值分不清是改动的效果还是尺子的抖动。所以：
+- `eval/run.py::judge_temperature` 按模型锁温度，三处判分器构造共用
+  `build_judge()`（各 new 各的是这次故障的直接成因）；
+- **标定要跑两遍看一致性**。2026-09-04 实测两遍逐题完全一致（14/14），
+  但这不是"它是确定性的"，只是"这 14 道上没抖"。
+
+#### `--rescore`：口径变了，不必重新花钱
+
+`eval/risk_boundary.py --rescore <tag>` 拿**已经存下来的答案**按现在的规则判据
+重算指标（2026-09-04 补上，`run.py` 早就有）。起因很具体：注入题的拒绝判据
+一天之内修了两次，而每修一次就要重跑两臂 ≈ 200 次付费调用——**答案一个字没变，
+变的只是"怎么数"**。
+
+⚠️⚠️ **它不重判、不重答**，判分器给的 `verdict` / `grounded` / `reason`
+原样保留。**而且只重算档案支撑得起的那几项**：
+
+```
+重算   missing_facts、banned_hits（含 forbidden_unless_refused）
+不算   fake_cites —— 它要数上下文里的 [图N]，而 context 存档时被剥掉了
+```
+
+⭐ 第一版把 `fake_cites` 也重算了，`imgs` 恒为空集，于是答案里每个 `[图N]`
+都成了假引用：`fake_citation_rate` 0.0% → 20.0%、准确率 94.6% → 80.4%，
+**两臂一模一样地坏掉**。看起来像发现了什么，其实只是重算了一个档案支撑不起的
+指标。⚠️ **这和 `run.rescore` 拒绝 `--rejudge` 是同一条理由：
+重算只能覆盖档案真正保留下来的东西。**
+
+#### 判分器标定：`eval/judge_calibration.py`
+
+⭐⭐ **先证明这把尺能用，再用它量东西。** 换判分器之后直接跑 524 次付费调用，
+是拿钱去赌一件十几次调用就能先确认的事。标定集 14 道（判分器 10 · 规则 4），
+覆盖：明显正确 / 明显错误 / no_answer 正确拒答 / no_answer 错误作答 /
+高风险幻觉 / 假引用 / 注入对照 / 普通问答 / 两道边界题。
+
+判据：**真问题（取自现有题集）+ 真材料（现跑一次检索，免费）+ 受控答案**。
+材料必须真（否则标定结论套不到实战上），答案必须受控（否则没有基准真值）。
+
+```powershell
+.venv\Scripts\python.exe ..\eval\judge_calibration.py --workers 3
+```
+
+退出码 0 = PASS。⚠️ **FAIL 就不要继续跑正式付费评测。**
+
+⚠️ 标定工具**自己也要被标定**：第一版的期望标签写的是 `incorrect`，
+而判分器的词表里根本没有这个词（只有 `correct/partial/wrong/no_answer`），
+结果 6 道全部报 MISS、打出一个 FAIL——**而那 6 道的判分理由逐条读下来全是对的**。
+差一点据此把一把好尺判成坏的。现在 import 时有硬断言核对词表。
+
+#### 并发：`--workers 3`
+
+`workers=5` 实测撞出 8 次 429（2026-09-03）。3 之后两臂各 45 次判分调用、
+**0 次 429、0 次重试**。稳定性优先于速度。
+
+#### 付费那一档
+
+⚠️⚠️ **判分器不可用，付费 A/B 跑不了**（[ISSUES.md](ISSUES.md) I-18）：
+`.env` 里的 `EVAL_JUDGE_MODEL=moonshot-v1-128k` 已被 Moonshot 下架，
+实测第一臂 56 题里 38 题判分失效（67.9%，红线 5%）。
+账号上只剩 `kimi-k2.6` / `kimi-k3` 可用。**换判分器 = 换量尺**，
+换完之后绝对数字不能再和下面那些历史 baseline 比，所以这是个产品决定，
+等人拍板。修好之前不要重跑——花的钱换不到能用的证据。
+
+⚠️ `--rescore` **救不回**已经花掉的答题调用：它只重算派生指标、不重判
+（存档里没有 `context`，见 `run.rescore` 文件头）。修好判分器要**整套重跑**。
+
+#### 分臂方式：`--selective on|off`，**不要用环境变量**
+
+⚠️⚠️ **baseline 那一臂必须显式关掉，不能"什么都不设"。**
+靠环境变量分臂的话，dense 那一臂等于「没设这个变量」，而它到底是什么值
+取决于**当前 shell 继承了什么**——一次 `$env:SELECTIVE_HYBRID_ENABLED="true"`
+留在会话里，后面那句「跑 dense 基线」就会安安静静地跑成 selective，
+两臂同配置，而对比表照常打印出一个"差异"。这种污染没有任何症状。
+
+所以 2026-09-03 给两个 runner 都加了 `--selective on|off`（形状同 `--general`）：
+传了就当场覆盖 `get_settings()` 的缓存对象，并写进结果档案的 `selective_hybrid`——
+**档案里那一行是实际生效值，不是"命令行传了什么"**。
+
+**PowerShell（当前开发环境）**：
+
+```powershell
+cd C:\Users\liushun\Desktop\Copilot\backend
+# 顺手清掉可能继承下来的环境变量。有 --selective 之后这一步不是必需的，
+# 但它让"这一轮到底跑的什么"不依赖任何会话状态
+$env:SELECTIVE_HYBRID_ENABLED = $null
+$env:HYBRID_ENABLED = $null
+
+.venv\Scripts\python.exe ..\eval\risk_boundary.py --selective off --tag risk-dense
+.venv\Scripts\python.exe ..\eval\risk_boundary.py --selective on  --tag risk-selective
+.venv\Scripts\python.exe ..\eval\risk_boundary.py --compare risk-dense risk-selective --variable selective_hybrid
+
+.venv\Scripts\python.exe ..\eval\run.py --selective off --tag pub-dense
+.venv\Scripts\python.exe ..\eval\run.py --selective on  --tag pub-selective
+.venv\Scripts\python.exe ..\eval\run.py --compare pub-dense pub-selective --variable selective_hybrid
+```
+
+⚠️ **两臂之间什么都不要做**：不 `sync-yuque`、不 `ingest`、不发布勘误或标准答案、
+不跑 pytest（全量测试会动开发库里的块数）。语料一变，
+`--variable` 那道核验会当场判 UNRELIABLE 并拒绝出表——那是对的，
+但代价是两臂的钱白花了。
+
+#### `--variable`：这一轮只允许一个变量不同
+
+`compare` 现在会**核对实验身份**（2026-09-03 加）。在此之前它只**打印**
+几个参数、从来没**核对**过，于是两件事都能安静地发生：两臂之间跑过一次
+`sync-yuque`（语料变了，差值一半是语料的）；baseline 忘了显式关开关
+（两臂同配置，而对比表照样打出"差异"）。
+
+核对的字段（`run.IDENTITY_KEYS`，21 项）：
+
+```
+git_commit   corpus_sha   chunk_count   dataset   dataset_sha   space   path
+prompt   prompt_sha   answer_model   embedding_model   rerank_model   mode
+general_effective   injection_guard   hybrid   top_k   rerank_k   threshold
+chunk_size   chunk_overlap
+```
+
+除 `--variable` 指定的那一个之外，任何一项两轮不一致 → 打 **UNRELIABLE 并拒绝出表**
+（`--allow-unreliable` 才强出）。⚠️ `git_commit` 带脏工作区指纹
+（`<sha>-dirty.<8位>`）：两臂之间改了一行没提交的代码，commit 一样但指纹不同，
+照样拦得住。⚠️ 老档案缺这些字段时**不算差异**，只打一行「证明不了一致」——
+把"这轮没记"判成"配置不同"会让所有历史对比一夜之间全部 UNRELIABLE。
+
+**放行判据（收费这一档）**：四条硬指标全部仍为 `0.0%`（高风险幻觉、假引用、
+跨版本串台、注入照做），公共库准确率不低于当前 baseline，误拒答不上升。
+⚠️ **`none-sap-connector` 和 `ui-dashboard` 这两道要单独看**——
+它们是 2026-08-29 把 hybrid 打回去的那两道，任何一道再翻就是直接否决。
+**不能因为 identifier recall 更好就接受安全指标退化。**
+
+⭐ 四条硬指标是**规则判定**，不靠判分器（见 `risk_boundary.judge_all` 的说明）。
+也就是说判分器修好之前，`--no-judge` 仍然能量到那四条——但准确率、
+`high_risk_grounded_rate` 这类语义指标会一律记 UNRELIABLE，
+**而本轮的核心假设（no_answer 上会不会乱答）恰恰需要语义判分**，所以不能靠它交差。
+
 ---
 
 ## 四·六、长会话题集（11 道，W2.1 / W2.2 的 A/B）
