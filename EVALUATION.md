@@ -577,6 +577,34 @@ ERP 版本（`conversations.knowledge_space_id`，根本不在对话记录里）
 它**不是** W2.1 引入的（基线同样失分）——那道边界闸门只长在 Agent 那条路上，
 `qa.ask_stream` 里一行都没有。记在 ISSUES.md I-9。
 
+### ⭐ `DIRECT_BOUNDARY_ENABLED` 的 A/B（2026-09-06，11 题 × 2 臂）
+
+两臂只差这一个开关，其余按**生产配置**（`HISTORY_BUDGET_ENABLED=true`、
+`SESSION_FACTS_ENABLED=false`）。结果存 `eval/results/dbg-off.json` /
+`dbg-on.json`。
+
+```
+                        dbg-off   dbg-on
+上下文命中率              100.0%   100.0%
+跨窗口解析成功率            81.8%    72.7%
+  cross_window_fact        3/4  →   2/4     ← 噪声，见下
+  cross_window_ref         1/2  →   1/2     ← 放行判据要它涨，没涨
+  in_window_control        3/3  →   3/3
+  must_refuse              2/2  →   2/2
+```
+
+⛔ **判据不成立，开关继续关。** 目标题 `lc-vague-reference-out-of-window`
+两臂都失分；变动的三道全在 `cross_window_fact`，而闸门**一次都没执行过**
+（`HISTORY_BUDGET_ENABLED=true` 之下它结构上不可达，机理见 ISSUES.md I-9）。
+两臂走同一条代码路径 ⇒ 那三道是采样噪声。
+
+⚠️⚠️ **这一轮本来不必花钱**：ISSUES.md I-9 在 2026-09-02 就用一个零成本探针
+得出了同一结论，是 plan.md 里一条没跟着更新的待办把它又点起来一次。
+**记同一个决定的两份文件，一份过期就够让人重跑一遍。**
+
+⭐ 反过来说，这也是这份题集第一次在「生产配置」下留下完整的 11 题基线
+（`dbg-off`：上下文命中 100%、跨窗口 81.8%），下次动上下文装配可以直接拿它比。
+
 ### 四类题
 
 | category | 题数 | 期望 |

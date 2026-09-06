@@ -202,7 +202,7 @@ I-7（21 条无关来源）、I-8（两处语料笔误）复核为**早已修好
   结论和条件写进 [OPERATIONS.md](OPERATIONS.md)「CSRF：当前结论」，
   可核查的部分钉在 `tests/test_csrf_surface.py`。**没有引入 CSRF token**。
 
-### 2026-09-03 第三段　付费 A/B 停在判分器上
+### 2026-09-03 第三段　付费 A/B 停在判分器上　✅ 2026-09-04 解开（判分器换 kimi-k2.6，四轮都跑完了）
 
 **要做的事**：Dense vs Selective Hybrid 的付费 A/B。**没跑成**，
 第一臂就撞上判分器故障，已按规矩停手、没有继续烧钱。
@@ -245,26 +245,69 @@ I-7（21 条无关来源）、I-8（两处语料笔误）复核为**早已修好
 ⚠️ 值得记住的是发现方式：第一反应是"共享开发库又污染了"——
 **按那个结论把题改绿的话，线上就会留着「同一篇发布第二条勘误偶尔失败」**。
 
+### 2026-09-04 / 09-06　收尾：RC 合并进 main，两个开关各自有了结论
+
+✅ **`33a8714` 已快进合并进 `main` 并推上 origin**（2026-09-06），历史仍线性。
+
+⭐ **`SELECTIVE_HYBRID_ENABLED` 生产上已经开着**（2026-09-04 01:59 CST，
+比 RC 那一笔提交晚 40 分钟）。⚠️ **上面那一节和提交信息里的「默认关、
+本次只交付 RC、不改生产 .env」在这一点上已经过期**——`.env` 改了，
+改之前备份了（`.env.bak-preselective-20260904-175951`），依据和回滚步骤
+写在那一行上面。2026-09-06 只读核实，生产实际取值：
+
+```
+selective True   direct_boundary False   history_budget True
+hybrid False     agent_rollout 1.0
+```
+
+⚠️ 代码默认值仍是 `False`，`.env.example` 也写着关——**这是第三处
+「代码默认值和生产实际值不一致」**（另两处是 `HISTORY_BUDGET_ENABLED`
+和 `AGENT_ROLLOUT`）。只看代码会以为线上跑的是纯 dense。
+
+⛔ **`DIRECT_BOUNDARY_ENABLED`：A/B 跑完了，结论是「不开」。**
+2026-09-06，`eval/longchat.py` 两臂各一次，只差这一个开关，其余按生产配置
+（`HISTORY_BUDGET_ENABLED=true` / `SESSION_FACTS_ENABLED=false`）：
+
+```
+                        dbg-off      dbg-on
+DIRECT_BOUNDARY          false        true
+上下文命中率             100.0%      100.0%
+跨窗口解析成功率           81.8%       72.7%
+  cross_window_ref        1/2    →     1/2     ← 判据要它涨，没涨
+  in_window_control       3/3    →     3/3     ← 这一条守住了
+  must_refuse             2/2    →     2/2
+```
+
+⚠️⚠️ **目标题 `lc-vague-reference-out-of-window` 两臂都失分，开关对它
+一点作用都没有。** 变的那三道全是 `cross_window_fact`（off 错 platforms、
+on 错 version + subject-name），而闸门**一次都没执行过**——两臂走的是
+同一条代码路径，那三道只能是采样噪声，不是这个开关的效果。
+
+⭐⭐ **机理（免费探针当场量到，不是推断）**：闸门三个条件缺一不可，
+而 `HISTORY_BUDGET_ENABLED=true` 之下它**结构上不可达**：
+
+```
+没超预算  →  usable == kept  →  history_truncated=False  →  放行
+超了预算  →  dropped 非空    →  digest 非空              →  放行
+```
+
+那道题 18 条消息全部落在 1200 字预算内（实测 `usable 18 / kept 18 /
+dropped 0`），走的是第一支。**只要 W2.1 开着，这个开关打开就是空转**——
+而打开的真实代价是它会让 I-9 看起来已经关闭。详见
+[ISSUES.md](ISSUES.md) I-9 的 2026-09-06 那一段。
+
+⚠️ 两轮结果留在 `eval/results/dbg-off.json` / `dbg-on.json`。
+它们 `suite=longchat`、`scope` 认不出来，**不参与 `eval/gate.py` 的证据挑选**
+（跑完当场核实过，门禁仍 `退出码 0`，六项全 PASS）——I-19 那种"顶掉好证据"
+的事这一轮没有重演。
+
 ### 还没做的（本轮清出来的）
 
-1. **Selective Hybrid 的付费评测**（免费那一档已跑完全绿；付费那一档
-   ⛔ **被判分器故障挡住**，见上面那一节和 [ISSUES.md](ISSUES.md) I-18。
-   要先定判分器换哪个模型）。
-
-   ```
-                     dense   hybrid-all   selective
-   完整问句 hit      29/30      29/30       29/30
-   完整问句 MRR@5    0.911      0.911       0.911
-   identifier hit     6/15      15/15       15/15
-   identifier MRR@5  0.367      0.933       0.933
-   classifier FP/FN     —          —          0/0
-   ```
-
-   ⚠️⚠️ **但免费这一档看不见安全指标。** `keyword.yaml` 里 0 道
-   `no_answer` 题，而 ADR-16 那次回退（幻觉 0% → 10%）的机理只在
-   no_answer 题上显形——2026-08-29 那轮的「检索命中率一点没动」
-   正是这个结构性盲区。所以还要跑付费那两轮，命令和放行判据在
-   [EVALUATION.md](EVALUATION.md) 四·五·一。**开关继续默认关。**
+1. ~~**Selective Hybrid 的付费评测**~~　✅ 2026-09-04 全部跑完，
+   开关 2026-09-04 已在生产打开。四轮的数字见 `33a8714` 的提交信息、
+   上面「2026-09-04 / 09-06 收尾」那一节，以及生产 `.env` 第 78 行上面
+   那几行注释。⚠️ 免费那一档看不见安全指标（`keyword.yaml` 里 0 道
+   `no_answer` 题）这个结构性盲区仍然成立，**下一次动检索还是得跑付费那两轮**。
 2. **[ISSUES.md](ISSUES.md) I-16**：span / 日志「不带原文」没有闸门。
    `TRACING_ENABLED=true` 上生产之前必须补。
 3. **备份不是同一个 generation**（[OPERATIONS.md](OPERATIONS.md) 第三节）：
@@ -281,9 +324,11 @@ I-7（21 条无关来源）、I-8（两处语料笔误）复核为**早已修好
 1. **[ISSUES.md](ISSUES.md) I-6 后半「配图编号跳号」需要一个真实例子**
    （截图或当时那句提问）。后端编号查过是连续的，找到的唯一机制是
    `inlineImages` 删掉后端没有的图号；**不确定是不是报的那个，盲改会改错地方**。
-2. **`DIRECT_BOUNDARY_ENABLED` 要不要开**：代码就位、默认关。
-   开之前按规矩跑 `eval/longchat.py` 两边各一次（收费），
-   `cross_window_ref` 要涨、`in_window_control` 一分都不许掉。
+2. ~~**`DIRECT_BOUNDARY_ENABLED` 要不要开**~~　✅ 2026-09-06 跑完了，
+   **结论是不开**（`cross_window_ref` 1/2 → 1/2，判据不成立；闸门在
+   `HISTORY_BUDGET_ENABLED=true` 之下结构上不可达）。数字和机理见上面
+   「2026-09-04 / 09-06 收尾」那一节。⚠️ **真正要修的是 I-9 本身**，
+   不是这个开关。
 3. **Docker 真机验收**：本机没有 Docker。生产跑的是 systemd 不是 Docker，
    `docker-compose.yml` 是给别人复现用的，优先级最低。
 4. **Langfuse 接上**（可选，需要注册账号）：`TRACING_ENABLED` 生产上没
