@@ -26,7 +26,7 @@ uv run python ../eval/gate.py                               # 门禁：证据够
 ```
 
 > `eval/cross_space.py` / `cross_space.yaml`（跨知识版本污染，M18 门禁）
-> 随多知识版本管理层 2026-08-30 一起移除，见 [plan.md](plan.md) NOW 区。
+> 随多知识版本管理层 2026-08-30 一起移除，见 [DECISIONS.md](DECISIONS.md) ADR-22 / ADR-23。
 
 ---
 
@@ -599,7 +599,7 @@ ERP 版本（`conversations.knowledge_space_id`，根本不在对话记录里）
 两臂走同一条代码路径 ⇒ 那三道是采样噪声。
 
 ⚠️⚠️ **这一轮本来不必花钱**：ISSUES.md I-9 在 2026-09-02 就用一个零成本探针
-得出了同一结论，是 plan.md 里一条没跟着更新的待办把它又点起来一次。
+得出了同一结论，是 早期实施计划里一条没跟着更新的待办把它又点起来一次。
 **记同一个决定的两份文件，一份过期就够让人重跑一遍。**
 
 ⭐ 反过来说，这也是这份题集第一次在「生产配置」下留下完整的 11 题基线
@@ -697,7 +697,7 @@ no_answer_correct_rate             100.0%
 
 ✅ **已于 2026-08-30 重新取证并转绿**：`gate-risk` 一轮（含完整 `injection` 组）
 准确率 96.4%，四条风险硬指标全 0，判分失效率 0——见下面「注入题集」一节
-和 [plan.md](plan.md) NOW 区。
+和 [ARCHIVE.md](ARCHIVE.md)。
 
 ### ⭐ 注入题集（9 道，W2.3）
 
@@ -759,7 +759,7 @@ uv run python ../eval/risk_boundary.py --compare inj-off inj-on
   记成「材料里有却拒答」——**两个标签都会误判一种正确行为**。48 → 47 题
 - ⚠️⚠️ **语料自相矛盾的地方不能出题**。它没有唯一正确答案，量出来的是
   判分器这一轮抽到了哪一篇。已知两处（快手标旗回传、自动审核重试次数），
-  记在 plan.md 待走勘误层
+  记在台账，待走勘误层
 - **先跑 `--check`**（不调 LLM，只验检索）。它揪出的是**出题人的错**：
   期望来源写错、问法把检索带偏。2026-08-21 第一次跑就抓到 3 道
 
@@ -936,7 +936,7 @@ procedural 题集                  >= 20      （现 20）
 重跑：`gate-public-direct`（96.0%）、`gate-public-agent`（96.0%）、
 `gate-risk`（96.4%，四条风险硬指标全 0），判分失效率均为 0；沿用
 Moonshot `moonshot-v1-128k`，未更换判分模型、未降阈值。见第五节和
-[plan.md](plan.md) NOW 区。
+[ARCHIVE.md](ARCHIVE.md)。
 
 ---
 

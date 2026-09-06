@@ -16,7 +16,7 @@ Create Date: 2026-09-02
     以及七八处 alter_column ... nullable=False
 
 最后那条 `knowledge_space_id` 可空，动的是这个项目**唯一一条错了不可挽回**
-的规则（plan.md 二·6）。而这些 DDL 在部署时会安静地跑过去、退出码 0，
+的规则。而这些 DDL 在部署时会安静地跑过去、退出码 0，
 表现是「检索变慢了」和「隔离的地基松了一格」——两样都不会当场报错。
 
 所以这份迁移只保留四个 `add_column` 和一个索引。漂移本身是另一件事，
@@ -51,7 +51,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     # ⭐ 这个 downgrade 是**安全**的：四列都是这次新加的，删掉不会碰到任何
     # 上线之前就有的数据。和 b7e91c4d2a08 那份不同（它的 downgrade 会删掉
-    # 所有纠错图，见 plan.md 0.2 的警告）。
+    # 所有纠错图，见早期实施计划 0.2 的警告）。
     op.drop_index("ix_request_trace_verified_answer_id", table_name="request_trace")
     op.drop_column("request_trace", "image_count")
     op.drop_column("request_trace", "general_knowledge_used")

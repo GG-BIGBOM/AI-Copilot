@@ -109,7 +109,7 @@ echo "$CRLF_CHECK" | "$PY" - || exit 1
 # ⭐⭐ **前端自检只有一条命令，清单在 `frontend/package.json` 的 `verify` 里。**
 #
 # 这里原来手写着 `npm test && npm run lint && npx next typegen && npx tsc --noEmit`，
-# CI 里抄着一份，plan.md 里还抄着一份。2026-08-25 就是这么破的：
+# CI 里抄着一份，早期实施计划里还抄着一份。2026-08-25 就是这么破的：
 # CI 补了 `next typegen`，这里没补，于是本机自检永远绿、CI 红了三天。
 # `LayoutProps<"/">` 是 Next 16 **生成**的全局类型，住在 gitignore 掉的
 # `.next/types/`——本机有上次构建的残留所以看不出来，干净检出上报
@@ -218,7 +218,7 @@ echo "==> [7/7] 装依赖、跑迁移、重启"
 #    漏了的话表现是：上传成功、状态转到「解析失败」、错误写着「服务端缺少
 #    docx 解析组件」——网站一切正常，只有上传的文档全废。
 #    （**永远别在服务器上装 `parse-full`**：Docling 会拖进 torch，
-#    1.6GB 装都装不下，见 plan.md 一·3。`eval` 那组也不装——评测只在本机跑。）
+#    1.6GB 装都装不下，见早期实施计划 一·3。`eval` 那组也不装——评测只在本机跑。）
 #
 # ⚠️ `uv sync` 是**声明式**的：它把环境同步成「你这次列出的样子」，
 #    没列的 extra 会被**卸掉**。本机踩过——`uv sync --extra eval` 之后

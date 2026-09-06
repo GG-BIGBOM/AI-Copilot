@@ -1,6 +1,6 @@
 """M19-B 给 `request_trace` 补的四列，以及它们和 `answer_source` 的关系。
 
-⭐ **这四列是补充维度，不是新的 source 值。** plan.md 里那条约束写得很硬：
+⭐ **这四列是补充维度，不是新的 source 值。** 早期实施计划里那条约束写得很硬：
 「KB + 常识兜底时仍是 `kb` + `general_knowledge_used=true`，**不新增 source 值**，
 否则历史统计的分母会变」——给 source 加一个新值，半年的历史统计会集体换分母，
 而那是个没人会发现的错。

@@ -508,7 +508,7 @@
  *
  * ⭐ 这就是 PDF 导出的**全部**实现。没有服务端渲染器、没有前端 PDF 库、
  * 没有新依赖——理由见 `lib/export-answer.ts` 文件头（服务器 1.6GB 装不下
- * 渲染器且缺中文字体；plan.md 2.4 的许可红线已经因为 AGPL 拒过一个 PDF 库）。
+ * 渲染器且缺中文字体；许可红线已经因为 AGPL 拒过一个 PDF 库）。
  *
  * ⚠️ 用 visibility 而不是 display：display:none 会让被隐藏元素**脱离布局**，
  * 于是目标那一条会跟着塌到奇怪的位置。visibility 保留盒子、只是不画，

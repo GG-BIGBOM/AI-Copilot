@@ -124,7 +124,7 @@ export function MessageActions({
 
   /**
    * ⭐ **PDF 走浏览器打印，不做服务端渲染**（理由见 `lib/export-answer.ts` 文件头：
-   * 服务器 1.6GB 装不下渲染器、还缺中文字体；而 plan.md 2.4 那条许可红线
+   * 服务器 1.6GB 装不下渲染器、还缺中文字体；而那条许可红线
    * 已经因为 AGPL 拒过一个 PDF 库）。
    *
    * 做法是给 body 和这一条回答各打一个标记，剩下的交给 `@media print`。

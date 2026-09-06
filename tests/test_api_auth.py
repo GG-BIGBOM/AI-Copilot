@@ -440,7 +440,7 @@ async def test_a_disabled_account_cannot_even_authenticate(api_client, logged_in
 async def test_disable_command_revokes_a_live_token(api_client, logged_in, maker):
     """⭐⭐ **`copilot disable` 之后，**签发在停用之前**的那张 JWT 立刻作废。**
 
-    这是 plan.md「Release Blockers」里「用户禁用后旧 JWT 还能调用」那一条的
+    这是「Release Blockers」里「用户禁用后旧 JWT 还能调用」那一条的
     证据。它成立靠的是一件架构上的事实：`get_current_user_optional` 每次请求
     都拿 `sub` 去 `session.get(User, ...)`，顺手就读到了 `is_active`——
     也就是说**撤销本来就是即时的**，缺的只是一个改 `is_active` 的入口。

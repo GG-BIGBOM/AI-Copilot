@@ -9,8 +9,8 @@
     CI       干净检出，没有那个目录            → TS2304: Cannot find name 'LayoutProps'
 
 修的时候往 CI 里补了一行 `npx next typegen`。**但同一份清单当时抄在三个地方**
-——`.github/workflows/ci.yml`、`deploy/deploy.sh` 第 1 步、`plan.md` 的
-「本机自检」——补了一处，另外两处没动，靠一句「两边任何一处改了另一处也要改」
+——`.github/workflows/ci.yml`、`deploy/deploy.sh` 第 1 步、面向人的那份文档
+的「本机自检」——补了一处，另外两处没动，靠一句「两边任何一处改了另一处也要改」
 的注释维持一致。那句注释就是上一次失败的原因本身。
 
 所以这一轮把清单收成一份（`frontend/package.json` 的 `verify`），
@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY = ROOT / "deploy" / "deploy.sh"
 PKG = ROOT / "frontend" / "package.json"
-PLAN = ROOT / "plan.md"
+DOC = ROOT / "README.md"
 
 
 def _scripts() -> dict[str, str]:
@@ -110,13 +110,13 @@ def test_no_entry_point_hand_rolls_the_checklist(path: Path, who: str, hand_roll
 
 
 def test_the_documented_self_check_is_the_same_command():
-    """plan.md 里写给人看的那段「本机自检」也要指向同一份清单。
+    """README 里写给人看的那段「测试」也要指向同一份清单。
 
     ⭐ 它是三个入口里**唯一一个人会照着敲的**。文档和实际跑的命令不一样时，
     人照着敲出来的结果是绿的、CI 是红的，而人会先相信自己敲的那个。
     """
-    text = PLAN.read_text(encoding="utf-8")
-    assert "npm run verify" in text, "plan.md 的本机自检没跟着改成 npm run verify"
+    text = DOC.read_text(encoding="utf-8")
+    assert "npm run verify" in text, "README 的自检段没跟着改成 npm run verify"
 
 
 # ═══════════════ 三、后端那一半 ═══════════════

@@ -2,7 +2,7 @@
 
 **为什么是 Kimi 而不是本地 OCR**：服务器 1.6GB，任何 OCR 模型
 （PaddleOCR / tesseract 的中文包 / 更别说 Docling）都装不下，
-这条在 plan.md「一、第 3 条硬约束」里已经封死。所以走 API。
+这条是立项时就封死的硬约束（服务器 1.6GB，装不下也跑不动）。所以走 API。
 
 **为什么不是 Gemini**：国内服务器连不上 `generativelanguage.googleapis.com`
 （实测 15 秒超时）。Kimi 在服务器上实测 200 / 3.2s。

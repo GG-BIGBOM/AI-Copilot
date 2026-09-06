@@ -10,7 +10,7 @@
 服务器只有 1.6GB 内存，所以这里**只用纯 Python 的轻量库**
 （python-docx / python-pptx / pypdf，都在 `parse` 这个 extra 里）。
 PDF 只做纯文本提取，不上 Docling 那条会拖进 torch 的 ML 管线——
-见 plan.md「一、第 3 条硬约束」。
+「一、第 3 条硬约束」。
 
 **文档里的嵌图（M17）**：DOCX / PPTX / XLSX / PDF 里的截图要跟着正文一起
 出来，而且**要落在它说明的那一段旁边**——ERP 操作手册的图就是步骤本身，
@@ -315,7 +315,7 @@ def parse_image(path: Path, vision=None) -> ParsedUpload:
 def _pdf_page_images(path: Path, pages: list[int], dpi: int) -> list[bytes]:
     """把指定页渲染成 PNG 字节。扫描件 PDF 专用。
 
-    ⭐ 用 pypdfium2 不用 PyMuPDF：后者是 AGPL（plan.md 七.3 的许可红线）。
+    ⭐ 用 pypdfium2 不用 PyMuPDF：后者是 AGPL。
 
     **一页一渲染、渲完立刻关掉。** 一次性渲 20 页 A4@150dpi 是 130MB 的
     位图常驻，而 worker 的 `MemoryMax=400M`——那会让解析在中途被 systemd

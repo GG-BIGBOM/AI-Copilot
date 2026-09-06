@@ -36,7 +36,7 @@ app = typer.Typer(
 
 
 def _todo(milestone: str) -> None:
-    typer.secho(f"尚未实现，计划在 {milestone} 完成。见 plan.md", fg=typer.colors.YELLOW)
+    typer.secho(f"尚未实现，计划在 {milestone} 完成。见早期实施计划", fg=typer.colors.YELLOW)
     raise typer.Exit(code=1)
 
 

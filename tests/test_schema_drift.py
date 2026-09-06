@@ -11,7 +11,7 @@
     drop_constraint('knowledge_spaces_code_key', type_='unique')
     + 七八处 alter_column
 
-最后一条动的是 plan.md 二·6 里「这个项目最不能出的 bug」。
+最后一条动的是「这个项目最不能出的 bug」：数据隔离。
 
 ⭐⭐ **最坏的地方在于它们全都不报错。** 这批 DDL 部署时安静跑过、退出码 0、
 没有任何测试会红，表现只是「检索变慢了」和「地基松了一格」——
